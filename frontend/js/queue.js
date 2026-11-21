@@ -64,7 +64,7 @@ const Queue = (() => {
       input.value = "";
       autoGrow();
       showToast(added.length === 1 ? "Додано в чергу." : `Додано в чергу: ${added.length}.`);
-      $("queueSection").scrollIntoView({ behavior: "smooth", block: "nearest" });
+      $("historyCard").scrollIntoView({ behavior: "smooth", block: "nearest" });
     } catch (err) {
       showToast(err.message, "error");
     } finally {
@@ -209,85 +209,104 @@ const Queue = (() => {
   }
 
   const STATUS = {
-    waiting: "Чекає",
-    downloading: "Завантажується",
-    analyzing: "Шукаємо моменти",
-    done: "Готово",
-    failed: "Помилка",
+    waiting: "У черзі",
+    downloading: "⏳ Обробляється",
+    analyzing: "⏳ Обробляється",
+    failed: "Не вдалося",
   };
+  const SHOWN = ["waiting", "downloading", "analyzing", "failed"];
+  let lastIds = "";
+
+  /** Projects that have a queue card right now (their ordinary card is hidden on the home page). */
+  function activeProjectIds() {
+    return new Set(items.filter((i) => SHOWN.includes(i.status) && i.project_id).map((i) => i.project_id));
+  }
+
+  /** Steps under the progress bar: download → speech recognition → search for moments. */
+  function stepOf(it) {
+    if (it.status === "downloading") return 0;
+    return (it.progress || 0) < 0.6 ? 1 : 2;
+  }
+  function steps(cur) {
+    const done = ["Скачано", "Розпізнано", "Знайдено"], now = ["Скачування", "Розпізнавання", "Пошук"];
+    return now.map((t, k) =>
+      `<span class="${k < cur ? "ok" : k === cur ? "now" : ""}">${k < cur ? `✓ ${done[k]}` : k === cur ? `● ${t}` : `○ ${t}`}</span>`).join("");
+  }
 
   function render() {
-    const section = $("queueSection");
     const list = $("queueList");
-    if (!section || !list) return;
-    const total = items.length + uploads.length;
-    section.hidden = total === 0;
-    if (!total) return;
-
-    const working = items.filter((i) => i.status !== "done" && i.status !== "failed").length + uploads.filter((u) => !u.error).length;
-    $("queueCount").textContent = working ? `· в роботі ${working}` : "· усе готово";
-    $("queueClear").hidden = !items.some((i) => i.status === "done" || i.status === "failed");
-
-    const waiting = items.filter((i) => i.status === "waiting");
-    const rows = [];
+    if (!list || list.querySelector(".menu-open")) return; // do not close a «⋯» menu under the cursor
+    const shown = items.filter((i) => SHOWN.includes(i.status));
+    const waiting = shown.filter((i) => i.status === "waiting");
+    const running = shown.some((i) => i.status === "downloading" || i.status === "analyzing");
+    const cards = [];
 
     for (const u of uploads) {
       const pct = Math.round(u.pct * 100);
-      rows.push(`
-        <li class="q-item ${u.error ? "failed" : "uploading"}">
-          <div class="q-thumb"><span>📁</span></div>
-          <div class="q-main">
-            <div class="q-title" title="${escapeHtml(u.name)}">${escapeHtml(u.name)}</div>
-            <div class="q-msg">${u.error ? escapeHtml(u.error) : `Передаємо файл у студію: ${pct}%`}</div>
-            ${u.error ? "" : `<div class="q-bar"><i style="width:${pct}%"></i></div>`}
+      cards.push(`
+        <li class="q-item video-card ${u.error ? "failed" : "uploading"}">
+          <div class="history-thumb-wrap q-thumb"><span class="q-ico">📁</span>
+            ${u.error ? "" : `<div class="q-over"><b>Передаю файл у студію… ${pct}%</b><div class="q-bar"><i style="width:${pct}%"></i></div></div>`}</div>
+          <span class="vc-badge${u.error ? " bad" : ""}">${u.error ? "Не вдалося" : "📁 Файл"}</span>
+          <div class="history-details">
+            <span class="history-item-title" title="${escapeHtml(u.name)}">${escapeHtml(u.name)}</span>
+            <span class="video-card-meta">${u.error ? escapeHtml(u.error) : "Не закривай вкладку, поки файл передається"}</span>
+            ${u.error ? `<div class="q-actions"><button type="button" class="btn btn-secondary btn-sm" data-dismiss="${u.key}">Прибрати</button></div>` : ""}
           </div>
-          <span class="q-pill ${u.error ? "failed" : "downloading"}">${u.error ? "Помилка" : "Файл"}</span>
-          <div class="q-actions">${u.error ? `<button type="button" class="q-icon" data-dismiss="${u.key}" title="Прибрати">✕</button>` : ""}</div>
         </li>`);
     }
 
-    for (const it of items) {
+    for (const it of shown) {
       const pct = Math.round((it.progress || 0) * 100);
       const busy = it.status === "downloading" || it.status === "analyzing";
       const wIndex = waiting.indexOf(it);
       const thumb = it.project_id
-        ? `<img src="/api/projects/${encodeURIComponent(it.project_id)}/thumbnail" alt="" loading="lazy" onerror="this.remove()">`
+        ? `<img src="/api/projects/${encodeURIComponent(it.project_id)}/thumbnail" class="history-thumb-img" alt="" loading="lazy" onerror="this.remove()">`
         : "";
       const title = it.title && it.title !== it.source_url ? it.title : prettyUrl(it.source_url || it.title);
-      let msg = it.message || "";
-      if (it.status === "waiting") msg = wIndex === 0 && !items.some((i) => i.status === "downloading" || i.status === "analyzing") ? "Зараз почнемо…" : `У черзі: ${wIndex + 1}-е`;
-      if (it.status === "failed") msg = it.error || msg;
-      const count = it.clips_count ? `${it.clips_count} кліпів` : "кліпів: авто";
-
-      let actions = "";
+      let badge = STATUS[it.status];
+      let meta = "";
       if (it.status === "waiting") {
-        actions = `
-          <button type="button" class="q-icon" data-move="${it.id}:-1" title="Раніше" ${wIndex <= 0 ? "disabled" : ""}>↑</button>
-          <button type="button" class="q-icon" data-move="${it.id}:1" title="Пізніше" ${wIndex >= waiting.length - 1 ? "disabled" : ""}>↓</button>
-          <button type="button" class="q-icon" data-remove="${it.id}" title="Прибрати з черги">✕</button>`;
-      } else if (it.status === "done") {
-        actions = `
-          ${it.project_id ? `<button type="button" class="btn btn-primary btn-sm" data-open="${escapeHtml(it.project_id)}">Відкрити кліпи →</button>` : ""}
-          <button type="button" class="q-icon" data-remove="${it.id}" title="Прибрати зі списку">✕</button>`;
+        badge = wIndex === 0 ? (running ? "У черзі · наступне" : "Зараз почнемо") : `У черзі · ${wIndex + 1}-е`;
+        meta = it.clips_count ? `Чекає своєї черги · ${it.clips_count} кліпів` : "Чекає своєї черги";
+      } else if (busy) {
+        meta = "Можна закрити вкладку";
       } else if (it.status === "failed") {
-        actions = `
-          <button type="button" class="btn btn-secondary btn-sm" data-retry="${it.id}">↻ Ще раз</button>
-          <button type="button" class="q-icon" data-remove="${it.id}" title="Прибрати зі списку">✕</button>`;
+        meta = it.error || it.message || "Помилка";
       }
-
-      rows.push(`
-        <li class="q-item ${it.status}">
-          <div class="q-thumb">${thumb}<span>${it.source_url && !it.project_id ? "🔗" : "🎬"}</span></div>
-          <div class="q-main">
-            <div class="q-title" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
-            <div class="q-msg">${escapeHtml(msg)}<span class="q-meta"> · ${escapeHtml(count)}</span></div>
-            ${busy ? `<div class="q-bar${it.status === "downloading" && !pct ? " busy" : ""}"><i style="width:${pct}%"></i></div>` : ""}
+      const over = busy ? `
+            <div class="q-over">
+              <b>${escapeHtml(it.message || "Обробляю…")}${pct ? ` ${pct}%` : ""}</b>
+              <div class="q-bar${it.status === "downloading" && !pct ? " busy" : ""}"><i style="width:${pct}%"></i></div>
+              <div class="q-steps">${steps(stepOf(it))}</div>
+            </div>` : "";
+      const menu = it.status === "waiting" ? `
+          <button type="button" class="vc-dots" aria-haspopup="true" aria-expanded="false" title="Дії" aria-label="Дії">⋯</button>
+          <div class="vc-menu" role="menu" hidden>
+            <button type="button" role="menuitem" data-move="${it.id}:-1" ${wIndex <= 0 ? "disabled" : ""}>↑ Раніше в черзі</button>
+            <button type="button" role="menuitem" data-move="${it.id}:1" ${wIndex >= waiting.length - 1 ? "disabled" : ""}>↓ Пізніше в черзі</button>
+            <button type="button" role="menuitem" data-remove="${it.id}" class="danger">✕ Прибрати з черги</button>
+          </div>` : "";
+      const actions = it.status === "failed" ? `
+            <div class="q-actions">
+              <button type="button" class="btn btn-primary btn-sm" data-retry="${it.id}">↻ Ще раз</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-remove="${it.id}">Прибрати</button>
+            </div>` : "";
+      cards.push(`
+        <li class="q-item video-card ${it.status}">
+          <div class="history-thumb-wrap q-thumb"><span class="q-ico">${it.source_url && !it.project_id ? "🔗" : "🎬"}</span>${thumb}${over}</div>
+          <span class="vc-badge${it.status === "failed" ? " bad" : ""}">${escapeHtml(badge)}</span>${menu}
+          <div class="history-details">
+            <span class="history-item-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
+            <span class="video-card-meta">${escapeHtml(meta)}</span>${actions}
           </div>
-          <span class="q-pill ${it.status}">${STATUS[it.status] || it.status}${busy && pct ? ` ${pct}%` : ""}</span>
-          <div class="q-actions">${actions}</div>
         </li>`);
     }
-    list.innerHTML = rows.join("");
+    list.innerHTML = cards.join("");
+    if (typeof Home !== "undefined") {
+      const ids = [...activeProjectIds()].sort().join(",");
+      if (ids !== lastIds) { lastIds = ids; Home.render(); } else Home.sync();
+    }
   }
 
   function prettyUrl(u) {
@@ -321,6 +340,8 @@ const Queue = (() => {
     list.addEventListener("click", (e) => {
       const b = e.target.closest("button");
       if (!b) return;
+      if (b.classList.contains("vc-dots")) { e.stopPropagation(); Home.toggleMenu(b.closest(".q-item")); return; }
+      Home.closeMenus();
       if (b.dataset.remove) remove(b.dataset.remove);
       else if (b.dataset.retry) retry(b.dataset.retry);
       else if (b.dataset.dismiss) dismissUpload(b.dataset.dismiss);
@@ -346,5 +367,5 @@ const Queue = (() => {
 
   document.addEventListener("DOMContentLoaded", init);
 
-  return { submitHero, addFiles, addProject, remove, retry, move, clearFinished, refresh, parseLinks };
+  return { submitHero, addFiles, addProject, remove, retry, move, clearFinished, refresh, parseLinks, activeProjectIds };
 })();

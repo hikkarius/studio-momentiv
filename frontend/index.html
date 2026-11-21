@@ -44,24 +44,41 @@
     
 
     <!-- STEP 1: Video Source Input Card -->
-    <section class="studio-card step-card" id="step1Card">
-      <div class="hero-head">
+    <section class="studio-card step-card home-add" id="step1Card">
+      <div class="hero-head home-hero-only">
         <h2 class="hero-title">Знайди найкращі моменти</h2>
-        <p class="hero-sub">Встав одне або кілька посилань на YouTube чи TikTok, або обери відео з комп’ютера. Вони стануть у чергу й оброблятимуться по одному.</p>
+        <p class="hero-sub">Дай довге відео, і студія сама знайде в ньому найцікавіші шматки на 15–60 секунд для Shorts, Reels і TikTok.</p>
       </div>
+      <h2 class="home-add-title home-list-only">Додай відео</h2>
 
-      <!-- One row: link + file + go. The old tab buttons stay for app.js but are hidden. -->
+      <!-- The old tab buttons stay for app.js but are hidden. -->
       <div class="tabs-nav" hidden>
         <button class="tab-btn" id="tabFileBtn" onclick="switchSourceTab('file')">Файл</button>
         <button class="tab-btn active" id="tabUrlBtn" onclick="switchSourceTab('url')">Посилання</button>
       </div>
       <div class="hero-source" id="tabUrlContent">
-        <textarea id="urlInput" rows="1" placeholder="Посилання на відео (можна кілька, кожне з нового рядка)" class="input-text hero-input" aria-label="Посилання на відео"></textarea>
-        <button class="btn btn-secondary hero-file" type="button" onclick="document.getElementById('fileInput').click()">📁 Файли</button>
+        <textarea id="urlInput" rows="1" placeholder="Встав посилання на YouTube чи TikTok" title="Можна вставити кілька посилань, кожне з нового рядка" class="input-text hero-input" aria-label="Посилання на відео"></textarea>
+        <button class="btn btn-secondary hero-file" type="button" onclick="document.getElementById('fileInput').click()">📁 Файл з комп’ютера</button>
         <button class="btn btn-primary hero-go" id="urlDownloadBtn" onclick="Queue.submitHero()">В чергу →</button>
       </div>
-      <div class="hero-opts" aria-label="Що шукати">
-        <label class="hero-opt">Кліпів
+      <input type="file" id="fileInput" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,.mkv,.m4v,.avi" multiple hidden>
+      <span id="tabFileContent" hidden></span>
+
+      <div class="home-opts" id="homeOpts">
+        <span class="home-opts-lbl">Шукаю:</span>
+        <span class="home-chips" id="heroHint"></span>
+        <button type="button" class="home-opts-edit" id="homeOptsEdit" aria-expanded="false" aria-controls="homeOptsPanel">Змінити</button>
+        <span class="home-drop-hint home-list-only">або просто перетягни відео у вікно</span>
+      </div>
+      <div class="home-opts-panel" id="homeOptsPanel" hidden>
+        <label class="hero-opt">Що шукати
+          <select id="heroFilter" class="input-select">
+            <option value="Viral Hooks">🔥 Вірусні гачки</option>
+            <option value="Actionable Advice">💡 Експертні поради</option>
+            <option value="Storytelling">🎭 Емоційні історії</option>
+          </select>
+        </label>
+        <label class="hero-opt">Скільки кліпів
           <select id="heroClips" class="input-select">
             <option value="0">Авто (за довжиною)</option>
             <option value="5">5</option><option value="10">10</option><option value="15">15</option>
@@ -69,19 +86,14 @@
             <option value="50">50</option><option value="75">75</option><option value="100">100</option>
           </select>
         </label>
-        <label class="hero-opt">Шукати
-          <select id="heroFilter" class="input-select">
-            <option value="Viral Hooks">🔥 Вірусні гачки</option>
-            <option value="Actionable Advice">💡 Експертні поради</option>
-            <option value="Storytelling">🎭 Емоційні історії</option>
-          </select>
-        </label>
+        <span class="home-opts-note">Це для наступних відео. Довжину кліпів і мову змінюй у <button type="button" class="linkish" onclick="Settings.open()">Налаштуваннях</button>.</span>
       </div>
-      <div class="dropzone hero-drop" id="dropzone" onclick="document.getElementById('fileInput').click()">
-        <input type="file" id="fileInput" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,.mkv,.m4v,.avi" multiple style="display:none">
-        <span id="tabFileContent">або перетягни сюди одне чи кілька відео (MP4, MOV, MKV)</span>
-      </div>
-      <p class="hero-hint" id="heroHint">Мова: українська · кліпи 15–60 с · без перекриттів</p>
+
+      <ol class="home-how home-hero-only">
+        <li><i>1</i><b>Додай відео</b>Посилання або файл, від 10 хвилин до 3 годин.</li>
+        <li><i>2</i><b>Зачекай</b>Студія розпізнає мову і знайде моменти. Можна закрити вкладку, поки студія запущена.</li>
+        <li><i>3</i><b>Обери й скачай</b>Переглянь кліпи, тисни «Беру» і скачай звичайні або вертикальні з субтитрами.</li>
+      </ol>
 
       <!-- Video Loaded Info Box -->
       <div class="video-info-box" id="videoInfoBox" style="display:none;">
@@ -133,28 +145,24 @@
       </div>
     </section>
 
-    <!-- PROCESSING QUEUE -->
-    <section class="queue-section" id="queueSection" hidden aria-label="Черга обробки">
-      <div class="videos-head">
-        <h2>Черга <span id="queueCount"></span></h2>
-        <div class="queue-head-actions">
-          <span class="videos-hint" id="queueHint">Відео обробляються по одному. Можна закрити вкладку: черга працює, поки запущена студія.</span>
-          <button type="button" class="btn btn-secondary btn-sm" id="queueClear" onclick="Queue.clearFinished()" hidden>Прибрати завершені</button>
-        </div>
-      </div>
-      <ol class="queue-list" id="queueList"></ol>
-    </section>
-
-    <!-- YOUR VIDEOS -->
-    <section class="videos-section" id="historyCard" style="display:none;">
+    <!-- YOUR VIDEOS: videos being processed (the queue) come first, then the ready ones -->
+    <section class="videos-section" id="historyCard" hidden>
       <div class="videos-head">
         <h2>Твої відео <span id="historyCount">0</span></h2>
+        <label class="home-search"><span aria-hidden="true">🔍</span><input type="search" id="homeSearch" placeholder="Знайти відео за назвою" aria-label="Знайти відео за назвою"></label>
+        <div class="home-sort" id="homeSort" role="group" aria-label="Порядок">
+          <button type="button" data-s="new" aria-pressed="true">Нові</button>
+          <button type="button" data-s="old" aria-pressed="false">Старі</button>
+        </div>
       </div>
-      <div id="historyContent">
-        <div class="videos-grid" id="historyList"></div>
+      <div class="videos-grid" id="videosGrid">
+        <ol class="queue-cards" id="queueList" aria-label="Черга обробки"></ol>
+        <div class="video-cards" id="historyList"></div>
       </div>
-      <span id="historyArrow" hidden></span>
+      <p class="home-nothing" id="homeNothing" hidden>Нічого не знайшлося.</p>
+      <span id="historyArrow" hidden></span><div id="historyContent" hidden></div>
     </section>
+    <div class="drop-overlay" id="dropOverlay" hidden><div>Відпусти, щоб додати відео</div></div>
 
     <!-- Active Video Selected Banner -->
     <div class="active-project-bar" id="activeProjectBar" style="display:none;">
@@ -737,6 +745,7 @@
   <script src="/js/app.js"></script>
   <script src="/js/vertical.js"></script>
   <script src="/js/editor.js"></script>
+  <script src="/js/home.js"></script>
   <script src="/js/queue.js"></script>
   <script src="/js/settings.js"></script>
   <script src="/js/welcome.js"></script>

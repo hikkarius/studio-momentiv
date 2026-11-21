@@ -8,7 +8,6 @@ let currentClips = [];
 let activeEventSource = null;
 
 document.addEventListener("DOMContentLoaded", () => {
-  initDropzone();
   loadRecentProjects();
 });
 
@@ -16,85 +15,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
 let isHistoryCollapsed = false;
 
+/** The video cards live in home.js; this name stays because other files call it. */
 async function loadRecentProjects() {
-  const historyCard = document.getElementById("historyCard");
-  const historyList = document.getElementById("historyList");
-  const historyCount = document.getElementById("historyCount");
-
-  try {
-    const res = await fetch("/api/projects");
-    if (!res.ok) return;
-    const data = await res.json();
-    const projects = data.projects || [];
-
-    if (projects.length === 0) {
-      if (historyCard) historyCard.style.display = "none";
-      return;
-    }
-
-    if (historyCount) historyCount.textContent = projects.length;
-    if (historyCard) historyCard.style.display = "block";
-
-    historyList.innerHTML = "";
-    projects.forEach((p) => {
-      const item = document.createElement("div");
-      item.className = "history-item";
-      if (currentProject && currentProject.id === p.id) {
-        item.classList.add("active");
-      }
-
-      const total = p.clips_count || 0;
-      const reviewed = p.reviewed_count || 0;
-      const kept = p.kept_count || 0;
-      const pct = total ? Math.round((reviewed / total) * 100) : 0;
-      const busy = p.status === "analyzing" || p.status === "transcribing" || p.status === "downloading";
-      const statusText = busy ? "Обробляється…" : total ? `${total} кліпів · переглянуто ${pct}%${kept ? ` · обрано ${kept}` : ""}` : p.status === "failed" ? "Не вдалося · клік, щоб спробувати ще" : "Кліпів ще немає · клік, щоб знайти";
-      const encodedId = encodeURIComponent(p.id);
-      item.classList.add("video-card");
-
-      item.innerHTML = `
-        <div class="history-item-left" role="button" tabindex="0" title="Відкрити">
-          <div class="history-thumb-wrap">
-            <img src="/api/projects/${encodedId}/thumbnail" class="history-thumb-img" alt="">
-            <span class="history-fallback-icon" style="display: none;">🎬</span>
-            <span class="video-card-dur">${escapeHtml(p.duration_formatted || "00:00")}</span>
-          </div>
-          <div class="history-details">
-            <span class="history-item-title" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>
-            <span class="video-card-meta">${escapeHtml(statusText)}</span>
-            <span class="video-card-prog${busy ? " busy" : ""}"><i style="width:${busy ? 40 : pct}%"></i></span>
-          </div>
-        </div>
-        <button class="btn-history-delete" type="button" title="Видалити відео зі списку" aria-label="Видалити">✕</button>
-      `;
-
-      const thumbImg = item.querySelector(".history-thumb-img");
-      if (thumbImg) {
-        thumbImg.addEventListener("error", () => {
-          thumbImg.style.display = "none";
-          if (thumbImg.nextElementSibling) thumbImg.nextElementSibling.style.display = "flex";
-        });
-      }
-      const openOrQueue = () => {
-        if (!total && busy) {
-          showToast("Це відео ще обробляється, дивись чергу вгорі.", "info");
-          return;
-        }
-        if (!total && !busy && typeof Queue !== "undefined") {
-          if (confirm(`У «${p.title}» ще немає кліпів. Поставити в чергу на пошук моментів?`)) Queue.addProject(p.id);
-          return;
-        }
-        openProject(p.id);
-      };
-      item.querySelector(".history-item-left").addEventListener("click", openOrQueue);
-      item.querySelector(".history-item-left").addEventListener("keydown", (ev) => { if (ev.key === "Enter") openOrQueue(); });
-      item.querySelector(".btn-history-delete").addEventListener("click", (ev) => deleteProject(p.id, ev));
-
-      historyList.appendChild(item);
-    });
-  } catch (err) {
-    console.warn("Could not load recent projects:", err);
-  }
+  if (typeof Home !== "undefined") await Home.load();
 }
 
 function toggleHistoryCollapse() {
@@ -219,38 +142,6 @@ function switchSourceTab(tab) {
 
 // ─── Drag & Drop Upload ──────────────────────────────────────────────────────
 
-function initDropzone() {
-  const dropzone = document.getElementById("dropzone");
-  const fileInput = document.getElementById("fileInput");
-
-  ["dragenter", "dragover"].forEach((eventName) => {
-    dropzone.addEventListener(eventName, (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dropzone.classList.add("hover");
-    });
-  });
-
-  ["dragleave", "drop"].forEach((eventName) => {
-    dropzone.addEventListener(eventName, (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dropzone.classList.remove("hover");
-    });
-  });
-
-  dropzone.addEventListener("drop", (e) => {
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      Queue.addFiles(e.dataTransfer.files);
-    }
-  });
-
-  fileInput.addEventListener("change", (e) => {
-    if (e.target.files && e.target.files.length > 0) {
-      Queue.addFiles(e.target.files);
-    }
-  });
-}
 
 async function uploadFile(file) {
   // Clear any existing moments/player from previous session immediately
@@ -572,7 +463,7 @@ async function retryAnalysisForCurrentProject() {
   } catch (err) {
     showToast(err.message, "error");
   }
-  const qs = document.getElementById("queueSection");
+  const qs = document.getElementById("historyCard");
   if (qs) qs.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
