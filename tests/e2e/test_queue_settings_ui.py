@@ -80,23 +80,82 @@ def test_failed_item_shows_error_and_retry(page, studio, project, monkeypatch):
     page.locator("#queueList .q-item.waiting").wait_for()
 
 
+def _set_range(page, key, value):
+    page.evaluate(
+        """([k, v]) => { const el = document.querySelector(`[data-key='${k}']`); el.value = v;
+             el.dispatchEvent(new Event('input')); el.dispatchEvent(new Event('change')); }""",
+        [key, str(value)],
+    )
+
+
 def test_settings_change_applies_to_home(page, studio, project):
     page.goto(studio["url"] + "/")
     page.click("#btnOpenSettings")
-    page.fill("[data-key='clips.default_max_len']", "45")
-    page.press("[data-key='clips.default_max_len']", "Tab")
+    page.wait_for_function("document.getElementById('setLenBig').textContent.includes('15–60')")
+    _set_range(page, "clips.default_max_len", 45)
     page.wait_for_function("document.getElementById('heroHint').textContent.includes('15–45')")
     assert config_loader.app_config.clips.default_max_len == 45
+    assert "15–45 с" in page.locator("#setLenBig").inner_text()
 
-    page.fill("[data-key='clips.default_min_len']", "50")
-    page.press("[data-key='clips.default_min_len']", "Tab")
-    page.wait_for_function("document.getElementById('settingsSaved').textContent.includes('меншою')")
-    assert page.input_value("[data-key='clips.default_min_len']") == "15"
+    # presets set both ends at once
+    page.click("#setLenPresets button[data-max='90']")
+    page.wait_for_function("document.getElementById('heroHint').textContent.includes('30–90')")
+    assert (config_loader.app_config.clips.default_min_len, config_loader.app_config.clips.default_max_len) == (30, 90)
+    assert page.locator("#setLenPresets button[data-max='90']").get_attribute("aria-pressed") == "true"
+    page.click("#setLenPresets button[data-max='60']")
+    page.wait_for_function("document.getElementById('setLenBig').textContent.includes('15–60')")
 
-    page.select_option("[data-key='studio.default_clips']", "30")
-    page.wait_for_function("document.getElementById('heroClips').value === '30'")
+    # a minimum that is not below the maximum is refused and the slider goes back
+    page.evaluate("""fetch('/api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                     body: JSON.stringify({clips: {default_min_len: 70}})}).then(r => r.status)""")
+    assert config_loader.app_config.clips.default_min_len == 15
+
+    page.click("[data-key='studio.default_clips'] [data-v='20']")
+    page.wait_for_function("document.getElementById('heroClips').value === '20'")
+    assert page.locator("[data-key='studio.default_clips'] [data-v='20']").get_attribute("aria-pressed") == "true"
+    page.click("[data-key='studio.default_filter'] [data-v='Storytelling']")
+    page.wait_for_function("document.getElementById('heroFilter').value === 'Storytelling'")
+    page.click("[data-key='clips.max_overlap_sec'] [data-v='0']")
+    page.wait_for_function("document.getElementById('setOverlapNote').textContent.includes('не перетинаються')")
+    assert config_loader.app_config.clips.max_overlap_sec == 0
     page.keyboard.press("Escape")
     assert page.locator("#settingsScreen").is_hidden()
+    assert not page.errors
+
+
+def test_settings_key_status_and_sections(page, studio, project, monkeypatch):
+    from backend import app_update
+    calls = []
+    monkeypatch.setattr(app_update, "check_gemini_key", lambda k: calls.append(k) or {"ok": True, "message": "Ключ працює."})
+    page.goto(studio["url"] + "/")
+    page.click("#btnOpenSettings")
+    page.click(".settings-tabs [data-tab=ai]")
+    assert page.locator("#settingsSection").inner_text() == "Ключ і розпізнавання"
+    page.wait_for_function("document.getElementById('setKeyBox').dataset.state === 'ok'")
+    assert "працює" in page.locator("#setKeyState").inner_text()
+    assert len(calls) == 1
+    assert page.locator("#setKeyDot").is_hidden()
+
+    monkeypatch.setattr(app_update, "check_gemini_key", lambda k: {"ok": False, "message": "Google не прийняв цей ключ."})
+    page.click("#setKeyCheck")
+    page.wait_for_function("document.getElementById('setKeyBox').dataset.state === 'bad'")
+    assert page.locator("#setKeyDot").is_visible()
+    assert "не прийняв" in page.locator("#setKeyMsg").inner_text()
+
+    # quality cards and the «Точніші оцінки» switch
+    page.click("#setModel [data-v='medium']")
+    page.wait_for_function("document.querySelector(\"#setModel [data-v='medium']\").getAttribute('aria-pressed') === 'true'")
+    assert config_loader.app_config.whisper.model == "medium"
+    page.click("#setModel [data-v='large-v3-turbo']")
+    was = config_loader.app_config.gemini.rerank
+    page.click("[data-key='gemini.rerank']")
+    page.wait_for_function(f"Boolean({str(not was).lower()}) === document.querySelector(\"[data-key='gemini.rerank']\").checked")
+    assert config_loader.app_config.gemini.rerank is (not was)
+    page.click("[data-key='gemini.rerank']")
+
+    page.click(".settings-tabs [data-tab=about]")
+    assert page.locator("#btnReport").is_visible()
+    page.wait_for_function("document.getElementById('setVersion').textContent.includes('Студія моментів ')")
     assert not page.errors
 
 

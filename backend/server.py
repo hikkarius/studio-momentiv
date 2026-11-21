@@ -1284,6 +1284,17 @@ class _KeyCheck(BaseModel):
     save: bool = True
 
 
+@app.post("/api/settings/check-saved-key")
+def check_saved_key():
+    """«Налаштування»: asks Google whether the key saved in .env still works (free, no clips used)."""
+    from config_loader import ensure_gemini_api_key
+
+    key = (ensure_gemini_api_key() or "").strip()
+    if not key:
+        return {"ok": False, "message": "Ключа Gemini немає.", "settings": _settings_view()}
+    return {**app_update.check_gemini_key(key), "settings": _settings_view()}
+
+
 @app.post("/api/settings/check-key")
 def check_key(payload: _KeyCheck):
     """First-run screen: really asks Google whether the key works, and saves it if it does."""

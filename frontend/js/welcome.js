@@ -80,9 +80,10 @@ const Welcome = (() => {
     } catch (_) { /* offline: no pill */ }
   }
 
-  async function update() {
+  /** skipConfirm: the caller already asked (the «Про студію» section uses a dialog). */
+  async function update(skipConfirm = false) {
     if (!info) return;
-    if (!confirmUpdate()) return;
+    if (!skipConfirm && !confirmUpdate()) return;
     try {
       const res = await fetch("/api/update", { method: "POST" });
       const data = await res.json().catch(() => ({}));
@@ -106,5 +107,5 @@ const Welcome = (() => {
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
   else start();
 
-  return { open, close, saveKey, update };
+  return { open, close, saveKey, update, info: () => info };
 })();
