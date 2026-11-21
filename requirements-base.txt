@@ -1,0 +1,13 @@
+# Бібліотеки, потрібні студії на будь-якому комп'ютері (інсталятор ставить їх завжди)
+faster-whisper>=1.0.3
+av>=11.0.0,<14.0.0  # Required by faster-whisper for audio decoding (metadata_errors support)
+google-genai>=1.16.0
+numpy>=1.24.0
+yt-dlp>=2024.11.4
+pyyaml>=6.0.1
+pydantic>=2.6.0
+python-dotenv>=1.0.0
+fastapi>=0.110.0
+uvicorn>=0.30.0
+python-multipart>=0.0.9  # FastAPI form/file uploads
+opencv-python>=4.8.0  # face detection for vertical 9:16 clips (YuNet model in assets/models)

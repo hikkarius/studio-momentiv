@@ -1,0 +1,34 @@
+name: Release for friends
+
+# Push a tag like v1.0.1 (it must match "version" in version.json) and this builds
+# Studio-Momentiv.zip and attaches it to a GitHub Release. The studio's «Оновити» button downloads it.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check version.json matches the tag
+        run: |
+          v=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "version.json says $v but tag is ${GITHUB_REF_NAME}"; exit 1; }
+
+      - name: Build Studio-Momentiv.zip
+        run: |
+          mkdir -p dist/Studio-Momentiv
+          git ls-files -z | grep -zvE '^(tests/|\.github/|\.agents/|\.antigravity/|review_agent\.py$|pytest\.ini$|\.coveragerc$|\.dockerignore$|requirements-dev\.txt$)' \
+            | xargs -0 -I{} cp --parents {} dist/Studio-Momentiv/
+          cd dist && python3 -c "import shutil; shutil.make_archive('Studio-Momentiv', 'zip', '.', 'Studio-Momentiv')"
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Studio-Momentiv.zip
+          generate_release_notes: true

@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Студія моментів</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/editor.css">
+  <link rel="stylesheet" href="/css/queue-settings.css">
+  <link rel="stylesheet" href="/css/welcome.css">
+  <script src="/js/theme.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800&family=Russo+One&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand">
+        <span class="brand-icon">⚡</span>
+        <div>
+          <h1 class="brand-title">Студія моментів</h1>
+        </div>
+      </div>
+      <div class="header-tools">
+      <div class="theme-switch" role="group" aria-label="Тема">
+        <button type="button" data-theme="light">☀ Світла</button>
+        <button type="button" data-theme="dark">☾ Темна</button>
+        <button type="button" data-theme="system">Авто</button>
+      </div>
+      <button type="button" class="btn btn-primary btn-sm update-pill" id="btnUpdate" hidden onclick="Welcome.update()">⬆ Оновити</button>
+      <button type="button" class="btn btn-secondary btn-settings" id="btnOpenSettings" onclick="Settings.open()">⚙ Налаштування</button>
+      <div id="hwBadge" class="hardware-pill">
+        <span class="status-dot"></span>
+        <span id="hwText">Зондування прискорення...</span>
+      </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="studio-container">
+    
+
+    <!-- STEP 1: Video Source Input Card -->
+    <section class="studio-card step-card" id="step1Card">
+      <div class="hero-head">
+        <h2 class="hero-title">Знайди найкращі моменти</h2>
+        <p class="hero-sub">Встав одне або кілька посилань на YouTube чи TikTok, або обери відео з комп’ютера. Вони стануть у чергу й оброблятимуться по одному.</p>
+      </div>
+
+      <!-- One row: link + file + go. The old tab buttons stay for app.js but are hidden. -->
+      <div class="tabs-nav" hidden>
+        <button class="tab-btn" id="tabFileBtn" onclick="switchSourceTab('file')">Файл</button>
+        <button class="tab-btn active" id="tabUrlBtn" onclick="switchSourceTab('url')">Посилання</button>
+      </div>
+      <div class="hero-source" id="tabUrlContent">
+        <textarea id="urlInput" rows="1" placeholder="Посилання на відео (можна кілька, кожне з нового рядка)" class="input-text hero-input" aria-label="Посилання на відео"></textarea>
+        <button class="btn btn-secondary hero-file" type="button" onclick="document.getElementById('fileInput').click()">📁 Файли</button>
+        <button class="btn btn-primary hero-go" id="urlDownloadBtn" onclick="Queue.submitHero()">В чергу →</button>
+      </div>
+      <div class="hero-opts" aria-label="Що шукати">
+        <label class="hero-opt">Кліпів
+          <select id="heroClips" class="input-select">
+            <option value="0">Авто (за довжиною)</option>
+            <option value="5">5</option><option value="10">10</option><option value="15">15</option>
+            <option value="20">20</option><option value="30">30</option><option value="40">40</option>
+            <option value="50">50</option><option value="75">75</option><option value="100">100</option>
+          </select>
+        </label>
+        <label class="hero-opt">Шукати
+          <select id="heroFilter" class="input-select">
+            <option value="Viral Hooks">🔥 Вірусні гачки</option>
+            <option value="Actionable Advice">💡 Експертні поради</option>
+            <option value="Storytelling">🎭 Емоційні історії</option>
+          </select>
+        </label>
+      </div>
+      <div class="dropzone hero-drop" id="dropzone" onclick="document.getElementById('fileInput').click()">
+        <input type="file" id="fileInput" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,.mkv,.m4v,.avi" multiple style="display:none">
+        <span id="tabFileContent">або перетягни сюди одне чи кілька відео (MP4, MOV, MKV)</span>
+      </div>
+      <p class="hero-hint" id="heroHint">Мова: українська · кліпи 15–60 с · без перекриттів</p>
+
+      <!-- Video Loaded Info Box -->
+      <div class="video-info-box" id="videoInfoBox" style="display:none;">
+        <div class="info-row">
+          <span class="info-title" id="infoTitle">video.mp4</span>
+          <span class="info-badge" id="infoDuration">⏱ 00:00</span>
+          <span class="info-badge highlight" id="infoClips">Рекомендовано: 5 кліпів</span>
+        </div>
+      </div>
+
+      <!-- Controls & Start Action -->
+      <div class="action-row" id="step1Actions" style="display:none;">
+        <div class="action-controls-grid">
+          <div class="slider-control">
+            <label for="clipsCountSlider">
+              Кількість моментів (до 100):
+              <input type="number" id="clipsCountNumber" min="1" max="100" value="10" class="input-number" oninput="syncClipsCount(this.value)">
+            </label>
+            <input type="range" id="clipsCountSlider" min="1" max="100" value="10" oninput="syncClipsCount(this.value)">
+          </div>
+
+          <div class="select-control">
+            <label for="filterModeSelect">Стиль фокусу:</label>
+            <select id="filterModeSelect" class="input-select">
+              <option value="Viral Hooks" selected>🔥 Вірусні гачки (Viral Hooks)</option>
+              <option value="Actionable Advice">💡 Експертні інсайти (Education)</option>
+              <option value="Storytelling">🎭 Емоційні історії (Storytelling)</option>
+            </select>
+          </div>
+        </div>
+
+        <button class="btn btn-primary btn-start-analyze" id="btnAnalyze" onclick="startAnalysis()">
+          ✨ Знайти вірусні моменти (AI)
+        </button>
+      </div>
+
+      <!-- Active Job Progress Bar -->
+      <div class="progress-box" id="analyzeProgressBox" style="display:none;">
+        <div class="progress-header">
+          <span id="analyzeProgressMsg">Аналіз відео...</span>
+          <span id="analyzeProgressPct">0%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="analyzeProgressFill" style="width: 0%;"></div>
+        </div>
+        <div class="analyze-error-actions" id="analyzeErrorActions" style="display:none;">
+          <button class="btn btn-primary" id="btnRetryAnalyze" onclick="startAnalysis()">🔄 Спробувати ще раз</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- PROCESSING QUEUE -->
+    <section class="queue-section" id="queueSection" hidden aria-label="Черга обробки">
+      <div class="videos-head">
+        <h2>Черга <span id="queueCount"></span></h2>
+        <div class="queue-head-actions">
+          <span class="videos-hint" id="queueHint">Відео обробляються по одному. Можна закрити вкладку: черга працює, поки запущена студія.</span>
+          <button type="button" class="btn btn-secondary btn-sm" id="queueClear" onclick="Queue.clearFinished()" hidden>Прибрати завершені</button>
+        </div>
+      </div>
+      <ol class="queue-list" id="queueList"></ol>
+    </section>
+
+    <!-- YOUR VIDEOS -->
+    <section class="videos-section" id="historyCard" style="display:none;">
+      <div class="videos-head">
+        <h2>Твої відео <span id="historyCount">0</span></h2>
+        <span class="videos-hint">Клік по картці відкриває відео</span>
+      </div>
+      <div id="historyContent">
+        <div class="videos-grid" id="historyList"></div>
+      </div>
+      <span id="historyArrow" hidden></span>
+    </section>
+
+    <!-- Active Video Selected Banner -->
+    <div class="active-project-bar" id="activeProjectBar" style="display:none;">
+      <div class="active-bar-left">
+        <span class="active-bar-badge">🎬 АКТИВНЕ ВІДЕО:</span>
+        <span class="active-bar-title" id="activeBarTitle">video.mp4</span>
+        <span class="active-bar-meta" id="activeBarMeta">⏱ 00:00</span>
+      </div>
+      <div class="active-bar-right">
+        <button class="btn btn-secondary btn-sm" id="btnResetSession" onclick="resetStudioState()">
+          ✕ Скинути вибір
+        </button>
+        <button class="btn btn-primary btn-sm" id="btnUploadAnother" onclick="resetStudioState()">
+          ➕ Завантажити інше відео
+        </button>
+      </div>
+    </div>
+
+    <!-- STEP 2: Results & Moments Showcase -->
+    <section class="studio-card step-card" id="step2Card" style="display:none;">
+      <div class="card-header results-header">
+        <div>
+          <span class="step-num">2</span>
+          <h2>Вітрина знайдених моментів та метадані</h2>
+        </div>
+        <div class="top-export-actions">
+          <button class="btn btn-secondary" onclick="exportAllSubtitles()">
+            📦 Всі субтитри (.srt)
+          </button>
+          <button class="btn btn-secondary" onclick="exportTxt()">
+            📄 Завантажити TXT
+          </button>
+          <button class="btn btn-secondary" onclick="exportJson()">
+            📊 Експорт JSON
+          </button>
+          <button class="btn btn-primary" onclick="copyAllMoments()">
+            📋 Скопіювати все
+          </button>
+        </div>
+      </div>
+
+      <div class="moments-workspace">
+        
+        <!-- Left: Video Player for instant playback -->
+        <div class="player-column">
+          <div class="video-container">
+            <video id="sourceVideo" controls playsinline preload="metadata"></video>
+          </div>
+          <div class="player-helper">
+            <span>💡 Клікніть на будь-який таймкод праворуч, щоб миттєво переглянути цей момент.</span>
+          </div>
+        </div>
+
+        <!-- Right: Moments List -->
+        <div class="moments-column">
+          <div class="moments-list-header">
+            <h3 id="momentsCountTitle">🔥 Знайдені фрагменти:</h3>
+          </div>
+          <div class="moments-list" id="momentsList">
+            <!-- Dynamically injected -->
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Modal for Interactive Clip Trimming / Fine-Tuning -->
+  <div class="modal-backdrop" id="trimModal" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-badge" id="trimModalBadge">КЛІП #1</span>
+          <h3 class="modal-title" id="trimModalTitle">Підкоригувати межі моменту</h3>
+        </div>
+        <button class="modal-close-btn" type="button" onclick="closeTrimModal()">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="modal-player-wrap">
+          <video id="trimVideoPlayer" controls playsinline preload="auto"></video>
+          <div class="trim-playback-indicator" id="trimPlaybackIndicator">
+            ⏱ Поточний час у відео: <strong id="trimCurrentTime">00:00.0</strong>
+          </div>
+        </div>
+
+        <div class="trim-controls-grid">
+          <!-- Start Boundary Column -->
+          <div class="trim-boundary-box">
+            <div class="trim-boundary-header">
+              <label for="trimStartInput">🟢 Початок моменту:</label>
+              <button class="btn btn-xs btn-outline" type="button" onclick="setTrimStartToCurrent()">
+                ⏱ Поточний час
+              </button>
+            </div>
+            <div class="trim-input-row">
+              <input type="number" id="trimStartInput" step="0.1" min="0" class="input-number trim-num-input" onchange="onTrimInputChange()">
+              <span class="trim-sec-label">сек</span>
+            </div>
+            <div class="trim-step-buttons">
+              <button class="btn btn-xs btn-step" type="button" onclick="adjustTrimStart(-1.0)">-1с</button>
+              <button class="btn btn-xs btn-step" type="button" onclick="adjustTrimStart(-0.2)">-0.2с</button>
+              <button class="btn btn-xs btn-step" type="button" onclick="adjustTrimStart(+0.2)">+0.2с</button>
+              <button class="btn btn-xs btn-step" type="button" onclick="adjustTrimStart(+1.0)">+1с</button>
+            </div>
+          </div>
+
+          <!-- End Boundary Column -->
+          <div class="trim-boundary-box">
+            <div class="trim-boundary-header">
+              <label for="trimEndInput">🔴 Кінець моменту:</label>
+              <button class="btn btn-xs btn-outline" type="button" onclick="setTrimEndToCurrent()">
+                ⏱ Поточний час
+              </button>
+            </div>
+            <div class="trim-input-row">
+              <input type="number" id="trimEndInput" step="0.1" min="0" class="input-number trim-num-input" onchange="onTrimInputChange()">
+              <span class="trim-sec-label">сек</span>
+            </div>
+            <div class="trim-step-buttons">
+              <button class="btn btn-xs btn-step" type="button" onclick="adjustTrimEnd(-1.0)">-1с</button>
+              <button class="btn btn-xs btn-step" type="button" onclick="adjustTrimEnd(-0.2)">-0.2с</button>
+              <button class="btn btn-xs btn-step" type="button" onclick="adjustTrimEnd(+0.2)">+0.2с</button>
+              <button class="btn btn-xs btn-step" type="button" onclick="adjustTrimEnd(+1.0)">+1с</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Summary and Options -->
+        <div class="trim-meta-summary">
+          <span class="trim-calc-duration">⏱ Підсумкова тривалість: <strong id="trimCalcDuration">0 сек</strong></span>
+          <label class="trim-autostop-label">
+            <input type="checkbox" id="trimAutoStopCheck" checked>
+            Авто-зупинка на кінці моменту
+          </label>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" onclick="closeTrimModal()">Скасувати</button>
+        <button class="btn btn-primary" id="btnSaveTrim" type="button" onclick="saveTrimChanges()">💾 Зберегти нові межі</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Налаштування ═══ -->
+  <div class="settings-backdrop" id="settingsScreen" hidden>
+    <section class="settings-sheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <header class="settings-head">
+        <h2 id="settingsTitle">Налаштування</h2>
+        <span class="settings-saved" id="settingsSaved" aria-live="polite"></span>
+        <button type="button" class="modal-close-btn" onclick="Settings.close()" aria-label="Закрити">✕</button>
+      </header>
+      <nav class="settings-tabs" role="tablist">
+        <button type="button" role="tab" data-tab="clips" aria-selected="true">Кліпи</button>
+        <button type="button" role="tab" data-tab="ai" aria-selected="false">Розпізнавання й ШІ</button>
+        <button type="button" role="tab" data-tab="disk" aria-selected="false">Місце на диску</button>
+      </nav>
+
+      <div class="settings-body" data-panel="clips">
+        <div class="set-group">
+          <h3>Довжина кліпів</h3>
+          <div class="set-row two">
+            <label>Найкоротший, секунд<input type="number" min="5" max="300" class="input-number" data-key="clips.default_min_len"></label>
+            <label>Найдовший, секунд<input type="number" min="10" max="600" class="input-number" data-key="clips.default_max_len"></label>
+          </div>
+          <label class="set-row">Скільки секунд можуть мати спільного два кліпи
+            <input type="number" min="0" max="30" step="0.5" class="input-number" data-key="clips.max_overlap_sec">
+            <small>0 — кліпи зовсім не перетинаються.</small>
+          </label>
+        </div>
+        <div class="set-group">
+          <h3>Для нових відео</h3>
+          <label class="set-row">Скільки кліпів шукати
+            <select class="input-select" data-key="studio.default_clips" data-type="int">
+              <option value="0">Авто: приблизно 1 на кожні 25 секунд відео</option>
+              <option value="5">5</option><option value="10">10</option><option value="15">15</option>
+              <option value="20">20</option><option value="30">30</option><option value="40">40</option>
+              <option value="50">50</option><option value="75">75</option><option value="100">100</option>
+            </select>
+          </label>
+          <label class="set-row">Що шукати
+            <select class="input-select" data-key="studio.default_filter" id="setFilter"></select>
+          </label>
+          <small class="set-note">Це те, що буде вибрано на головній. Для окремого відео можна змінити там же.</small>
+        </div>
+      </div>
+
+      <div class="settings-body" data-panel="ai" hidden>
+        <div class="set-group">
+          <h3>Розпізнавання мови (Whisper)</h3>
+          <label class="set-row">Якість розпізнавання
+            <select class="input-select" data-key="whisper.model" id="setModel"></select>
+            <small>Після зміни наступне відео розпізнається заново, навіть якщо вже оброблялося.</small>
+          </label>
+          <label class="set-row">Мова відео
+            <select class="input-select" data-key="whisper.language" id="setLang"></select>
+          </label>
+        </div>
+        <div class="set-group">
+          <h3>Пошук моментів (Gemini)</h3>
+          <div class="set-row">
+            <span>Ключ Gemini: <b id="setKeyState">…</b></span>
+            <div class="set-key">
+              <input type="password" id="setKeyInput" class="input-text" placeholder="Встав новий ключ, щоб замінити" autocomplete="off">
+              <button type="button" class="btn btn-secondary" onclick="Settings.saveKey()">Зберегти ключ</button>
+            </div>
+            <small>Ключ зберігається тільки на цьому комп’ютері, у файлі .env.</small>
+          </div>
+          <label class="set-check"><input type="checkbox" data-key="gemini.rerank">
+            <span>Другий прохід: ШІ порівнює всі знайдені кліпи між собою й уточнює оцінки <small>(точніше, але на один запит більше)</small></span></label>
+        </div>
+      </div>
+
+      <div class="settings-body" data-panel="disk" hidden>
+        <div class="set-group">
+          <div class="disk-top">
+            <h3>Студія займає <b id="diskStudio">…</b></h3>
+            <span class="disk-free" id="diskFree"></span>
+          </div>
+          <div class="disk-bar" id="diskBar" aria-hidden="true"></div>
+          <ul class="disk-legend" id="diskLegend"></ul>
+        </div>
+        <div class="set-group">
+          <h3>Прибрати</h3>
+          <div class="disk-action">
+            <div><b>Сміття <span id="diskJunk"></span></b><small>Недокачані файли, тимчасовий звук, залишки видалених відео. Нічого потрібного.</small></div>
+            <button type="button" class="btn btn-secondary" id="btnCleanJunk" onclick="Settings.cleanJunk()">Прибрати</button>
+          </div>
+          <div class="disk-action">
+            <div><b>Готові файли кліпів <span id="diskClips"></span></b><small>Нарізані 16:9 і вертикальні кліпи. Кліпи, позначки й налаштування лишаються: файл зробиться знову, коли натиснеш «Скачати».</small></div>
+            <div class="disk-action-ctl">
+              <select class="input-select" id="diskOlder">
+                <option value="0">усі</option><option value="7">старші за 7 днів</option>
+                <option value="30" selected>старші за 30 днів</option><option value="90">старші за 90 днів</option>
+              </select>
+              <button type="button" class="btn btn-secondary" onclick="Settings.cleanClips()">Видалити</button>
+            </div>
+          </div>
+          <label class="set-row">Прибирати автоматично при запуску студії
+            <select class="input-select" data-key="studio.cleanup_days" data-type="int">
+              <option value="0">Ні</option>
+              <option value="7">Так: сміття і файли кліпів, старші за 7 днів</option>
+              <option value="14">Так: сміття і файли кліпів, старші за 14 днів</option>
+              <option value="30">Так: сміття і файли кліпів, старші за 30 днів</option>
+              <option value="60">Так: сміття і файли кліпів, старші за 60 днів</option>
+            </select>
+          </label>
+        </div>
+        <div class="set-group">
+          <h3>Відео за розміром</h3>
+          <ul class="disk-projects" id="diskProjects"></ul>
+        </div>
+      </div>
+
+      <footer class="settings-foot">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="Settings.resetAll()">Повернути все як було спочатку</button>
+        <span>Зміни зберігаються одразу.</span>
+      </footer>
+    </section>
+  </div>
+
+  <!-- ═══ Перший запуск: ключ Gemini ═══ -->
+  <div class="settings-backdrop welcome-backdrop" id="welcomeScreen" hidden>
+    <section class="settings-sheet welcome-sheet" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle">
+      <header class="settings-head">
+        <h2 id="welcomeTitle">Вітаю у Студії моментів!</h2>
+      </header>
+      <div class="welcome-body">
+        <p class="welcome-lead">Студія сама знаходить у довгих відео найцікавіші моменти для коротких кліпів. Для цього їй потрібен безкоштовний ключ Google Gemini. Він робиться один раз і займає 2 хвилини.</p>
+        <ol class="welcome-steps">
+          <li><b>Відкрий Google AI Studio</b> і увійди у свій Google-акаунт.
+            <a class="btn btn-secondary btn-sm" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Відкрити AI Studio ↗</a></li>
+          <li><b>Натисни «Create API key»</b> (Створити ключ). Якщо спитає проєкт, вибери будь-який або створи новий. Потім натисни на ключ і скопіюй його.</li>
+          <li><b>Встав ключ сюди</b> і натисни «Перевірити й зберегти».
+            <div class="set-key welcome-key">
+              <input type="password" id="welcomeKey" class="input-text" placeholder="Встав ключ Gemini" autocomplete="off" spellcheck="false">
+              <button type="button" class="btn btn-primary" id="welcomeSave" onclick="Welcome.saveKey()">Перевірити й зберегти</button>
+            </div>
+            <div class="welcome-msg" id="welcomeMsg" role="status" aria-live="polite"></div>
+          </li>
+        </ol>
+        <div class="welcome-gpu" id="welcomeGpu"></div>
+        <details class="welcome-more">
+          <summary>Що треба знати про безкоштовний ключ</summary>
+          <p>Безкоштовний ключ має ліміт запитів на день. Для кількох відео на день цього вистачає. Якщо ліміт закінчився, студія про це скаже, і можна буде спробувати пізніше.</p>
+          <p>На безкоштовному тарифі Google може використовувати запити для покращення своїх моделей. Не обробляй відео, які мають лишатися приватними.</p>
+          <p>Ключ зберігається тільки на цьому комп'ютері. Змінити його можна в «Налаштування → Розпізнавання й ШІ».</p>
+        </details>
+      </div>
+      <footer class="settings-foot">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="Welcome.close()">Пізніше</button>
+        <span id="welcomeVersion"></span>
+      </footer>
+    </section>
+  </div>
+
+  <!-- Notification Toast -->
+  <div class="toast" id="toast"></div>
+
+  <!-- ═══ Монтажний стіл ═══ -->
+  <section id="editor" hidden aria-label="Монтажний стіл">
+    <div class="ed-main">
+      <header class="ed-top">
+        <button class="ed-btn ghost" id="edBack" type="button">← Усі відео</button>
+        <div class="ed-logo"><i></i>Студія моментів</div>
+        <div class="ed-crumb"><b id="edProjTitle"></b><span id="edProjMeta"></span></div>
+        <div class="ed-mode" id="edMode" role="tablist" aria-label="Режим">
+          <button type="button" role="tab" data-m="table" aria-selected="true">✂ Монтажний стіл</button>
+          <button type="button" role="tab" data-m="vx" aria-selected="false">📱 Вертикальні кліпи</button>
+        </div>
+        <button class="ed-btn sm" id="edReanalyze" type="button" title="Шукати кліпи заново (транскрипція береться з кешу)">↻ Шукати заново</button>
+        <div class="theme-switch" role="group" aria-label="Тема">
+          <button type="button" data-theme="light">☀ Світла</button>
+          <button type="button" data-theme="dark">☾ Темна</button>
+          <button type="button" data-theme="system">Авто</button>
+        </div>
+      </header>
+
+      <section class="ed-panel ed-overview" aria-label="Усе відео">
+        <div class="ed-ov-head">
+          <h2>Усе відео · номер кліпу = його місце у відео</h2>
+          <div class="ed-legend"><span><i style="background:var(--ed-cand)"></i>ще не дивився</span><span><i style="background:var(--ed-keep)"></i>беру</span><span><i style="background:var(--ed-drop);opacity:.4"></i>не беру</span><span><i style="background:var(--ed-accent)"></i>відкритий</span></div>
+        </div>
+        <div class="ed-ov" id="edOv" title="Клік по кліпу або номеру відкриває його"></div>
+      </section>
+
+      <div class="ed-cols">
+        <section class="ed-panel" aria-label="Кліпи">
+          <div class="ed-ph"><h2>Кліпи</h2>
+            <div class="ed-sort" id="edSort" role="group" aria-label="Порядок">
+              <button type="button" data-s="score" aria-pressed="true" title="Найвища оцінка зверху">Найкращі</button>
+              <button type="button" data-s="time" aria-pressed="false" title="Як ідуть у відео">По черзі</button>
+            </div></div>
+          <div class="ed-filters" id="edFilters" role="group" aria-label="Фільтр">
+            <button type="button" data-f="all" aria-pressed="true">Усі<span id="edCnt_all"></span></button>
+            <button type="button" data-f="new" aria-pressed="false">Нові<span id="edCnt_new"></span></button>
+            <button type="button" data-f="keep" aria-pressed="false">Беру<span id="edCnt_keep"></span></button>
+            <button type="button" data-f="drop" aria-pressed="false">Ні<span id="edCnt_drop"></span></button>
+          </div>
+          <ul class="ed-list" id="edList"></ul>
+        </section>
+
+        <section class="ed-panel ed-stage" aria-label="Перегляд кліпу">
+          <div class="ed-stage-head"><span class="t" id="edClipNo"></span><span class="m" id="edClipMeta"></span></div>
+          <div class="ed-screen paused" id="edScreen" title="Клік: грати або пауза">
+            <video id="edVideo" preload="metadata" playsinline></video>
+            <div class="ed-bigplay" aria-hidden="true">▶</div>
+          </div>
+          <div class="ed-trim" id="edTrim" aria-label="Межі кліпу">
+            <div class="ed-track" id="edTrack" title="Тягни по доріжці: перемотка в межах кліпу. Тягни жовті дужки: початок і кінець. Клік по слову: почати чи закінчити ним."></div>
+            <div class="ed-bounds">
+              <div class="ed-bound start"><span class="ic" aria-hidden="true"></span><span class="lbl">Початок<br>кліпу</span><span class="v" id="edStartTc"></span>
+                <button class="ed-btn sm" type="button" data-nudge="start:-0.5" title="Почати раніше на пів секунди">−0,5</button>
+                <button class="ed-btn sm" type="button" data-nudge="start:0.5" title="Почати пізніше на пів секунди">+0,5</button></div>
+              <span class="ed-len" id="edLen" title="Тривалість кліпу"></span>
+              <div class="ed-bound end"><button class="ed-btn sm" type="button" data-nudge="end:-0.5" title="Закінчити раніше на пів секунди">−0,5</button>
+                <button class="ed-btn sm" type="button" data-nudge="end:0.5" title="Закінчити пізніше на пів секунди">+0,5</button>
+                <span class="v" id="edEndTc"></span><span class="lbl">Кінець<br>кліпу</span><span class="ic" aria-hidden="true"></span></div>
+            </div>
+          </div>
+          <div class="ed-controls">
+            <button class="ed-btn round" id="edPrev" type="button" title="Попередній кліп (↑)" aria-label="Попередній кліп">↑</button>
+            <button class="ed-btn primary" id="edPlay" type="button" title="Грати або пауза (Пробіл)">▶ Грати</button>
+            <button class="ed-btn round" id="edNext" type="button" title="Наступний кліп (↓)" aria-label="Наступний кліп">↓</button>
+            <span class="ed-tc" id="edTc"></span>
+            <span class="ed-spacer"></span>
+            <div class="ed-decide" id="edDecide">
+              <button class="ed-btn big keep" id="edKeep" type="button" aria-pressed="false">✓ Беру <kbd>Y</kbd></button>
+              <button class="ed-btn big drop" id="edDrop" type="button" aria-pressed="false">✕ Не беру <kbd>N</kbd></button>
+              <div class="ed-verdict"><span class="ed-verdict-b"></span><button type="button" class="ed-btn sm ed-change" title="Зняти позначку">Змінити</button></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="ed-panel ed-side" aria-label="Кліп">
+          <div class="ed-tabs" role="tablist" id="edTabs">
+            <button type="button" role="tab" data-tab="text" aria-selected="true" aria-controls="edTabText">Текст</button>
+            <button type="button" role="tab" data-tab="post" aria-selected="false" aria-controls="edTabPost">Допис</button>
+            <button type="button" role="tab" data-tab="dl" aria-selected="false" aria-controls="edTabDl">Скачати</button>
+          </div>
+          <div class="ed-tabbody" id="edTabText" role="tabpanel">
+            <div class="ed-why" id="edWhy"></div>
+            <div class="ed-words" id="edWords"></div>
+            <div class="ed-small">Клік по слову: слухати з цього місця до кінця кліпу. Сірі слова поза кліпом. Щоб їх додати, потягни жовту дужку під відео.</div>
+          </div>
+          <div class="ed-tabbody" id="edTabPost" role="tabpanel" hidden>
+            <div class="ed-field">
+              <label for="edTitle">Заголовок <button type="button" id="edCopyTitle">Копіювати</button></label>
+              <input id="edTitle" type="text" maxlength="200">
+            </div>
+            <div class="ed-field">
+              <label for="edCaption">Опис <button type="button" id="edCopyCaption">Копіювати</button></label>
+              <textarea id="edCaption" rows="4"></textarea>
+            </div>
+            <div class="ed-field">
+              <label for="edTags">Хештеги <button type="button" id="edCopyTags">Копіювати</button></label>
+              <input id="edTags" type="text">
+            </div>
+            <button class="ed-btn" id="edCopyPost" type="button">⧉ Копіювати весь допис</button>
+          </div>
+          <div class="ed-tabbody" id="edTabDl" role="tabpanel" hidden>
+            <div class="ed-dl">
+              <button class="ed-btn" id="edMp4" type="button">🎬 Відео кліпу <span id="edMp4Info">MP4</span></button>
+              <button class="ed-btn" id="edSrt" type="button">💬 Субтитри <span>SRT</span></button>
+              <button class="ed-btn" id="edCopyPost2" type="button">⧉ Текст допису <span>копіювати</span></button>
+              <button class="ed-btn" id="edGoVx" type="button">📱 Вертикальний кліп 9:16 <span>окремий екран</span></button>
+            </div>
+            <div class="ed-small">Відео ріжеться з оригіналу без втрати якості, з тими межами, що зараз. Усі обрані кліпи разом: кнопка «Скачати обрані» внизу. Вертикальні кліпи із субтитрами: режим «📱 Вертикальні кліпи» вгорі.</div>
+          </div>
+        </section>
+        <section class="ed-panel ed-vx" id="edVx" aria-label="Вертикальний кліп" hidden>
+          <div class="ed-stage-head vx-head"><span class="t" id="vxClipNo"></span><span class="m" id="vxClipMeta"></span>
+            <div class="vx-decide" id="vxDecide">
+              <button type="button" class="ed-btn keep" id="vxKeep" aria-pressed="false">✓ Беру <kbd>Y</kbd></button>
+              <button type="button" class="ed-btn drop" id="vxDrop" aria-pressed="false">✕ Не беру <kbd>N</kbd></button>
+              <div class="ed-verdict"><span class="ed-verdict-b"></span><button type="button" class="ed-btn sm ed-change" title="Зняти позначку">Змінити</button></div>
+            </div></div>
+          <div class="vx-body">
+            <div class="vx-wrap">
+              <div class="vx-left">
+                <div class="vx-phone" id="vxPhone" role="button" tabindex="0" aria-label="Попередній вигляд вертикального кліпу. Клік: грати або пауза">
+                  <canvas id="vxCanvas" width="360" height="640"></canvas>
+                  <div class="vx-hook" id="vxHook" hidden></div>
+                  <div class="vx-cap" id="vxCap"></div>
+                  <div class="vx-bigplay" id="vxBigPlay" aria-hidden="true">▶</div>
+                  <div class="vx-busy" id="vxBusy" hidden>Шукаю обличчя…</div>
+                </div>
+                <input type="range" class="vx-scrub" id="vxScrub" min="0" max="1" step="0.05" value="0" aria-label="Прокрутка кліпу">
+                <div class="vx-playrow">
+                  <button type="button" class="ed-btn sm" id="vxPlay">▶ Грати</button>
+                  <span class="vx-tc" id="vxTc"></span>
+                </div>
+                <div class="vx-note" id="vxNote" hidden></div>
+              </div>
+              <div class="vx-right">
+                <section class="vx-card">
+                  <h3 class="vx-card-h"><i>1</i>Кадрування</h3>
+                  <div class="vx-seg" id="vxFrame">
+                    <button type="button" data-v="auto" title="Стежить за обличчям; двоє в одному кадрі: ділить екран; облич немає: весь кадр">Авто (за обличчям)</button>
+                    <button type="button" data-v="blur" title="Весь горизонтальний кадр на розмитому тлі">Весь кадр</button>
+                  </div>
+                </section>
+                <section class="vx-card">
+                  <h3 class="vx-card-h"><i>2</i>Субтитри</h3>
+                  <div class="vx-row">
+                    <div class="vx-lbl">Стиль</div>
+                    <div class="vx-seg" id="vxStyle"></div>
+                  </div>
+                <div class="vx-row vx-grid2">
+                  <div>
+                    <label class="vx-lbl" for="vxSize">Розмір субтитрів <span id="vxSizeV"></span></label>
+                    <div class="vx-range"><span>менше</span><input type="range" id="vxSize" min="60" max="160" step="5"><span>більше</span></div>
+                  </div>
+                  <div>
+                    <label class="vx-lbl" for="vxPos">Висота субтитрів</label>
+                    <div class="vx-range"><span>вище</span><input type="range" id="vxPos" min="30" max="80" step="1"><span>нижче</span></div>
+                  </div>
+                </div>
+                <div class="vx-row vx-grid2">
+                  <div>
+                    <div class="vx-lbl">Колір виділення</div>
+                    <div class="vx-swatches" id="vxColor"></div>
+                  </div>
+                  <div>
+                    <div class="vx-lbl">Колір тексту</div>
+                    <div class="vx-swatches" id="vxText"></div>
+                  </div>
+                </div>
+                <div class="vx-row">
+                  <div class="vx-grid2">
+                    <div>
+                      <div class="vx-lbl">Кути плашки</div>
+                      <div class="vx-seg" id="vxRound">
+                        <button type="button" data-v="0">▭ Прямі</button>
+                        <button type="button" data-v="1">▢ Закруглені</button>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="vx-lbl">Обведення субтитрів</div>
+                      <div class="vx-seg" id="vxStroke">
+                        <button type="button" data-v="">Як у стилі</button>
+                        <button type="button" data-v="000000"><i class="vx-dot" style="background:#000"></i>Чорне</button>
+                        <button type="button" data-v="FFFFFF"><i class="vx-dot" style="background:#fff"></i>Біле</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                </section>
+                <section class="vx-card vx-hookbox">
+                  <h3 class="vx-card-h"><i>3</i>Заголовок<label class="vx-check vx-card-sw"><input type="checkbox" id="vxHookOn"> показувати</label></h3>
+                  <div class="vx-hookset" id="vxHookSet">
+                    <input type="text" id="vxHookText" maxlength="120" aria-label="Текст заголовка" placeholder="Текст заголовка">
+                    <div class="vx-seg" id="vxHookStyle">
+                      <button type="button" data-v="white">Біла плашка</button>
+                      <button type="button" data-v="black">Чорна плашка</button>
+                      <button type="button" data-v="accent">Кольорова плашка</button>
+                      <button type="button" data-v="outline">Без плашки</button>
+                    </div>
+                    <div class="vx-grid2">
+                      <div>
+                        <div class="vx-lbl">Кути плашки</div>
+                        <div class="vx-seg" id="vxHookRound">
+                          <button type="button" data-v="0">▭ Прямі</button>
+                          <button type="button" data-v="1">▢ Закруглені</button>
+                        </div>
+                      </div>
+                      <div>
+                        <div class="vx-lbl">Обведення заголовка</div>
+                        <div class="vx-seg" id="vxHookStroke">
+                          <button type="button" data-v="">Як у стилі</button>
+                          <button type="button" data-v="000000"><i class="vx-dot" style="background:#000"></i>Чорне</button>
+                          <button type="button" data-v="FFFFFF"><i class="vx-dot" style="background:#fff"></i>Біле</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="vx-grid2">
+                      <div>
+                        <label class="vx-lbl" for="vxHookSize">Розмір заголовка</label>
+                        <div class="vx-range"><span>менше</span><input type="range" id="vxHookSize" min="60" max="180" step="5"><span>більше</span></div>
+                      </div>
+                      <div>
+                        <label class="vx-lbl" for="vxHookPos">Висота заголовка</label>
+                        <div class="vx-range"><span>вище</span><input type="range" id="vxHookPos" min="3" max="80" step="1"><span>нижче</span></div>
+                      </div>
+                    </div>
+                    <div>
+                      <div>
+                        <div class="vx-lbl">Показувати</div>
+                        <div class="vx-seg" id="vxHookDur">
+                          <button type="button" data-v="3">Перші 3 с</button>
+                          <button type="button" data-v="all">Увесь кліп</button>
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+                </section>
+                <section class="vx-card">
+                  <h3 class="vx-card-h"><i>4</i>Текст субтитрів<span class="vx-card-sub">натисни слово, щоб виправити</span></h3>
+                  <div class="vx-words" id="vxWords"></div>
+                  <div class="vx-wedit" id="vxWedit" hidden>
+                    <input type="text" id="vxWinput" maxlength="60" aria-label="Слово">
+                    <label class="vx-check"><input type="checkbox" id="vxWkey"> Виділити кольором</label>
+                    <button type="button" class="ed-btn sm primary" id="vxWsave">Зберегти</button>
+                    <button type="button" class="ed-btn sm" id="vxWdel">Прибрати слово</button>
+                    <button type="button" class="ed-btn sm ghost" id="vxWreset">Як було</button>
+                  </div>
+                  <div class="ed-small">Кольорове: ключове слово, підсвічується іншим кольором. Закреслене: прибране зі субтитрів.</div>
+                </section>
+                <section class="vx-card">
+                  <h3 class="vx-card-h"><i>5</i>Скачати цей кліп</h3>
+                  <div class="vx-lbl">Відео</div>
+                  <div class="vx-dl">
+                    <button class="vx-dlbtn main" id="vxDlSubs" type="button"><b>Вертикальний із субтитрами</b><small>MP4 1080×1920</small></button>
+                    <button class="vx-dlbtn" id="vxDlClean" type="button"><b>Вертикальний без субтитрів</b><small>MP4 1080×1920, свої титри в CapCut</small></button>
+                    <button class="vx-dlbtn" id="vxMp4" type="button"><b>Чистий кліп 16:9</b><small>як і раніше, для монтажу</small></button>
+                  </div>
+                  <div class="vx-lbl vx-gap">Субтитри й допис</div>
+                  <div class="vx-dl two">
+                    <button class="vx-dlbtn" id="vxSrt" type="button"><b>Субтитри .srt</b><small>для CapCut чи Premiere</small></button>
+                    <button class="vx-dlbtn" id="vxCopyPost" type="button"><b>Текст допису</b><small>копіювати заголовок, опис, хештеги</small></button>
+                  </div>
+                </section>
+                <section class="vx-card">
+                  <h3 class="vx-card-h"><i>6</i>Усі обрані кліпи</h3>
+                  <div class="vx-dl two">
+                    <button class="vx-dlbtn" id="vxZipClean" type="button"><b>ZIP чистих кліпів</b><small>як і раніше</small></button>
+                    <button class="vx-dlbtn" id="vxZip" type="button"><b>ZIP вертикальних</b><small id="vxZipInfo">із субтитрами, видно прогрес</small></button>
+                  </div>
+                  <div class="vx-prog" id="vxProg" hidden><i id="vxProgBar"></i></div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <footer class="ed-bar">
+      <div class="sum" id="edSum"></div>
+      <div class="keys"><kbd>Пробіл</kbd> грати · <kbd>↑</kbd><kbd>↓</kbd> кліпи · <kbd>←</kbd><kbd>→</kbd> ±2 с · <kbd>Y</kbd> беру · <kbd>N</kbd> не беру</div>
+      <button class="ed-btn primary" id="edZip" type="button" disabled>↓ Скачати обрані (ZIP)</button>
+    </footer>
+    <div class="ed-toast" id="edToast" role="status" aria-live="polite"></div>
+  </section>
+
+  <script src="/js/app.js"></script>
+  <script src="/js/vertical.js"></script>
+  <script src="/js/editor.js"></script>
+  <script src="/js/queue.js"></script>
+  <script src="/js/settings.js"></script>
+  <script src="/js/welcome.js"></script>
+</body>
+</html>

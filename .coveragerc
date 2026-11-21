@@ -1,0 +1,6 @@
+[run]
+omit =
+    review_agent.py
+    check_models.py
+    .venv/*
+    tests/*

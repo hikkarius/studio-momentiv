@@ -1,0 +1,3 @@
+# Only for running tests (not needed to use the studio)
+pytest
+playwright

@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# config.yaml — Налаштування AI Video Moments Analyzer Studio
+# Редагуй цей файл, щоб змінити поведінку без правки коду.
+# ─────────────────────────────────────────────────────────────────────────────
+
+whisper:
+  model: large-v3-turbo # tiny | base | small | medium | large-v3 | large-v3-turbo (найкраща для української, ~2.3 ГБ відеопам'яті)
+  language: uk          # uk (українська) | auto (автовизначення) | en
+  device: auto          # auto (вибере GPU якщо є) | cpu | cuda
+  compute_type: int8    # int8 (cpu) | float16 (cuda) | float32
+  cpu_threads: 8        # потоки CPU (ігнорується якщо device=cuda)
+  faster_whisper: true  # швидка CTranslate2 транскрипція з прозорим fallback
+  beam_size: 5          # розмір променя пошуку для точності розпізнавання
+
+clips:
+  interval_sec: 28      # 1 кліп на кожні N секунд (авто-розрахунок)
+  default_min_len: 15   # мін. тривалість кліпу (сек)
+  default_max_len: 60   # макс. тривалість кліпу (сек)
+  max_count: 100        # верхня межа кількості кліпів
+  max_overlap_sec: 2    # скільки секунд можуть мати спільного два кліпи (0 = зовсім без перетинів)
+
+gemini:
+  candidate_models:
+    # Оптимальні, перевірені та блискавичні моделі згідно актуального API Google
+    # Розташовані від найшвидшої та найстабільнішої до запасних
+    - gemini-3.1-flash-lite   # Ультрашвидка (0.7-1.2с, максимальна стабільність) — головний вибір
+    - gemini-3.5-flash-lite   # Дуже швидка (~0.8-1.5с, висока точність та інтелект)
+    - gemini-flash-lite-latest # Актуальний офіційний реліз Flash Lite
+    - gemini-3.5-flash        # Потужна модель для глибинного аналізу (~4.4с)
+  rerank: true               # другий прохід: Gemini порівнює всі кліпи між собою і уточнює оцінки
+
+
+cache:
+  enabled: true
+  dir: .transcript_cache    # директорія для кешу транскрипцій
+
+logging:
+  level: INFO              # DEBUG | INFO | WARNING | ERROR | CRITICAL
+  format: text             # text (читабельний для розробки) | json (структурований для prod)
+  file: shorts_automator.log
+

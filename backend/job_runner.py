@@ -1,0 +1,272 @@
+"""
+backend/job_runner.py — Background task executor for AI Video Moments Studio.
+Handles audio transcription and Gemini virality analysis in background threads.
+Provides SSE subscriber queues so frontend receives real-time progress without polling.
+"""
+from __future__ import annotations
+
+import asyncio
+import datetime
+import json
+import logging
+import math
+import os
+import re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable, Dict, List, Optional, Set
+
+from backend import db
+from constants import FILTER_INSTRUCTIONS, resolve_filter_mode
+from core import (
+    analyze_and_find_clips,
+    app_config,
+    transcribe_video,
+    validate_clips,
+)
+from ai_selector import rerank_clips
+from clip_refiner import refine_clips
+
+log = logging.getLogger("shorts_core")
+
+UPLOADS_DIR = "web_uploads"
+OUTPUT_DIR = "web_output"
+
+_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="MomentsWorker")
+_subscribers_lock = threading.Lock()
+_subscribers: Dict[str, Set[asyncio.Queue]] = {}
+_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def set_event_loop(loop: asyncio.AbstractEventLoop):
+    global _loop
+    _loop = loop
+
+
+def register_subscriber(job_id: str) -> asyncio.Queue:
+    """Registers an SSE client queue for real-time updates of job_id in a thread-safe manner."""
+    q: asyncio.Queue = asyncio.Queue()
+    with _subscribers_lock:
+        if job_id not in _subscribers:
+            _subscribers[job_id] = set()
+        _subscribers[job_id].add(q)
+    return q
+
+
+def unregister_subscriber(job_id: str, q: asyncio.Queue):
+    """Unregisters an SSE client queue in a thread-safe manner."""
+    with _subscribers_lock:
+        if job_id in _subscribers and q in _subscribers[job_id]:
+            _subscribers[job_id].remove(q)
+            if not _subscribers[job_id]:
+                del _subscribers[job_id]
+
+
+def broadcast_update(job_id: str, data: Dict[str, Any]):
+    """Broadcasts update to SSE queues and updates database thread-safely."""
+    db.update_job(
+        job_id,
+        status=data.get("status"),
+        progress=data.get("progress"),
+        message=data.get("message"),
+        error=data.get("error"),
+    )
+
+    with _subscribers_lock:
+        queues = list(_subscribers.get(job_id, []))
+
+    if queues and _loop is not None:
+        for q in queues:
+            _loop.call_soon_threadsafe(q.put_nowait, data)
+
+
+# ─── Worker Task ──────────────────────────────────────────────────────────────
+
+# One analysis at a time: Whisper on the GPU and the Gemini quota do not like parallel videos.
+_analyze_lock = threading.Lock()
+
+
+def auto_clips_count(duration: float) -> int:
+    """How many clips to ask for when the user leaves the count on «Авто»: ~1 per 25 s, 5..100."""
+    return max(5, min(100, round((duration or 0) / 25)))
+
+
+def _run_analyze_worker(
+    job_id: str,
+    project_id: str,
+    clips_count: int,
+    filter_mode: str,
+    engine: str = "whisper_local",
+):
+    if not _analyze_lock.acquire(blocking=False):
+        broadcast_update(job_id, {"status": "queued", "progress": 0.0, "message": "Чекає, поки закінчиться обробка іншого відео..."})
+        _analyze_lock.acquire()
+    try:
+        _run_analyze_worker_locked(job_id, project_id, clips_count, filter_mode, engine)
+    finally:
+        _analyze_lock.release()
+
+
+def run_analyze_now(project_id: str, clips_count: int = 0, filter_mode: str = "Viral Hooks") -> str:
+    """Runs the analysis in the calling thread (used by the processing queue). Returns the job ID."""
+    proj = db.get_project(project_id)
+    if clips_count <= 0:
+        clips_count = auto_clips_count(proj["duration"] if proj else 0)
+    job_id = _new_job_id(project_id)
+    db.create_job(job_id, project_id, "analyze")
+    _run_analyze_worker(job_id, project_id, clips_count, filter_mode)
+    return job_id
+
+
+def _new_job_id(project_id: str) -> str:
+    clean_suffix = project_id[-8:] if len(project_id) >= 8 else project_id
+    return f"job_analyze_{clean_suffix}_{int(time.time() * 1000) % 100000}"
+
+
+def _run_analyze_worker_locked(
+    job_id: str,
+    project_id: str,
+    clips_count: int,
+    filter_mode: str,
+    engine: str = "whisper_local",
+):
+    try:
+        broadcast_update(job_id, {"status": "running", "progress": 0.05, "message": "Ініціалізація аналізу відео..."})
+        proj = db.get_project(project_id)
+        if not proj:
+            raise ValueError(f"Проєкт {project_id} не знайдено.")
+
+        video_path = proj["source_path"]
+        db.update_project_status(project_id, "analyzing")
+
+        canonical_filter = resolve_filter_mode(filter_mode)
+
+        # Local Faster-Whisper GPU/CPU Transcription
+        def whisper_cb(*args):
+            if len(args) >= 2 and isinstance(args[0], (int, float)):
+                pct = max(0.0, min(1.0, float(args[0])))
+                mapped_progress = round(0.15 + 0.40 * pct, 2)
+                msg = str(args[1])
+            else:
+                mapped_progress = 0.25
+                msg = str(args[0]) if args else "Транскрипція..."
+            broadcast_update(job_id, {"status": "running", "progress": mapped_progress, "message": msg})
+
+        broadcast_update(job_id, {"status": "running", "progress": 0.10, "message": f"Розпізнавання мови (Whisper {app_config.whisper.model})..."})
+        segments, words, detected_lang, from_cache = transcribe_video(video_path, status_cb=whisper_cb)
+        if not segments:
+            raise RuntimeError("У відео не виявлено мовлення або транскрипція порожня.")
+
+        broadcast_update(job_id, {"status": "running", "progress": 0.60, "message": "ШІ-пошук вірусних моментів (Google Gemini)..."})
+
+        # Gemini Virality Selection (raises GeminiUnavailableError with a user-facing message)
+        min_len = app_config.clips.default_min_len
+        max_len = app_config.clips.default_max_len
+        # Ask for ~50% more candidates than needed: some get dropped as intros/ads, overlaps or too short
+        request_count = min(app_config.clips.max_count, math.ceil(clips_count * 1.5))
+        # Clips must not overlap, so the requested count limits their length: aim for ~80% coverage
+        target_len = max(min_len + 3, min(45.0, proj["duration"] * 0.8 / max(1, clips_count)))
+        raw_candidates = analyze_and_find_clips(
+            client=None,
+            segments=segments,
+            count=request_count,
+            min_len=min_len,
+            max_len=max_len,
+            filter_mode=canonical_filter,
+            detected_lang=detected_lang,
+            target_len=target_len,
+        )
+
+        broadcast_update(job_id, {"status": "running", "progress": 0.85, "message": "Підганяємо межі кліпів під речення..."})
+        # Loose sanity check only: the refiner below snaps short clips out to full sentences
+        rough = validate_clips(raw_candidates, proj["duration"], min_len=8, max_len=max_len + 30, tolerance=0)
+        valid_clips = refine_clips(
+            rough,
+            words,
+            video_duration=proj["duration"],
+            count=clips_count,
+            min_len=min_len,
+            max_len=max_len,
+            max_overlap=app_config.clips.max_overlap_sec,
+            segments=segments,
+        )
+        if not valid_clips:
+            raise RuntimeError(
+                f"ШІ не повернув жодного коректного кліпу тривалістю {min_len}–{max_len} с. "
+                "Транскрипцію збережено, спробуйте ще раз або змініть фільтр."
+            )
+
+        if app_config.gemini.rerank and len(valid_clips) > 1:
+            broadcast_update(job_id, {"status": "running", "progress": 0.92, "message": "Другий прохід: порівнюємо кліпи між собою..."})
+            valid_clips = rerank_clips(valid_clips, filter_mode=canonical_filter, detected_lang=detected_lang)
+
+        # 3. Generate structured metadata files in OUTPUT_DIR/{project_id}
+        out_dir = os.path.join(OUTPUT_DIR, project_id)
+        os.makedirs(out_dir, exist_ok=True)
+        txt_path = os.path.join(out_dir, "metadata.txt")
+        json_path = os.path.join(out_dir, "metadata.json")
+
+        with open(json_path, "w", encoding="utf-8") as jf:
+            json.dump(valid_clips, jf, ensure_ascii=False, indent=2)
+
+        with open(txt_path, "w", encoding="utf-8") as tf:
+            tf.write("====================================================================\n")
+            tf.write(f"  ВІРУСНІ МОМЕНТИ: {proj.get('title', 'Відео')}                     \n")
+            tf.write(f"  Дата: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}      \n")
+            tf.write(f"  Всього знайдено моментів: {len(valid_clips)}                     \n")
+            tf.write("====================================================================\n\n")
+
+            for i, c in enumerate(valid_clips, 1):
+                s_m, s_s = divmod(int(c.get("start", 0)), 60)
+                e_m, e_s = divmod(int(c.get("end", 0)), 60)
+                dur = int(c.get("end", 0) - c.get("start", 0))
+                title = c.get("title", f"Кліп #{i}")
+                score = c.get("score", 85)
+                hook = c.get("hook_text") or (c.get("hook") if isinstance(c.get("hook"), str) else "")
+                reason = c.get("reason", "")
+                caption = c.get("caption", "")
+                tags = " ".join(c.get("hashtags", []))
+
+                tf.write(f"═══════════════════════════════════════════════════════════════════\n")
+                tf.write(f"🎬 КЛІП #{i}: {title}\n")
+                tf.write(f"═══════════════════════════════════════════════════════════════════\n")
+                tf.write(f"⏱️ Таймкод:     {s_m:02d}:{s_s:02d} — {e_m:02d}:{e_s:02d}  ({dur} сек)\n")
+                tf.write(f"🔥 Вірусний бал: {score}/100\n")
+                if hook:
+                    tf.write(f"🎯 Початковий хук: «{hook}»\n")
+                if reason:
+                    tf.write(f"💡 Чому це вірусно: {reason}\n")
+                if caption:
+                    tf.write(f"📝 Опис для посту: {caption}\n")
+                if tags:
+                    tf.write(f"🏷️ Хештеги:       {tags}\n")
+                tf.write("\n")
+
+        # 4. Save to DB
+        db.save_candidate_clips(project_id, valid_clips)
+        db.update_project_status(project_id, "ready")
+
+        broadcast_update(job_id, {
+            "status": "completed",
+            "progress": 1.0,
+            "message": f"Готово! Знайдено {len(valid_clips)} вірусних моментів.",
+        })
+
+    except Exception as e:
+        log.exception(f"Analyze job {job_id} failed: {e}")
+        db.update_project_status(project_id, "failed")
+        broadcast_update(job_id, {"status": "failed", "progress": 1.0, "error": str(e), "message": f"Помилка: {e}"})
+
+
+def enqueue_analyze_job(
+    project_id: str,
+    clips_count: int = 5,
+    filter_mode: str = "Viral Hooks",
+    engine: str = "whisper_local",
+) -> str:
+    """Enqueues an analyze job for a project and returns the job ID."""
+    job_id = _new_job_id(project_id)
+    db.create_job(job_id, project_id, "analyze")
+    _executor.submit(_run_analyze_worker, job_id, project_id, clips_count, filter_mode, engine)
+    return job_id

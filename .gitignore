@@ -1,0 +1,46 @@
+# Секрети та персональні дані (КАТЕГОРИЧНО НЕ КОМІТИТИ)
+.env
+run_studio.bat
+*.bat
+!run_studio.example.bat
+
+# Відео та тимчасові результати роботи
+web_output/
+web_uploads/
+e2e_test_output/
+.transcript_cache/
+*.log
+*.db
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.ass
+temp_*
+current_source.*
+
+# Кеш Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Віртуальне оточення
+.venv/
+venv/
+ENV/
+# Тимчасові файли рендеру вертикальних кліпів
+.render_tmp/
+
+# Налаштування, змінені в студії (екран «Налаштування»)
+user_settings.json
+
+# Файли для друзів (інсталятор): ці .bat треба комітити
+!Встановити.bat
+!Запустити.bat
+!Оновити.bat
+# Що ставить інсталятор
+tools/
+install.log
+update.log
