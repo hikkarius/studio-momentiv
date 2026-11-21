@@ -461,7 +461,11 @@ const Vertical = (() => {
     $("vxDlSubs").addEventListener("click", (e) => renderAndDownload(e.currentTarget, true));
     $("vxDlClean").addEventListener("click", (e) => renderAndDownload(e.currentTarget, false));
     $("vxZip").addEventListener("click", startZip);
-    $("vxZipClean").addEventListener("click", () => $("edZip").click());
+    $("vxZipClean").addEventListener("click", () => {
+      if (!ctx.keptCount()) { ctx.toast("Спершу познач кліпи «Беру».", true); return; }
+      ctx.toast("Готуємо архів… Великі архіви можуть зайняти хвилину.");
+      ctx.download(`/api/projects/${ctx.pid()}/export-zip`);
+    });
     const toggle = () => ctx.togglePlay();
     $("vxPhone").addEventListener("click", toggle);
     $("vxPhone").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); toggle(); } });

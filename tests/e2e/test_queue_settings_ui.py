@@ -33,7 +33,9 @@ def _fake_analyze(job_id, project_id, clips_count, filter_mode, engine="whisper_
 def test_paste_several_links_and_manage_queue(page, studio, project):
     page.goto(studio["url"] + "/")
     page.fill("#urlInput", "https://youtu.be/one\nhttps://youtu.be/twohttps://youtu.be/three")
+    page.click("#homeOptsEdit")  # the search options open under «Шукаю: … Змінити»
     page.select_option("#heroClips", "20")
+    assert "кліпів: 20" in page.locator("#heroHint").inner_text()
     page.click("#urlDownloadBtn")
     rows = page.locator("#queueList .q-item")
     rows.nth(2).wait_for()
@@ -41,8 +43,14 @@ def test_paste_several_links_and_manage_queue(page, studio, project):
     assert [i["clips_count"] for i in db.list_queue_items()] == [20, 20, 20]
     assert "youtu.be/one" in rows.nth(0).inner_text()
 
+    # queue order lives in the card's «⋯» menu
+    assert rows.nth(2).locator(".vc-menu").is_hidden()
+    rows.nth(2).hover()
+    rows.nth(2).locator(".vc-dots").click()
     rows.nth(2).locator("[data-move$=':-1']").click()
     page.wait_for_function("document.querySelectorAll('#queueList .q-item')[1].innerText.includes('three')")
+    rows.nth(0).hover()
+    rows.nth(0).locator(".vc-dots").click()
     rows.nth(0).locator("[data-remove]").click()
     page.wait_for_function("document.querySelectorAll('#queueList .q-item').length === 2")
     assert not page.errors

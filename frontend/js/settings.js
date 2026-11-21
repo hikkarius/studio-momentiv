@@ -89,9 +89,7 @@ const Settings = (() => {
     }
     if (hf && !hf.dataset.touched) hf.value = v.studio.default_filter;
     const lang = (view.choices.language.find((l) => l.value === v.whisper.language) || {}).label || v.whisper.language;
-    const overlap = Number(v.clips.max_overlap_sec) > 0 ? `перекриття до ${v.clips.max_overlap_sec} с` : "без перекриттів";
-    const hint = $("heroHint");
-    if (hint) hint.textContent = `Мова: ${lang.toLowerCase()} · кліпи ${v.clips.default_min_len}–${v.clips.default_max_len} с · ${overlap}`;
+    if (typeof Home !== "undefined") Home.setDefaults({ lang: lang.toLowerCase(), min: v.clips.default_min_len, max: v.clips.default_max_len });
   }
 
   async function save(patch, okText = "Збережено ✓") {

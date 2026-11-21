@@ -35,13 +35,22 @@ def open_editor(page, studio):
 
 # ─── Home page ───────────────────────────────────────────────────────────────
 
+def pick_theme(page, scope, mode):
+    """Themes live in a drop-down: open it, pick one, it closes again."""
+    page.click(f"{scope} .theme-menu-btn")
+    page.click(f"{scope} .theme-switch button[data-theme='{mode}']")
+    assert page.locator(f"{scope} .theme-menu-pop").is_hidden()
+
+
 def test_home_theme_switch_persists(page, studio, project):
     page.goto(studio["url"] + "/")
-    page.click(".app-header .theme-switch button[data-theme='light']")
+    assert page.locator(".app-header .theme-menu-pop").is_hidden()
+    pick_theme(page, ".app-header", "light")
     assert page.evaluate("document.documentElement.dataset.theme") == "light"
     light_bg = page.evaluate("getComputedStyle(document.body).backgroundColor")
 
-    page.click(".app-header .theme-switch button[data-theme='dark']")
+    assert "Світла" in page.locator(".app-header .theme-menu-btn").inner_text()
+    pick_theme(page, ".app-header", "dark")
     dark_bg = page.evaluate("getComputedStyle(document.body).backgroundColor")
     assert light_bg != dark_bg
 
@@ -49,7 +58,10 @@ def test_home_theme_switch_persists(page, studio, project):
     assert page.evaluate("document.documentElement.dataset.theme") == "dark"
     assert page.locator(".app-header .theme-switch button[data-theme='dark']").get_attribute("aria-pressed") == "true"
 
-    page.click(".app-header .theme-switch button[data-theme='system']")
+    page.click(".app-header .theme-menu-btn")
+    page.keyboard.press("Escape")  # Escape closes the menu without a change
+    assert page.locator(".app-header .theme-menu-pop").is_hidden()
+    pick_theme(page, ".app-header", "system")
     assert page.evaluate("document.documentElement.hasAttribute('data-theme')") is False
     assert not page.errors
 
@@ -68,7 +80,18 @@ def test_open_project_shows_editor_sorted_by_score(page, studio, project):
     screen = page.locator("#edScreen").bounding_box()
     track = page.locator("#edTrack").bounding_box()
     assert 0 <= track["y"] - (screen["y"] + screen["height"]) < 30
-    assert page.locator("#edZip").is_disabled()
+    # trimmed screen: no score line next to the title, no ±0,5 / ↑↓ buttons, no bottom bar with the ZIP
+    assert page.locator("#edClipMeta, [data-nudge], #edPrev, #edNext, .ed-bar, #edZip, #hwBadge").count() == 0
+    assert not page.errors
+
+
+def test_editor_theme_menu(page, studio, project):
+    open_editor(page, studio)
+    pick_theme(page, "#editor", "dark")
+    assert page.evaluate("document.documentElement.dataset.theme") == "dark"
+    page.click("#editor .theme-menu-btn")
+    page.mouse.click(5, 300)  # a click elsewhere closes it
+    assert page.locator("#editor .theme-menu-pop").is_hidden()
     assert not page.errors
 
 
@@ -90,8 +113,6 @@ def test_keep_and_drop_with_buttons_and_keys(page, studio, project):
     page.click("#edFilters button[data-f='keep']")
     assert page.locator("#edList .ed-row").count() == 1
     assert "1" in page.locator("#edCnt_keep").inner_text()
-    assert page.locator("#edZip").is_enabled()
-    assert "Обрано 1" in page.locator("#edSum").inner_text()
     assert page.locator("#edOv .c.keep").count() == 1
     assert page.locator("#edOv .c.drop").count() == 1
 
@@ -124,7 +145,7 @@ def test_timeline_and_arrows_navigate(page, studio, project):
     page.wait_for_function("Editor.state().clipIndex === 1")
     page.keyboard.press("ArrowDown")
     page.wait_for_function("Editor.state().clipIndex !== 1")
-    page.click("#edPrev")
+    page.keyboard.press("ArrowUp")
     page.wait_for_function("Editor.state().clipIndex === 1")
 
 
@@ -208,20 +229,23 @@ def test_playhead_stays_inside_the_clip(page, studio, project):
     page.wait_for_function("Math.abs(Editor.state().time - 30) < 0.3")  # and at the start (30 s)
 
     # moving the end bracket later lets the playhead reach further
-    page.click("[data-nudge='end:0.5']")
-    page.click("[data-nudge='end:0.5']")
-    assert wait_for(page, lambda: abs(clip(2)["end_sec"] - 51.0) < 0.05)
+    page.evaluate("document.getElementById('edVideo').currentTime = 51.0")
+    page.wait_for_function("Math.abs(Editor.state().time - 51) < 0.2")
+    page.keyboard.press("]")
+    assert wait_for(page, lambda: clip(2)["end_sec"] > 50.7)
+    new_end = clip(2)["end_sec"]
+    page.evaluate("document.getElementById('edVideo').currentTime = 40.0")
+    page.wait_for_function("Math.abs(Editor.state().time - 40) < 0.2")
+    track = page.locator("#edTrack").bounding_box()  # the zoom follows the new bounds
     page.mouse.move(track["x"] + track["width"] * 0.5, y)
     page.mouse.down()
     page.mouse.move(track["x"] + track["width"] - 2, y, steps=6)
     page.mouse.up()
-    page.wait_for_function("Math.abs(Editor.state().time - 51) < 0.3")
+    page.wait_for_function(f"Math.abs(Editor.state().time - {new_end}) < 0.3")
 
 
-def test_nudge_and_drag_handle(page, studio, project):
+def test_drag_handle(page, studio, project):
     open_editor(page, studio)
-    page.click("[data-nudge='end:0.5']")
-    assert wait_for(page, lambda: abs(clip(2)["end_sec"] - 50.5) < 0.05)
 
     handle = page.locator("#edTrack .hd[data-h='start']")
     box = handle.bounding_box()
@@ -283,8 +307,9 @@ def test_download_single_clip_and_zip(page, studio, project):
     page.keyboard.press("ArrowDown")
     page.keyboard.press("y")
     assert wait_for(page, lambda: sum(c["review_status"] == "keep" for c in db.get_candidate_clips(PROJECT_ID)) == 2)
+    page.click("#edMode button[data-m='vx']")  # the ZIP of kept clean clips lives on «Вертикальні кліпи»
     with page.expect_download(timeout=30000) as dl:
-        page.click("#edZip")
+        page.click("#vxZipClean")
     path = dl.value.path()
     names = zipfile.ZipFile(io.BytesIO(open(path, "rb").read())).namelist()
     assert sum(n.endswith(".mp4") for n in names) == 2

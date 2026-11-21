@@ -80,11 +80,6 @@ const Editor = (() => {
 
     const count = (f) => st.clips.filter((c) => (f === "all" ? true : f === "new" ? !c.review_status : c.review_status === f)).length;
     ["all", "new", "keep", "drop"].forEach((f) => { $(`edCnt_${f}`).textContent = count(f); });
-    const kept = st.clips.filter((c) => c.review_status === "keep");
-    const secs = Math.round(kept.reduce((a, c) => a + len(c), 0));
-    $("edSum").innerHTML = `Обрано ${kept.length} <span>з ${st.clips.length} · ${secs} с відео</span>`;
-    $("edZip").disabled = kept.length === 0;
-    $("edZip").textContent = kept.length ? `↓ Скачати обрані (${kept.length}) · ZIP` : "↓ Скачати обрані (ZIP)";
   }
 
   /** Whole-video strip. Numbers sit on two rows so neighbouring clips never hide each other's number. */
@@ -119,7 +114,6 @@ const Editor = (() => {
     if (!c) return;
     $("edClipNo").textContent = `№${c.num} · ${c.title || ""}`;
     $("vxClipNo").textContent = $("edClipNo").textContent;
-    $("vxClipMeta").textContent = $("edClipMeta").textContent = `оцінка ${c.virality_score} · ${Math.round(len(c))} с · ${fmtS(c.start_sec)}–${fmtS(c.end_sec)}`;
     $("edKeep").setAttribute("aria-pressed", String(c.review_status === "keep"));
     $("edDrop").setAttribute("aria-pressed", String(c.review_status === "drop"));
     $("vxKeep").setAttribute("aria-pressed", String(c.review_status === "keep"));
@@ -135,9 +129,6 @@ const Editor = (() => {
     if (document.activeElement !== $("edCaption")) $("edCaption").value = c.caption || "";
     if (document.activeElement !== $("edTags")) $("edTags").value = (c.hashtags || []).join(" ");
     $("edMp4Info").textContent = `MP4 · ${Math.round(len(c))} с`;
-    $("edStartTc").textContent = fmt(c.start_sec);
-    $("edEndTc").textContent = fmt(c.end_sec);
-    $("edLen").textContent = `${(Math.round(len(c) * 10) / 10).toString().replace(".", ",")} с`;
     renderTc();
   }
 
@@ -425,11 +416,6 @@ const Editor = (() => {
     }
   }
 
-  function nudge(which, delta) {
-    const c = clip();
-    if (which === "start") setBounds(c.start_sec + delta, c.end_sec); else setBounds(c.start_sec, c.end_sec + delta);
-  }
-
   function trackTime(e) {
     const r = $("edTrack").getBoundingClientRect();
     const f = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
@@ -579,6 +565,7 @@ const Editor = (() => {
     if ($("editor").hidden) return;
     if (e.key === "Escape") { closePop(); return; }
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target.closest && e.target.closest(".theme-menu")) return; // the theme drop-down handles its own keys
     const k = e.key;
     if (k === " ") { e.preventDefault(); togglePlay(); }
     else if (k === "ArrowDown" || k === "j" || k === "о") { e.preventDefault(); step(1); }
@@ -628,7 +615,8 @@ const Editor = (() => {
 
   function init() {
     if (typeof Vertical !== "undefined") {
-      Vertical.attach({ clip, pid, api, patch, toast, download, video, seek, togglePlay, postText, copy });
+      const keptCount = () => st.clips.filter((c) => c.review_status === "keep").length;
+      Vertical.attach({ clip, pid, api, patch, toast, download, video, seek, togglePlay, postText, copy, keptCount });
     }
     document.addEventListener("keydown", onKey);
     document.addEventListener("pointerdown", (e) => { if (st.pop && !e.target.closest(".ed-pop")) closePop(); });
@@ -641,12 +629,6 @@ const Editor = (() => {
     $("edPlay").addEventListener("click", togglePlay);
     $("edKeep").addEventListener("click", () => mark("keep"));
     $("edDrop").addEventListener("click", () => mark("drop"));
-    $("edPrev").addEventListener("click", () => step(-1));
-    $("edNext").addEventListener("click", () => step(1));
-    document.querySelectorAll("[data-nudge]").forEach((b) => b.addEventListener("click", () => {
-      const [which, d] = b.dataset.nudge.split(":");
-      nudge(which, parseFloat(d));
-    }));
     const T = $("edTrack");
     T.addEventListener("pointerdown", onTrackDown);
     T.addEventListener("pointermove", onTrackMove);
@@ -689,10 +671,6 @@ const Editor = (() => {
     $("edCopyPost2").addEventListener("click", () => copy(postText()));
     $("edMp4").addEventListener("click", () => { toast("Готуємо відео…"); download(`/api/projects/${pid()}/clips/${clip().clip_index}/download`); });
     $("edSrt").addEventListener("click", () => download(`/api/projects/${pid()}/clips/${clip().clip_index}/export-srt`));
-    $("edZip").addEventListener("click", () => {
-      toast("Готуємо архів… Великі архіви можуть зайняти хвилину.");
-      download(`/api/projects/${pid()}/export-zip`);
-    });
     document.querySelectorAll("#edMode button").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.m)));
     $("vxKeep").addEventListener("click", () => mark("keep"));
     $("vxDrop").addEventListener("click", () => mark("drop"));

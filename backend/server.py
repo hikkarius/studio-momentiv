@@ -468,7 +468,7 @@ async def stream_job_progress(job_id: str):
 @app.get("/api/projects")
 def list_projects():
     """Lists recent projects."""
-    projects = db.list_recent_projects(limit=20)
+    projects = db.list_recent_projects(limit=500)  # the home page searches and sorts them itself
     return {"projects": projects}
 
 
