@@ -21,6 +21,8 @@ const Vertical = (() => {
   let ctx = null;
   const st = { opts: null, plan: null, planKey: "", words: [], loading: false, raf: 0, saveTimer: null, pending: null, selWord: null, zipJob: null, capKey: "" };
 
+  // What each style tile shows: one short phrase drawn in that style
+  const TILE = { none: "<i>без тексту</i>", hl: "ЦЕ <i>ВОНО</i>", kar: "<i>ЦЕ</i> ВОНО", one: "ВОНО", box: "<i>Це воно</i>", gold: "ЦЕ <i>ВОНО</i>", min: "це воно" };
   const styleOf = (id) => STYLES.find((s) => s.id === id) || STYLES[1];
   const ACCENTS = ["FFE14D", "7CFF4F", "FF4D4D", "4DC3FF", "FF5EC4", "E6C068", "FF9F1C"];
   const TEXTS = [["FFFFFF", "Біле"], ["FFE14D", "Жовте"], ["FFF8EC", "Кремове"]];
@@ -53,7 +55,8 @@ const Vertical = (() => {
   // ─── Controls ──────────────────────────────────────────────────────────────
   function renderControls() {
     const o = st.opts;
-    $("vxStyle").innerHTML = STYLES.map((s) => `<button type="button" data-v="${s.id}" aria-pressed="${s.id === o.style}">${s.name}</button>`).join("");
+    $("vxStyle").innerHTML = STYLES.map((s) => `<button type="button" data-v="${s.id}" aria-pressed="${s.id === o.style}">` +
+      `<span class="vx-tile vx-t-${s.id}" aria-hidden="true">${TILE[s.id]}</span><b>${s.name}</b></button>`).join("");
     document.querySelectorAll("#vxFrame button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === (o.frame === "blur" ? "blur" : "auto"))));
     const split = st.plan && st.plan.layout.kind === "split";
     $("vxPos").value = o.pos ?? (split ? 50 : styleOf(o.style).pos || 66);
@@ -113,14 +116,24 @@ const Vertical = (() => {
     const W = $("vxWords");
     const edits = st.opts.edits || {};
     if (!st.words.length) { W.innerHTML = `<span class="ed-small">Тексту для цього кліпу не знайдено.</span>`; return; }
-    W.innerHTML = st.words.map((w, i) => {
+    let html = "", line = "", n = 0, t0 = null;
+    const flushLine = () => { if (line) html += `<div class="vx-ln"><span class="t">${fmtLine(t0)}</span><div>${line}</div></div>`; line = ""; n = 0; t0 = null; };
+    st.words.forEach((w, i) => {
       const e = edits[w.id] || {};
       const gone = e.w === "";
       const cls = [w.key && !gone ? "key" : "", e.w !== undefined || e.k !== undefined ? "edited" : "", gone ? "gone" : "", st.selWord === w.id ? "sel" : ""].join(" ");
-      return `<button type="button" class="${cls}" data-i="${i}">${escapeText(gone ? w.orig : w.word)}</button>`;
-    }).join("");
+      if (t0 === null) t0 = w.start;
+      line += `<button type="button" class="${cls}" data-i="${i}">${escapeText(gone ? w.orig : w.word)}</button>`;
+      n++;
+      if (/[.!?…]$/.test(w.orig || w.word) || n >= 8) flushLine();
+    });
+    flushLine();
+    W.innerHTML = html;
+    const tab = document.getElementById("vxTabText");
+    if (tab) tab.classList.toggle("dot", Object.keys(edits).length > 0);
   }
 
+  function fmtLine(t) { t = Math.max(0, t || 0); return `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`; }
   function escapeText(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
   /** Words from the plan exclude deleted ones; keep them visible (struck through) so they can be restored. */
@@ -472,7 +485,8 @@ const Vertical = (() => {
     $("vxPlay").addEventListener("click", toggle);
     const onPlay = () => {
       const paused = ctx.video().paused;
-      $("vxPlay").textContent = paused ? "▶ Грати" : "❚❚ Пауза";
+      $("vxPlay").textContent = paused ? "▶" : "❚❚";
+      $("vxPlay").setAttribute("aria-label", paused ? "Грати" : "Пауза");
       $("vxPhone").classList.toggle("playing", !paused);
     };
     ctx.video().addEventListener("play", onPlay);

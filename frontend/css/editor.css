@@ -437,7 +437,98 @@
 #editor.is-vx .ed-filters, #editor.is-vx .ed-ov, #editor.is-vx .ed-sort { display: none; }
 #editor.is-vx .ed-vx-note { display: block; flex: 1; }
 
-@media (max-width: 1439px) { .ed-cols { grid-template-columns: minmax(0, 1fr) 340px; } .ed-stat:last-child { display: none; } .ed-reanalyze small { display: none; } .ed-bigdl small .q { display: none; } }
+/* «Вертикальні кліпи» as a studio: the phone big in the middle with download under it,
+   settings one tab at a time on the right (Кадр · Стиль · Заголовок · Текст · Тонко). */
+.ed-stat-vx { display: none; }
+#editor.is-vx .ed-prog .ed-stat { display: none; }
+#editor.is-vx .ed-prog .ed-stat-vx { display: flex; }
+#edVx { padding: 0; overflow: hidden; }
+.vx-studio { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 76px 410px; }
+.vx-stage { min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 14px 18px 16px;
+  background: radial-gradient(ellipse at 50% 42%, var(--ed-panel2), var(--ed-panel) 72%); border-radius: 14px 0 0 14px; }
+.vx-shead { display: flex; align-items: center; gap: 10px; width: 100%; flex: none; min-width: 0; }
+.vx-shead .ed-no { white-space: nowrap; }
+.vx-stitle { font-size: 17px; font-weight: 800; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vx-shead .vx-decide { margin-left: auto; }
+.vx-shead .vx-decide .ed-btn { padding: 7px 12px; font-size: 13.5px; }
+.vx-nav { display: flex; gap: 6px; flex: none; }
+.vx-screen { flex: 1 1 auto; min-height: 220px; width: 100%; container-type: size; display: grid; place-items: center; }
+.vx-screen .vx-phone { height: min(100cqh, 100cqw * 16 / 9); width: auto; max-width: none; aspect-ratio: 9 / 16; border-radius: 22px;
+  box-shadow: 0 0 0 6px var(--ed-sunk), 0 16px 40px rgba(0, 0, 0, .35); }
+.vx-playrow { width: min(100%, 640px); display: flex; align-items: center; gap: 12px; flex: none; }
+.vx-pbtn { width: 42px; height: 42px; border-radius: 50%; border: 0; background: var(--ed-accent-grad); color: var(--ed-accent-ink); font-size: 15px; cursor: pointer; flex: none; display: grid; place-items: center; }
+.vx-playrow .vx-scrub { flex: 1; }
+.vx-stage .vx-note { width: min(100%, 640px); flex: none; }
+.vx-dlbar { width: min(100%, 640px); display: flex; gap: 8px; flex: none; }
+#edVx .vx-big { flex: 1; min-width: 0; border: 0; border-radius: 12px; padding: 13px 16px; background: var(--ed-accent-grad); color: var(--ed-accent-ink);
+  font-weight: 800; font-size: 15.5px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vx-big:hover { filter: brightness(1.05); }
+.vx-big:disabled { opacity: .5; cursor: default; }
+.vx-big.busy { cursor: progress; opacity: .85; }
+.vx-dlbar .ed-btn { white-space: nowrap; }
+.vx-more { position: relative; }
+.vx-more-pop { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 90; width: 300px; padding: 6px; border-radius: 12px; border: 1px solid var(--ed-line); background: var(--ed-panel); box-shadow: var(--ed-pop-shadow); }
+.vx-mi { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; border: 0; background: none; border-radius: 8px; padding: 9px 11px; cursor: pointer; }
+.vx-mi:hover { background: var(--ed-panel2); }
+.vx-mi b { font-size: 14.5px; color: var(--ed-fg); } .vx-mi small { font-size: 12.5px; color: var(--ed-muted); }
+.vx-mi.busy { cursor: progress; opacity: .8; }
+.vx-stage .vx-prog { width: min(100%, 640px); flex: none; }
+.vx-tabs { display: flex; flex-direction: column; gap: 4px; padding: 10px 4px; background: var(--ed-panel2); border-left: 1px solid var(--ed-line2); border-right: 1px solid var(--ed-line2); }
+#vxTabs button { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 11px 0; border: 0; border-radius: 10px; background: none;
+  font-weight: 700; font-size: 11px; letter-spacing: -.01em; white-space: nowrap; color: var(--ed-muted); cursor: pointer; }
+.vx-tabs button span { font-size: 21px; line-height: 1; font-weight: 800; }
+.vx-tabs button:hover { color: var(--ed-fg); }
+.vx-tabs button[aria-selected="true"] { background: var(--ed-panel); color: var(--ed-fg); box-shadow: inset 3px 0 0 var(--ed-accent); }
+.vx-tabs button.dot::after { content: ""; position: absolute; right: 12px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--ed-accent); }
+.vx-tp { min-width: 0; min-height: 0; overflow: auto; padding: 20px; }
+.vx-pane { display: flex; flex-direction: column; gap: 16px; }
+.vx-pane[hidden] { display: none; }
+.vx-pane h3 { margin: 0; font-size: 19px; font-weight: 800; color: var(--ed-fg); }
+.vx-lead { margin: -10px 0 0; font-size: 14px; color: var(--ed-muted); }
+.vx-opts { display: flex; flex-direction: column; gap: 12px; }
+.vx-opts button { display: flex; align-items: center; gap: 14px; text-align: left; padding: 14px; border-radius: 14px; border: 1.5px solid var(--ed-line2); background: var(--ed-panel2); color: var(--ed-muted); cursor: pointer; }
+.vx-opts button:hover { border-color: var(--ed-muted); }
+.vx-opts button[aria-pressed="true"] { border-color: var(--ed-accent); box-shadow: 0 0 0 1px var(--ed-accent); background: var(--ed-panel); }
+.vx-opts svg { width: 56px; height: 76px; flex: none; } .vx-opts svg .f { fill: var(--ed-panel); }
+.vx-opts b { display: block; font-size: 15.5px; color: var(--ed-fg); } .vx-opts small { display: block; margin-top: 3px; font-size: 13px; line-height: 1.35; }
+.vx-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+#vxStyle button { display: flex; flex-direction: column; align-items: center; gap: 6px; border: 0; background: none; cursor: pointer; font-weight: 600; font-size: 13px; color: var(--ed-muted); padding: 0; }
+.vx-tiles button b { font-weight: 600; }
+.vx-tiles button[aria-pressed="true"] { color: var(--ed-fg); }
+.vx-tiles button[aria-pressed="true"] b { font-weight: 800; }
+.vx-tile { width: 100%; height: 76px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: .28em; white-space: nowrap; background: linear-gradient(160deg, #3d2b41, #1d1a22); border: 1.5px solid var(--ed-line2);
+  font: 900 17px "VX Montserrat", sans-serif; text-transform: uppercase; color: #fff; -webkit-text-stroke: 3px #000; paint-order: stroke fill; }
+.vx-tiles button:hover .vx-tile { border-color: var(--ed-muted); }
+.vx-tiles button[aria-pressed="true"] .vx-tile { border-color: var(--ed-accent); box-shadow: 0 0 0 2px var(--ed-accent); }
+.vx-tile i { font-style: normal; }
+.vx-t-hl i { background: #ffe14d; color: #000; -webkit-text-stroke: 0; padding: .08em .18em; }
+.vx-t-kar { font-family: "VX Rubik Black", sans-serif; text-transform: none; } .vx-t-kar i { color: #7cff4f; }
+.vx-t-one { font-family: "VX Unbounded", sans-serif; }
+.vx-t-box { font: 700 15px "VX Rubik", sans-serif; text-transform: none; -webkit-text-stroke: 0; } .vx-t-box i { background: rgba(0, 0, 0, .75); padding: .2em .45em; }
+.vx-t-gold { font: 400 19px "VX Russo", sans-serif; -webkit-text-stroke: 2px #000; } .vx-t-gold i { color: #e6c068; }
+.vx-t-min { font: 700 15px "VX Rubik", sans-serif; text-transform: none; -webkit-text-stroke: 0; text-shadow: 0 1px 3px #000; }
+.vx-t-none { font: 600 13px var(--ed-sans); text-transform: none; -webkit-text-stroke: 0; color: #bbb; }
+.vx-switch { font-weight: 700; font-size: 15px; }
+.vx-pane .vx-words { display: block; max-height: none; background: none; padding: 0; border-radius: 0; }
+.vx-ln { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 8px; align-items: start; padding: 7px 2px; border-bottom: 1px solid var(--ed-line2); }
+.vx-ln .t { font: 12px var(--ed-mono); color: var(--ed-faint); padding-top: 4px; }
+.vx-ln > div { display: flex; flex-wrap: wrap; gap: 4px; }
+.vx-pane .vx-words button { border-color: transparent; background: none; padding: 2px 5px; }
+.vx-pane .vx-words button:hover { background: var(--ed-panel2); }
+.vx-pane .vx-words button.edited { border-color: var(--ed-accent); }
+.vx-pane .vx-words button.key { background: var(--ed-accent-soft); }
+@media (max-width: 1439px) { .vx-studio { grid-template-columns: minmax(0, 1fr) 74px 360px; } .vx-tp { padding: 16px; } .vx-pane { gap: 12px; } .vx-tiles { gap: 8px; } .vx-tile { height: 56px; } .vx-nav .ed-btn { padding: 6px 9px; } }
+@media (max-width: 1100px) {
+  .vx-studio { grid-template-columns: minmax(0, 1fr); }
+  .vx-stage { border-radius: 14px 14px 0 0; }
+  .vx-screen { flex: none; height: 62vh; }
+  .vx-tabs { flex-direction: row; border: 0; border-top: 1px solid var(--ed-line2); border-bottom: 1px solid var(--ed-line2); }
+  .vx-tabs button { flex: 1; }
+  .vx-tabs button[aria-selected="true"] { box-shadow: inset 0 -3px 0 var(--ed-accent); }
+  .vx-shead { flex-wrap: wrap; }
+}
+
+@media (max-width: 1439px) { .ed-cols { grid-template-columns: minmax(0, 1fr) 340px; } .ed-prog .ed-stat:nth-child(4) { display: none; } .ed-reanalyze small { display: none; } .ed-bigdl small .q { display: none; } }
 @media (max-width: 1100px) {
   #editor { overflow: auto; }
   .ed-main { overflow: visible; min-height: 100vh; height: auto; }

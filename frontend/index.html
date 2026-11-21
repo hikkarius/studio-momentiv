@@ -549,6 +549,7 @@
           <div class="ed-stat keep"><span>Беру</span><b id="edCntKeep">0</b></div>
           <div class="ed-stat drop"><span>Не беру</span><b id="edCntDrop">0</b></div>
           <div class="ed-stat"><span>Ще не дивився</span><b id="edCntLeft">0</b></div>
+          <div class="ed-stat keep ed-stat-vx"><span>У добірці</span><b id="edCntPick">0</b></div>
         </div>
         <span class="ed-spacer"></span>
         <button class="ed-reanalyze" id="edReanalyze" type="button" title="Gemini ще раз перегляне розмову і запропонує нові кліпи. Транскрипція береться з кешу, тож це швидко.">
@@ -618,167 +619,154 @@
           </div>
         </section>
         <section class="ed-panel ed-vx" id="edVx" aria-label="Вертикальний кліп" hidden>
-          <div class="ed-stage-head vx-head"><span class="t" id="vxClipNo"></span>
-            <div class="vx-decide" id="vxDecide">
-              <button type="button" class="ed-btn keep" id="vxKeep" aria-pressed="false">✓ Беру <kbd>Y</kbd></button>
-              <button type="button" class="ed-btn drop" id="vxDrop" aria-pressed="false">✕ Не беру <kbd>N</kbd></button>
-              <div class="ed-verdict"><span class="ed-verdict-b"></span><button type="button" class="ed-btn sm ed-change" title="Зняти позначку">Змінити</button></div>
-            </div></div>
-          <div class="vx-body">
-            <div class="vx-wrap">
-              <div class="vx-left">
-                <div class="vx-phone" id="vxPhone" role="button" tabindex="0" aria-label="Попередній вигляд вертикального кліпу. Клік: грати або пауза">
+          <div class="vx-studio">
+            <div class="vx-stage">
+              <div class="vx-shead">
+                <span class="ed-no" id="vxNo"></span>
+                <b class="vx-stitle" id="vxClipNo"></b>
+                <div class="vx-decide" id="vxDecide">
+                  <button type="button" class="ed-btn keep" id="vxKeep" aria-pressed="false">✓ Беру <kbd>Y</kbd></button>
+                  <button type="button" class="ed-btn drop" id="vxDrop" aria-pressed="false">✕ Не беру <kbd>N</kbd></button>
+                  <div class="ed-verdict"><span class="ed-verdict-b"></span><button type="button" class="ed-btn sm ed-change" title="Зняти позначку">Змінити</button></div>
+                </div>
+                <div class="vx-nav">
+                  <button type="button" class="ed-btn sm" id="vxPrev" title="Попередній обраний кліп (↑)">↑ Попередній</button>
+                  <button type="button" class="ed-btn sm" id="vxNext" title="Наступний обраний кліп (↓)">Наступний ↓</button>
+                </div>
+              </div>
+              <div class="vx-screen">
+              <div class="vx-phone" id="vxPhone" role="button" tabindex="0" aria-label="Попередній вигляд вертикального кліпу. Клік: грати або пауза">
                   <canvas id="vxCanvas" width="360" height="640"></canvas>
                   <div class="vx-hook" id="vxHook" hidden></div>
                   <div class="vx-cap" id="vxCap"></div>
                   <div class="vx-bigplay" id="vxBigPlay" aria-hidden="true">▶</div>
                   <div class="vx-busy" id="vxBusy" hidden>Шукаю обличчя…</div>
                 </div>
-                <input type="range" class="vx-scrub" id="vxScrub" min="0" max="1" step="0.05" value="0" aria-label="Прокрутка кліпу">
-                <div class="vx-playrow">
-                  <button type="button" class="ed-btn sm" id="vxPlay">▶ Грати</button>
-                  <span class="vx-tc" id="vxTc"></span>
-                </div>
-                <div class="vx-note" id="vxNote" hidden></div>
               </div>
-              <div class="vx-right">
-                <section class="vx-card">
-                  <h3 class="vx-card-h"><i>1</i>Кадрування</h3>
-                  <div class="vx-seg" id="vxFrame">
-                    <button type="button" data-v="auto" title="Стежить за обличчям; двоє в одному кадрі: ділить екран; облич немає: весь кадр">Авто (за обличчям)</button>
-                    <button type="button" data-v="blur" title="Весь горизонтальний кадр на розмитому тлі">Весь кадр</button>
-                  </div>
-                </section>
-                <section class="vx-card">
-                  <h3 class="vx-card-h"><i>2</i>Субтитри</h3>
-                  <div class="vx-row">
-                    <div class="vx-lbl">Стиль</div>
-                    <div class="vx-seg" id="vxStyle"></div>
-                  </div>
-                <div class="vx-row vx-grid2">
-                  <div>
-                    <label class="vx-lbl" for="vxSize">Розмір субтитрів <span id="vxSizeV"></span></label>
-                    <div class="vx-range"><span>менше</span><input type="range" id="vxSize" min="60" max="160" step="5"><span>більше</span></div>
-                  </div>
-                  <div>
-                    <label class="vx-lbl" for="vxPos">Висота субтитрів</label>
-                    <div class="vx-range"><span>вище</span><input type="range" id="vxPos" min="30" max="80" step="1"><span>нижче</span></div>
+              <div class="vx-playrow">
+                <button type="button" class="vx-pbtn" id="vxPlay" aria-label="Грати">▶</button>
+                <input type="range" class="vx-scrub" id="vxScrub" min="0" max="1" step="0.05" value="0" aria-label="Прокрутка кліпу">
+                <span class="vx-tc" id="vxTc"></span>
+              </div>
+              <div class="vx-note" id="vxNote" hidden></div>
+              <div class="vx-dlbar">
+                <button class="vx-big" id="vxDlSubs" type="button" title="MP4 1080×1920 із субтитрами">⬇ Скачати 9:16 із субтитрами</button>
+                <button class="ed-btn" id="vxMp4" type="button" title="Чистий горизонтальний кліп для монтажу в CapCut">16:9 чистий</button>
+                <button class="ed-btn" id="vxSrt" type="button" title="Субтитри .srt для CapCut чи Premiere">SRT</button>
+                <div class="vx-more">
+                  <button class="ed-btn" id="vxMoreBtn" type="button" aria-haspopup="true" aria-expanded="false">Ще ▾</button>
+                  <div class="vx-more-pop" id="vxMorePop" role="menu" hidden>
+                    <button class="vx-mi" id="vxDlClean" type="button" role="menuitem"><b>9:16 без субтитрів</b><small>свої титри в CapCut</small></button>
+                    <button class="vx-mi" id="vxCopyPost" type="button" role="menuitem"><b>Копіювати текст допису</b><small>заголовок, опис, хештеги</small></button>
+                    <button class="vx-mi" id="vxZip" type="button" role="menuitem"><b>ZIP усіх обраних · 9:16</b><small id="vxZipInfo">із субтитрами, видно прогрес</small></button>
+                    <button class="vx-mi" id="vxZipClean" type="button" role="menuitem"><b>ZIP усіх обраних · чисті 16:9</b><small>для монтажу</small></button>
                   </div>
                 </div>
-                <div class="vx-row vx-grid2">
-                  <div>
-                    <div class="vx-lbl">Колір виділення</div>
-                    <div class="vx-swatches" id="vxColor"></div>
-                  </div>
-                  <div>
-                    <div class="vx-lbl">Колір тексту</div>
-                    <div class="vx-swatches" id="vxText"></div>
-                  </div>
+              </div>
+              <div class="vx-prog" id="vxProg" hidden><i id="vxProgBar"></i></div>
+            </div>
+            <nav class="vx-tabs" id="vxTabs" role="tablist" aria-label="Налаштування вертикального кліпу">
+              <button type="button" role="tab" data-t="frame" aria-selected="false"><span aria-hidden="true">⛶</span>Кадр</button>
+              <button type="button" role="tab" data-t="style" aria-selected="true"><span aria-hidden="true">Aa</span>Стиль</button>
+              <button type="button" role="tab" data-t="hook" aria-selected="false"><span aria-hidden="true">T</span>Заголовок</button>
+              <button type="button" role="tab" data-t="text" aria-selected="false" id="vxTabText"><span aria-hidden="true">✎</span>Текст</button>
+              <button type="button" role="tab" data-t="fine" aria-selected="false"><span aria-hidden="true">⚙</span>Тонко</button>
+            </nav>
+            <div class="vx-tp">
+              <section class="vx-pane" data-t="frame" hidden>
+                <h3>Кадрування</h3>
+                <p class="vx-lead">Як горизонтальне відео ляже у вертикальний телефон.</p>
+                <div class="vx-opts" id="vxFrame">
+                  <button type="button" data-v="auto" title="Стежить за обличчям; двоє в одному кадрі: ділить екран; облич немає: весь кадр">
+                    <svg viewBox="0 0 66 90" aria-hidden="true"><rect x="1" y="1" width="64" height="88" rx="9" class="f" stroke="currentColor" stroke-width="1.5"/><circle cx="33" cy="36" r="10" fill="currentColor" opacity=".6"/><path d="M14 66c3-12 11-17 19-17s16 5 19 17" fill="currentColor" opacity=".4"/><rect x="18" y="20" width="30" height="32" rx="4" fill="none" stroke="#58c27d" stroke-width="2"/></svg>
+                    <span><b>Авто (за обличчям)</b><small>Кадр сам стежить за тим, хто говорить. Двоє в кадрі: екран ділиться навпіл.</small></span></button>
+                  <button type="button" data-v="blur" title="Весь горизонтальний кадр на розмитому тлі">
+                    <svg viewBox="0 0 66 90" aria-hidden="true"><rect x="1" y="1" width="64" height="88" rx="9" class="f" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="2" width="62" height="25" rx="8" fill="currentColor" opacity=".12"/><rect x="2" y="63" width="62" height="25" rx="8" fill="currentColor" opacity=".12"/><rect x="3" y="28" width="60" height="34" fill="currentColor" opacity=".25" stroke="currentColor" stroke-width="1.2"/><circle cx="24" cy="41" r="5" fill="currentColor" opacity=".7"/><circle cx="43" cy="41" r="5" fill="currentColor" opacity=".7"/></svg>
+                    <span><b>Весь кадр</b><small>Видно все відео, зверху й знизу розмитий фон. Коли в кадрі кілька людей.</small></span></button>
                 </div>
+              </section>
+              <section class="vx-pane" data-t="style">
+                <h3>Стиль субтитрів</h3>
+                <p class="vx-lead">Клік по плитці, і телефон одразу покаже результат.</p>
+                <div class="vx-tiles" id="vxStyle"></div>
                 <div class="vx-row">
-                  <div class="vx-grid2">
-                    <div>
-                      <div class="vx-lbl">Кути плашки</div>
-                      <div class="vx-seg" id="vxRound">
-                        <button type="button" data-v="0">▭ Прямі</button>
-                        <button type="button" data-v="1">▢ Закруглені</button>
-                      </div>
-                    </div>
-                    <div>
-                      <div class="vx-lbl">Обведення субтитрів</div>
-                      <div class="vx-seg" id="vxStroke">
-                        <button type="button" data-v="">Як у стилі</button>
-                        <button type="button" data-v="000000"><i class="vx-dot" style="background:#000"></i>Чорне</button>
-                        <button type="button" data-v="FFFFFF"><i class="vx-dot" style="background:#fff"></i>Біле</button>
-                      </div>
-                    </div>
-                  </div>
+                  <label class="vx-lbl" for="vxPos">Висота субтитрів</label>
+                  <div class="vx-range"><span>вище</span><input type="range" id="vxPos" min="30" max="80" step="1"><span>нижче</span></div>
                 </div>
-                </section>
-                <section class="vx-card vx-hookbox">
-                  <h3 class="vx-card-h"><i>3</i>Заголовок<label class="vx-check vx-card-sw"><input type="checkbox" id="vxHookOn"> показувати</label></h3>
-                  <div class="vx-hookset" id="vxHookSet">
-                    <input type="text" id="vxHookText" maxlength="120" aria-label="Текст заголовка" placeholder="Текст заголовка">
+              </section>
+              <section class="vx-pane" data-t="hook" hidden>
+                <h3>Заголовок на відео</h3>
+                <p class="vx-lead">Плашка, яка утримує глядача перші секунди.</p>
+                <label class="vx-check vx-switch"><input type="checkbox" id="vxHookOn"> Показувати заголовок</label>
+                <div class="vx-hookset" id="vxHookSet">
+                  <input type="text" id="vxHookText" maxlength="120" aria-label="Текст заголовка" placeholder="Текст заголовка">
+                  <div class="vx-row"><div class="vx-lbl">Вигляд</div>
                     <div class="vx-seg" id="vxHookStyle">
                       <button type="button" data-v="white">Біла плашка</button>
                       <button type="button" data-v="black">Чорна плашка</button>
                       <button type="button" data-v="accent">Кольорова плашка</button>
                       <button type="button" data-v="outline">Без плашки</button>
-                    </div>
-                    <div class="vx-grid2">
-                      <div>
-                        <div class="vx-lbl">Кути плашки</div>
-                        <div class="vx-seg" id="vxHookRound">
-                          <button type="button" data-v="0">▭ Прямі</button>
-                          <button type="button" data-v="1">▢ Закруглені</button>
-                        </div>
-                      </div>
-                      <div>
-                        <div class="vx-lbl">Обведення заголовка</div>
-                        <div class="vx-seg" id="vxHookStroke">
-                          <button type="button" data-v="">Як у стилі</button>
-                          <button type="button" data-v="000000"><i class="vx-dot" style="background:#000"></i>Чорне</button>
-                          <button type="button" data-v="FFFFFF"><i class="vx-dot" style="background:#fff"></i>Біле</button>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="vx-grid2">
-                      <div>
-                        <label class="vx-lbl" for="vxHookSize">Розмір заголовка</label>
-                        <div class="vx-range"><span>менше</span><input type="range" id="vxHookSize" min="60" max="180" step="5"><span>більше</span></div>
-                      </div>
-                      <div>
-                        <label class="vx-lbl" for="vxHookPos">Висота заголовка</label>
-                        <div class="vx-range"><span>вище</span><input type="range" id="vxHookPos" min="3" max="80" step="1"><span>нижче</span></div>
-                      </div>
-                    </div>
-                    <div>
-                      <div>
-                        <div class="vx-lbl">Показувати</div>
-                        <div class="vx-seg" id="vxHookDur">
-                          <button type="button" data-v="3">Перші 3 с</button>
-                          <button type="button" data-v="all">Увесь кліп</button>
-                        </div>
-                      </div>
-                    </div>
-
+                    </div></div>
+                  <div class="vx-row">
+                    <label class="vx-lbl" for="vxHookPos">Висота заголовка</label>
+                    <div class="vx-range"><span>вище</span><input type="range" id="vxHookPos" min="3" max="80" step="1"><span>нижче</span></div>
                   </div>
-                </section>
-                <section class="vx-card">
-                  <h3 class="vx-card-h"><i>4</i>Текст субтитрів<span class="vx-card-sub">натисни слово, щоб виправити</span></h3>
-                  <div class="vx-words" id="vxWords"></div>
-                  <div class="vx-wedit" id="vxWedit" hidden>
-                    <input type="text" id="vxWinput" maxlength="60" aria-label="Слово">
-                    <label class="vx-check"><input type="checkbox" id="vxWkey"> Виділити кольором</label>
-                    <button type="button" class="ed-btn sm primary" id="vxWsave">Зберегти</button>
-                    <button type="button" class="ed-btn sm" id="vxWdel">Прибрати слово</button>
-                    <button type="button" class="ed-btn sm ghost" id="vxWreset">Як було</button>
+                  <div class="vx-row">
+                    <label class="vx-lbl" for="vxHookSize">Розмір заголовка</label>
+                    <div class="vx-range"><span>менше</span><input type="range" id="vxHookSize" min="60" max="180" step="5"><span>більше</span></div>
                   </div>
-                  <div class="ed-small">Кольорове: ключове слово, підсвічується іншим кольором. Закреслене: прибране зі субтитрів.</div>
-                </section>
-                <section class="vx-card">
-                  <h3 class="vx-card-h"><i>5</i>Скачати цей кліп</h3>
-                  <div class="vx-lbl">Відео</div>
-                  <div class="vx-dl">
-                    <button class="vx-dlbtn main" id="vxDlSubs" type="button"><b>Вертикальний із субтитрами</b><small>MP4 1080×1920</small></button>
-                    <button class="vx-dlbtn" id="vxDlClean" type="button"><b>Вертикальний без субтитрів</b><small>MP4 1080×1920, свої титри в CapCut</small></button>
-                    <button class="vx-dlbtn" id="vxMp4" type="button"><b>Чистий кліп 16:9</b><small>як і раніше, для монтажу</small></button>
-                  </div>
-                  <div class="vx-lbl vx-gap">Субтитри й допис</div>
-                  <div class="vx-dl two">
-                    <button class="vx-dlbtn" id="vxSrt" type="button"><b>Субтитри .srt</b><small>для CapCut чи Premiere</small></button>
-                    <button class="vx-dlbtn" id="vxCopyPost" type="button"><b>Текст допису</b><small>копіювати заголовок, опис, хештеги</small></button>
-                  </div>
-                </section>
-                <section class="vx-card">
-                  <h3 class="vx-card-h"><i>6</i>Усі обрані кліпи</h3>
-                  <div class="vx-dl two">
-                    <button class="vx-dlbtn" id="vxZipClean" type="button"><b>ZIP чистих кліпів</b><small>як і раніше</small></button>
-                    <button class="vx-dlbtn" id="vxZip" type="button"><b>ZIP вертикальних</b><small id="vxZipInfo">із субтитрами, видно прогрес</small></button>
-                  </div>
-                  <div class="vx-prog" id="vxProg" hidden><i id="vxProgBar"></i></div>
-                </section>
-              </div>
+                  <div class="vx-row"><div class="vx-lbl">Показувати</div>
+                    <div class="vx-seg" id="vxHookDur">
+                      <button type="button" data-v="3">Перші 3 с</button>
+                      <button type="button" data-v="all">Увесь кліп</button>
+                    </div></div>
+                  <div class="vx-row"><div class="vx-lbl">Кути плашки</div>
+                    <div class="vx-seg" id="vxHookRound">
+                      <button type="button" data-v="0">▭ Прямі</button>
+                      <button type="button" data-v="1">▢ Закруглені</button>
+                    </div></div>
+                  <div class="vx-row"><div class="vx-lbl">Обведення заголовка</div>
+                    <div class="vx-seg" id="vxHookStroke">
+                      <button type="button" data-v="">Як у стилі</button>
+                      <button type="button" data-v="000000"><i class="vx-dot" style="background:#000"></i>Чорне</button>
+                      <button type="button" data-v="FFFFFF"><i class="vx-dot" style="background:#fff"></i>Біле</button>
+                    </div></div>
+                </div>
+              </section>
+              <section class="vx-pane" data-t="text" hidden>
+                <h3>Текст субтитрів</h3>
+                <p class="vx-lead">Клік по слову: відео стрибне туди, а слово можна виправити.</p>
+                <div class="vx-words" id="vxWords"></div>
+                <div class="vx-wedit" id="vxWedit" hidden>
+                  <input type="text" id="vxWinput" maxlength="60" aria-label="Слово">
+                  <label class="vx-check"><input type="checkbox" id="vxWkey"> Виділити кольором</label>
+                  <button type="button" class="ed-btn sm primary" id="vxWsave">Зберегти</button>
+                  <button type="button" class="ed-btn sm" id="vxWdel">Прибрати слово</button>
+                  <button type="button" class="ed-btn sm ghost" id="vxWreset">Як було</button>
+                </div>
+                <div class="ed-small">Обведене: ти вже виправив. Кольорове: ключове слово. Закреслене: прибране з субтитрів. Виправлення йдуть і у відео, і в SRT.</div>
+              </section>
+              <section class="vx-pane" data-t="fine" hidden>
+                <h3>Тонке налаштування</h3>
+                <p class="vx-lead">Зазвичай не треба: стиль уже все підібрав.</p>
+                <div class="vx-row">
+                  <label class="vx-lbl" for="vxSize">Розмір субтитрів <span id="vxSizeV"></span></label>
+                  <div class="vx-range"><span>менше</span><input type="range" id="vxSize" min="60" max="160" step="5"><span>більше</span></div>
+                </div>
+                <div class="vx-row"><div class="vx-lbl">Колір виділення</div><div class="vx-swatches" id="vxColor"></div></div>
+                <div class="vx-row"><div class="vx-lbl">Колір тексту</div><div class="vx-swatches" id="vxText"></div></div>
+                <div class="vx-row"><div class="vx-lbl">Кути плашки</div>
+                  <div class="vx-seg" id="vxRound">
+                    <button type="button" data-v="0">▭ Прямі</button>
+                    <button type="button" data-v="1">▢ Закруглені</button>
+                  </div></div>
+                <div class="vx-row"><div class="vx-lbl">Обведення субтитрів</div>
+                  <div class="vx-seg" id="vxStroke">
+                    <button type="button" data-v="">Як у стилі</button>
+                    <button type="button" data-v="000000"><i class="vx-dot" style="background:#000"></i>Чорне</button>
+                    <button type="button" data-v="FFFFFF"><i class="vx-dot" style="background:#fff"></i>Біле</button>
+                  </div></div>
+              </section>
             </div>
           </div>
         </section>

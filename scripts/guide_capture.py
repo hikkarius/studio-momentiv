@@ -139,7 +139,7 @@ with sync_playwright() as pw:
     pg.keyboard.press("ArrowDown"); wait(1); pg.keyboard.press("y"); wait(1)
     pg.hover("#edMp4"); wait(1.2); shot("09-download")  # «Скачати» sits on top of the side panel
     pg.click("#edMode button[data-m='vx']"); wait(1)
-    pg.locator("#vxZipClean").scroll_into_view_if_needed(); pg.hover("#vxZipClean"); wait(1.5); shot("10-zip")
+    pg.click("#vxMoreBtn"); wait(0.5); pg.hover("#vxZipClean"); wait(1.5); shot("10-zip")
     ctx.close()
     b.close()
 srv.should_exit = True
