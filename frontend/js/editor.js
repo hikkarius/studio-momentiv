@@ -115,25 +115,6 @@ const Editor = (() => {
     $("edStep2").textContent = mini ? String(kept) : st.mode === "vx" ? `${kept} ${kept === 1 ? "кліп" : kept > 1 && kept < 5 ? "кліпи" : "кліпів"}` : `обрано ${kept}`;
   }
 
-  /** The player column is as wide as the video at its height; the side panel takes the rest. */
-  function fitStage() {
-    const cols = document.querySelector("#editor .ed-cols");
-    const scr = $("edScreen");
-    if (!cols || $("editor").hidden || st.mode === "vx" || window.innerWidth <= 1100) { if (cols) cols.style.removeProperty("--ed-stage-w"); return; }
-    const v0 = video();
-    const ratio = v0.videoWidth && v0.videoHeight ? v0.videoWidth / v0.videoHeight : 16 / 9;
-    const stage = scr.parentElement;
-    const extra = stage.clientWidth - scr.clientWidth;
-    const want = Math.round(scr.clientHeight * ratio + extra);
-    const max = cols.clientWidth - 340 - 14;
-    const next = Math.max(420, Math.min(want, max));
-    const cur = parseFloat(cols.style.getPropertyValue("--ed-stage-w")) || 0;
-    if (Math.abs(cur - next) > 2) {
-      cols.style.setProperty("--ed-stage-w", `${next}px`);
-      requestAnimationFrame(() => { if (st.project && clip() && st.mode !== "vx") renderTrack(); });
-    }
-  }
-
   function updateScroll() {
     const L = $("edList");
     const more = L.scrollWidth > L.clientWidth + 4;
@@ -206,10 +187,7 @@ const Editor = (() => {
     }
     W.innerHTML = "";
     let first = null;
-    const [from, to] = textRange(c);
-    if (from > 0) W.insertAdjacentHTML("beforeend", '<span class="ed-more-txt">…</span> ');
     st.words.forEach((w, j) => {
-      if (j < from || j > to) return;
       const out = w.start < c.start_sec - 0.05 || w.start >= c.end_sec;
       const sp = document.createElement("span");
       sp.className = "ed-w" + (out ? " out" : "");
@@ -221,23 +199,8 @@ const Editor = (() => {
       W.appendChild(document.createTextNode(" "));
       if (!out && !first) first = sp;
     });
-    if (to < st.words.length - 1) W.insertAdjacentHTML("beforeend", '<span class="ed-more-txt">…</span>');
     const body = $("edTabText");
-    if (first && !body.hidden) body.scrollTop = Math.max(0, first.offsetTop - body.offsetTop - 60);
-  }
-
-  /** Word indexes to show in «Текст кліпу»: the clip and about one sentence of context on each side. */
-  function textRange(c) {
-    const ends = (w) => /[.!?…]["»)]?$/.test(w.word || "");
-    let a = st.words.findIndex((w) => w.start >= c.start_sec - 0.05);
-    if (a < 0) a = st.words.length;
-    let b = a;
-    while (b + 1 < st.words.length && st.words[b + 1].start < c.end_sec) b++;
-    let from = a, n = 0;
-    while (from > 0 && n < 30) { if (n > 0 && ends(st.words[from - 1])) break; from--; n++; }
-    let to = b; n = 0;
-    while (to + 1 < st.words.length && n < 30) { to++; n++; if (ends(st.words[to])) break; }
-    return [from, to];
+    if (first && !body.hidden) body.scrollTop = Math.max(0, first.offsetTop - body.offsetTop - 120);
   }
 
   function renderTabs() {
@@ -266,7 +229,6 @@ const Editor = (() => {
     if (st.project) renderList();
     if (vx) { if (typeof Vertical !== "undefined") Vertical.onShow(); }
     else if (st.project && clip()) { renderOverview(); renderTrack(); }
-    fitStage();
   }
 
   // ─── Trim track ────────────────────────────────────────────────────────────
@@ -285,14 +247,16 @@ const Editor = (() => {
     const W = T.clientWidth || 600;
     const p = (t) => ((t - lo) / (hi - lo)) * 100;
     let h = "";
-    let end = -1e9;
-    st.words.forEach((w, j) => { // one calm row: words that do not fit become small ticks
+    const end = [-1e9, -1e9];
+    st.words.forEach((w, j) => {
       if (w.start < lo || w.start > hi) return;
       const x = (p(w.start) / 100) * W;
+      const wd = w.word.length * 7 + 14;
+      const row = x >= end[0] + 3 ? 0 : x >= end[1] + 3 ? 1 : -1;
+      if (row < 0) { h += `<span class="wt" style="left:${p(w.start)}%"></span>`; return; }
+      end[row] = x + wd;
       const inside = w.start >= c.start_sec - 0.05 && w.start < c.end_sec;
-      if (x < end + 4) { h += `<span class="wt${inside ? " in" : ""}" style="left:${p(w.start)}%"></span>`; return; }
-      end = x + w.word.length * 7.2 + 8;
-      h += `<span class="w${inside ? " in" : ""}" data-j="${j}" style="left:${p(w.start)}%">${esc(w.word)}</span>`;
+      h += `<span class="w${inside ? " in" : ""}${row ? " row2" : ""}" data-j="${j}" style="left:${p(w.start)}%">${esc(w.word)}</span>`;
     });
     h += `<div class="shade" style="left:0;width:${p(c.start_sec)}%"></div><div class="shade" style="left:${p(c.end_sec)}%;right:0"></div>`;
     h += `<div class="rg" style="left:${p(c.start_sec)}%;width:${p(c.end_sec) - p(c.start_sec)}%"></div>`;
@@ -405,14 +369,7 @@ const Editor = (() => {
     if (prev && prev.dataset.j !== String(j)) prev.classList.remove("now");
     if (j >= 0 && !v.paused) {
       const el = W.querySelector(`.ed-w[data-j="${j}"]`);
-      if (el && !el.classList.contains("now")) {
-        el.classList.add("now");
-        const body = $("edTabText");
-        if (!body.hidden && !st.textHover) {
-          const y = el.offsetTop - body.offsetTop;
-          if (y < body.scrollTop + 20 || y > body.scrollTop + body.clientHeight - 60) body.scrollTo({ top: Math.max(0, y - body.clientHeight / 3), behavior: "smooth" });
-        }
-      }
+      if (el && !el.classList.contains("now")) el.classList.add("now");
     }
   }
 
@@ -717,11 +674,6 @@ const Editor = (() => {
     document.addEventListener("pointerdown", (e) => { if (st.pop && !e.target.closest(".ed-pop")) closePop(); });
     window.addEventListener("resize", () => { if (!$("editor").hidden && st.project) { renderOverview(); renderTrack(); updateScroll(); } });
     $("edList").addEventListener("scroll", updateScroll, { passive: true });
-    $("edTabText").addEventListener("mouseenter", () => { st.textHover = true; });
-    $("edTabText").addEventListener("mouseleave", () => { st.textHover = false; });
-    if (window.ResizeObserver) new ResizeObserver(() => fitStage()).observe($("edScreen"));
-    window.addEventListener("resize", fitStage);
-    video().addEventListener("loadedmetadata", fitStage);
     // Grab the strip with the mouse and drag it left or right. A real drag does not open the clip under the cursor.
     const L0 = $("edList");
     let drag = null;
