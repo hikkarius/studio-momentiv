@@ -150,6 +150,17 @@ app.add_middleware(
 )
 
 
+
+@app.middleware("http")
+async def revalidate_interface_files(request, call_next):
+    """Interface files (page, CSS, JS) are always re-checked by the browser, so after an update
+    people see the new look without Ctrl+F5. Unchanged files still come back as a cheap 304."""
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith(("/css/", "/js/")):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 # ─── Pydantic Models ──────────────────────────────────────────────────────────
 
 class UrlUploadRequest(BaseModel):
