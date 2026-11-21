@@ -76,12 +76,19 @@
             <option value="Storytelling">🎭 Емоційні історії</option>
           </select>
         </label>
+        <label class="hero-opt">Мова
+          <select id="heroLang" class="input-select" title="Мова, якою говорять у відео. Субтитри, заголовки й описи будуть цією мовою.">
+            <option value="uk">Українська</option>
+            <option value="auto">Автоматично</option>
+            <option value="en">Англійська</option>
+          </select>
+        </label>
       </div>
       <div class="dropzone hero-drop" id="dropzone" onclick="document.getElementById('fileInput').click()">
         <input type="file" id="fileInput" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,.mkv,.m4v,.avi" multiple style="display:none">
         <span id="tabFileContent">або перетягни сюди одне чи кілька відео (MP4, MOV, MKV)</span>
       </div>
-      <p class="hero-hint" id="heroHint">Мова: українська · кліпи 15–60 с · без перекриттів</p>
+      <p class="hero-hint" id="heroHint">Кліпи 15–60 с · без перекриттів</p>
 
       <!-- Video Loaded Info Box -->
       <div class="video-info-box" id="videoInfoBox" style="display:none;">
@@ -354,6 +361,8 @@
           </label>
           <label class="set-row">Мова відео
             <select class="input-select" data-key="whisper.language" id="setLang"></select>
+            <small>Це мова за замовчуванням; для окремого відео її можна змінити на головній.
+              «Автоматично» вгадує мову за першими ~30 секундами мови у відео.</small>
           </label>
         </div>
         <div class="set-group">

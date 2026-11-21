@@ -56,7 +56,7 @@ def test_load_cache_miss_returns_none():
     assert load_transcript_cache("non_existent_file_xyz_123.mp4") is None
 
 
-@patch("transcription.load_transcript_cache")
+@patch("transcription.load_transcript_cache_for")
 def test_transcribe_video_returns_cached_if_available(mock_cache):
     mock_cache.return_value = ([{"start": 0, "end": 5, "text": "cached"}], [], "en")
     status_calls = []
@@ -68,7 +68,7 @@ def test_transcribe_video_returns_cached_if_available(mock_cache):
     assert len(status_calls) == 1
 
 
-@patch("transcription.load_transcript_cache", return_value=None)
+@patch("transcription.load_transcript_cache_for", return_value=None)
 @patch("transcription.extract_audio")
 @patch("transcription.get_whisper")
 @patch("transcription.save_transcript_cache")
@@ -103,7 +103,7 @@ def test_transcribe_video_runs_whisper_on_cache_miss(
     assert "українською мовою" in call_kwargs.get("initial_prompt", "")
 
 
-@patch("transcription.load_transcript_cache", return_value=None)
+@patch("transcription.load_transcript_cache_for", return_value=None)
 @patch("transcription.extract_audio")
 @patch("transcription.get_whisper")
 @patch("transcription.save_transcript_cache")
@@ -139,7 +139,7 @@ def test_transcribe_video_openai_whisper_engine(
         app_state._whisper_engine = prev_engine
 
 
-@patch("transcription.load_transcript_cache", return_value=None)
+@patch("transcription.load_transcript_cache_for", return_value=None)
 @patch("transcription.extract_audio")
 @patch("transcription.get_whisper")
 @patch("transcription.save_transcript_cache")
@@ -161,7 +161,7 @@ def test_transcribe_video_omits_uk_prompt_for_non_uk_languages(
     assert call_kwargs["language"] == "en"
 
 
-@patch("transcription.load_transcript_cache", return_value=None)
+@patch("transcription.load_transcript_cache_for", return_value=None)
 @patch("transcription.extract_audio")
 @patch("transcription.get_whisper")
 @patch("transcription.save_transcript_cache")

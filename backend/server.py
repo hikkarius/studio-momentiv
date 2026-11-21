@@ -31,6 +31,7 @@ from backend import app_update, db, job_runner, queue_runner, storage, support_r
 from constants import resolve_filter_mode
 from state import app_state
 from transcription import load_transcript_cache
+from languages import is_supported, language_choices
 from utils import (
     download_from_url_with_title,
     extract_clip_slice,
@@ -159,6 +160,15 @@ class AnalyzeRequest(BaseModel):
     clips_count: int = Field(default=5, ge=1, le=100)
     filter_mode: str = "Viral Hooks"
     engine: str = "whisper_local"
+    language: str = ""   # '' = the language from the settings
+
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v and not is_supported(v):
+            raise ValueError("Невідома мова відео.")
+        return v
 
     @field_validator("engine")
     @classmethod
@@ -177,6 +187,15 @@ class QueueAddRequest(BaseModel):
     project_ids: List[str] = Field(default_factory=list, max_length=50)
     clips_count: int = Field(default=0, ge=0, le=100)   # 0 = auto by video length
     filter_mode: str = "Viral Hooks"
+    language: str = ""   # '' = the language from the settings
+
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v and not is_supported(v):
+            raise ValueError("Невідома мова відео.")
+        return v
 
     @field_validator("filter_mode")
     @classmethod
@@ -417,6 +436,7 @@ def start_analyze(project_id: str, payload: AnalyzeRequest):
         clips_count=payload.clips_count,
         filter_mode=payload.filter_mode,
         engine=payload.engine,
+        language=payload.language or None,
     )
     return {"job_id": job_id, "project_id": project_id, "status": "queued"}
 
@@ -1147,7 +1167,8 @@ def add_to_queue(payload: QueueAddRequest):
     added = []
     for url in dict.fromkeys(urls):
         added.append(db.add_queue_item(queue_runner.new_item_id(), source_url=url, title=url,
-                                       clips_count=payload.clips_count, filter_mode=payload.filter_mode))
+                                       clips_count=payload.clips_count, filter_mode=payload.filter_mode,
+                                       language=payload.language))
     for pid in dict.fromkeys(payload.project_ids):
         _validate_project_id(pid)
         proj = db.get_project(pid)
@@ -1156,7 +1177,8 @@ def add_to_queue(payload: QueueAddRequest):
         if pid in busy:
             continue
         added.append(db.add_queue_item(queue_runner.new_item_id(), project_id=pid, title=proj.get("title") or pid,
-                                       clips_count=payload.clips_count, filter_mode=payload.filter_mode))
+                                       clips_count=payload.clips_count, filter_mode=payload.filter_mode,
+                                       language=payload.language))
     queue_runner.notify()
     return {"added": added}
 
@@ -1181,7 +1203,8 @@ def retry_queue_item(item_id: str):
         raise HTTPException(status_code=409, detail="Повторити можна лише те, що не вдалося.")
     db.delete_queue_item(item_id)
     new = db.add_queue_item(queue_runner.new_item_id(), source_url=item["source_url"], project_id=item["project_id"],
-                            title=item["title"], clips_count=item["clips_count"], filter_mode=item["filter_mode"])
+                            title=item["title"], clips_count=item["clips_count"], filter_mode=item["filter_mode"],
+                            language=item.get("language") or "")
     queue_runner.notify()
     return {"item": new}
 
@@ -1206,11 +1229,7 @@ WHISPER_MODEL_CHOICES = [
     {"value": "medium", "label": "Середня (medium)"},
     {"value": "small", "label": "Швидка, менш точна (small)"},
 ]
-LANGUAGE_CHOICES = [
-    {"value": "uk", "label": "Українська"},
-    {"value": "auto", "label": "Визначати автоматично"},
-    {"value": "en", "label": "Англійська"},
-]
+LANGUAGE_CHOICES = language_choices()
 FILTER_CHOICES = [
     {"value": "Viral Hooks", "label": "🔥 Вірусні гачки"},
     {"value": "Actionable Advice", "label": "💡 Експертні поради"},
@@ -1261,6 +1280,9 @@ def update_settings(payload: Dict[str, Any]):
     if "studio" in patch and "default_filter" in patch["studio"]:
         if patch["studio"]["default_filter"] not in {c["value"] for c in FILTER_CHOICES}:
             raise HTTPException(status_code=400, detail="Невідомий стиль пошуку.")
+    if "whisper" in patch and "language" in patch["whisper"]:
+        if not is_supported(str(patch["whisper"]["language"])):
+            raise HTTPException(status_code=400, detail="Невідома мова відео.")
 
     old_model = app_config.whisper.model
     if patch:

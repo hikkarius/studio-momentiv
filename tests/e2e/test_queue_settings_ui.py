@@ -25,7 +25,7 @@ def clean_queue_and_settings(tmp_path):
     config_loader._assign_in_place(config_loader.app_config, saved_cfg)
 
 
-def _fake_analyze(job_id, project_id, clips_count, filter_mode, engine="whisper_local"):
+def _fake_analyze(job_id, project_id, clips_count, filter_mode, engine="whisper_local", language=None):
     db.update_project_status(project_id, "ready")
     job_runner.broadcast_update(job_id, {"status": "completed", "progress": 1.0, "message": "Готово!"})
 
@@ -75,6 +75,8 @@ def test_failed_item_shows_error_and_retry(page, studio, project, monkeypatch):
 def test_settings_change_applies_to_home(page, studio, project):
     page.goto(studio["url"] + "/")
     page.click("#btnOpenSettings")
+    # wait until the sheet shows the loaded settings, or the late load overwrites what we type
+    page.wait_for_function("document.querySelector(\"[data-key='clips.default_max_len']\").value === '60'")
     page.fill("[data-key='clips.default_max_len']", "45")
     page.press("[data-key='clips.default_max_len']", "Tab")
     page.wait_for_function("document.getElementById('heroHint').textContent.includes('15–45')")
@@ -124,3 +126,18 @@ def test_first_run_asks_for_gemini_key(page, studio, monkeypatch, tmp_path):
     page.locator("#welcomeScreen").wait_for(state="hidden")
     assert os.environ["GEMINI_API_KEY"] == "AIza" + "k" * 35
     assert (tmp_path / ".env").read_text(encoding="utf-8").strip().endswith("k" * 35)
+
+
+def test_language_choice_on_home_goes_into_queue(page, studio, project):
+    config_loader.save_user_settings({"whisper": {"language": "en"}})
+    page.goto(studio["url"] + "/")
+    page.wait_for_function("document.getElementById('heroLang').value === 'en'")   # default from settings
+    labels = page.eval_on_selector_all("#heroLang option", "els => els.map(e => e.textContent)")
+    assert "Автоматично" in labels and "Німецька" in labels
+
+    page.select_option("#heroLang", "auto")
+    page.fill("#urlInput", "https://youtu.be/english-talk")
+    page.click("#urlDownloadBtn")
+    page.locator("#queueList .q-item").first.wait_for()
+    assert [i["language"] for i in db.list_queue_items()] == ["auto"]
+    assert not page.errors

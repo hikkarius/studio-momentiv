@@ -82,16 +82,25 @@ const Settings = (() => {
     const v = view.values;
     const hc = $("heroClips");
     const hf = $("heroFilter");
+    const hl = $("heroLang");
+    if (hl) {
+      const keep = hl.dataset.touched ? hl.value : null;
+      if (hl.options.length !== view.choices.language.length) {
+        hl.innerHTML = "";
+        options(hl, view.choices.language);
+      }
+      hl.value = keep || v.whisper.language;
+      if (!hl.value) hl.value = "uk";
+    }
     if (hc && !hc.dataset.touched) {
       const val = String(v.studio.default_clips);
       if (![...hc.options].some((o) => o.value === val)) hc.add(new Option(val, val));
       hc.value = val;
     }
     if (hf && !hf.dataset.touched) hf.value = v.studio.default_filter;
-    const lang = (view.choices.language.find((l) => l.value === v.whisper.language) || {}).label || v.whisper.language;
     const overlap = Number(v.clips.max_overlap_sec) > 0 ? `перекриття до ${v.clips.max_overlap_sec} с` : "без перекриттів";
     const hint = $("heroHint");
-    if (hint) hint.textContent = `Мова: ${lang.toLowerCase()} · кліпи ${v.clips.default_min_len}–${v.clips.default_max_len} с · ${overlap}`;
+    if (hint) hint.textContent = `Кліпи ${v.clips.default_min_len}–${v.clips.default_max_len} с · ${overlap}`;
   }
 
   async function save(patch, okText = "Збережено ✓") {
@@ -273,7 +282,7 @@ const Settings = (() => {
     s.querySelectorAll("[data-key]").forEach((el) => el.addEventListener("change", () => onFieldChange(el)));
     $("setKeyInput").addEventListener("keydown", (e) => { if (e.key === "Enter") saveKey(); });
     $("diskProjects").addEventListener("click", onProjectAction);
-    ["heroClips", "heroFilter"].forEach((id) => {
+    ["heroClips", "heroFilter", "heroLang"].forEach((id) => {
       const el = $(id);
       if (el) el.addEventListener("change", () => { el.dataset.touched = "1"; });
     });

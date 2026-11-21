@@ -86,6 +86,7 @@ def init_db():
             title TEXT NOT NULL DEFAULT '',
             clips_count INTEGER NOT NULL DEFAULT 0, -- 0 = auto (by video length)
             filter_mode TEXT NOT NULL DEFAULT 'Viral Hooks',
+            language TEXT NOT NULL DEFAULT '', -- '' = the language from the settings, else uk/en/auto/...
             status TEXT NOT NULL DEFAULT 'waiting', -- waiting, downloading, analyzing, done, failed
             progress REAL NOT NULL DEFAULT 0.0,
             message TEXT NOT NULL DEFAULT '',
@@ -113,6 +114,10 @@ def init_db():
         if "vertical_opts" not in columns:
             # JSON: vertical 9:16 export settings of the clip (caption style, framing, word edits)
             conn.execute("ALTER TABLE candidate_clips ADD COLUMN vertical_opts TEXT NOT NULL DEFAULT '{}';")
+
+        queue_columns = [row["name"] for row in conn.execute("PRAGMA table_info(queue_items);").fetchall()]
+        if "language" not in queue_columns:
+            conn.execute("ALTER TABLE queue_items ADD COLUMN language TEXT NOT NULL DEFAULT '';")
 
 
 def _parse_score(raw_score: Any, default: int = 85) -> int:
@@ -462,16 +467,17 @@ def add_queue_item(
     title: str = "",
     clips_count: int = 0,
     filter_mode: str = "Viral Hooks",
+    language: str = "",
 ) -> Dict[str, Any]:
     now = time.time()
     with get_db() as conn:
         row = conn.execute("SELECT MAX(position) AS p FROM queue_items").fetchone()
         position = (row["p"] or 0) + 1
         conn.execute(
-            "INSERT INTO queue_items (id, source_url, project_id, title, clips_count, filter_mode, status, "
+            "INSERT INTO queue_items (id, source_url, project_id, title, clips_count, filter_mode, language, status, "
             "progress, message, position, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, 'waiting', 0.0, 'Чекає своєї черги', ?, ?, ?)",
-            (item_id, source_url, project_id, title, int(clips_count), filter_mode, position, now, now),
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', 0.0, 'Чекає своєї черги', ?, ?, ?)",
+            (item_id, source_url, project_id, title, int(clips_count), filter_mode, language or "", position, now, now),
         )
     return get_queue_item(item_id)
 
