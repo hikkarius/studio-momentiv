@@ -66,22 +66,33 @@ def test_home_theme_switch_persists(page, studio, project):
     assert not page.errors
 
 
+def head(page):
+    """«№N · title» of the open clip, as the stage heading shows it."""
+    return f'{page.locator("#edNo").text_content()} · {page.locator("#edClipTitle").text_content()}'
+
+
 def test_open_project_shows_editor_sorted_by_score(page, studio, project):
     open_editor(page, studio)
     rows = page.locator("#edList .ed-row")
     assert rows.count() == 4
     assert "Найкращий момент" in rows.nth(0).inner_text()
     # numbers follow the place in the video: the best clip (30–50 s) is the 2nd one in time
-    assert page.locator("#edClipNo").text_content().startswith("№2 · Найкращий момент")
+    assert head(page).startswith("№2 · Найкращий момент")
     assert page.locator("#edList .ed-num").all_inner_texts() == ["№2", "№4", "№1", "№3"]
     assert page.locator("#edOv .c").count() == 4
     assert page.locator("#edOv .lab").all_inner_texts() == ["1", "2", "3", "4"]
     assert page.locator("#edTrack").is_visible()  # the clip track sits right under the video
     screen = page.locator("#edScreen").bounding_box()
     track = page.locator("#edTrack").bounding_box()
-    assert 0 <= track["y"] - (screen["y"] + screen["height"]) < 30
+    assert 0 <= track["y"] - (screen["y"] + screen["height"]) < 50  # only the «Початок · с · Кінець» line between
     # trimmed screen: no score line next to the title, no ±0,5 / ↑↓ buttons, no bottom bar with the ZIP
     assert page.locator("#edClipMeta, [data-nudge], #edPrev, #edNext, .ed-bar, #edZip, #hwBadge").count() == 0
+    # step rail with both steps, download always on top of the side panel, «Чому» under the title
+    assert page.locator("#edMode button[data-m='table'][aria-selected='true']").is_visible()
+    assert "переглянуто 0/4" in page.locator("#edStep1").inner_text()
+    assert page.locator("#edMp4").is_visible()
+    assert "Сильний хук" in page.locator("#edWhy").inner_text()
+    assert "Переглянуто 0 з 4" in page.locator("#edProgTxt").inner_text()
     assert not page.errors
 
 
@@ -101,12 +112,12 @@ def test_keep_and_drop_with_buttons_and_keys(page, studio, project):
     open_editor(page, studio)
     page.click("#edKeep")  # best clip (#2) → keep; it stays open and the buttons turn into its status
     assert wait_for(page, lambda: clip(2)["review_status"] == "keep")
-    assert page.locator("#edClipNo").text_content().startswith("№2")
+    assert head(page).startswith("№2")
     assert not page.locator("#edKeep").is_visible() and not page.locator("#edDrop").is_visible()
     assert "Беру" in page.locator("#edDecide .ed-verdict-b").inner_text()
 
     page.keyboard.press("ArrowDown")  # move on by hand
-    assert page.locator("#edClipNo").text_content().startswith("№4")
+    assert head(page).startswith("№4")
     page.keyboard.press("n")  # second best (#4) → drop
     assert wait_for(page, lambda: clip(4)["review_status"] == "drop")
 
@@ -156,7 +167,7 @@ def test_click_on_video_plays_and_pauses(page, studio, project):
     assert page.evaluate("Editor.state().paused") is True
     page.click("#edScreen")
     page.wait_for_function("!Editor.state().paused")
-    page.wait_for_function("document.getElementById('edPlay').innerText.includes('Пауза')")
+    page.wait_for_function("document.getElementById('edPlay').getAttribute('aria-label') === 'Пауза'")
     page.wait_for_timeout(400)
     page.click("#edScreen")
     page.wait_for_function("Editor.state().paused")
@@ -289,12 +300,11 @@ def test_edit_post_texts(page, studio, project):
     page.press("#edTags", "Tab")
     assert wait_for(page, lambda: clip(2)["title"] == "Новий заголовок" and clip(2)["hashtags"] == ["#шорти", "#подкаст"])
     assert "Новий заголовок" in page.locator("#edList .ed-row").nth(0).text_content()
-    assert "Новий заголовок" in page.locator("#edClipNo").text_content()
+    assert "Новий заголовок" in head(page)
 
 
 def test_download_single_clip_and_zip(page, studio, project):
     open_editor(page, studio)
-    page.click("#edTabs button[data-tab='dl']")
     with page.expect_download() as dl:
         page.click("#edMp4")
     assert dl.value.suggested_filename.endswith(".mp4")
@@ -385,7 +395,6 @@ def test_vertical_preview_settings_and_download(page, studio, project):
     # Back to the table: Текст / Допис / Скачати are where they were.
     page.click("#edMode button[data-m='table']")
     assert page.locator("#edPlay").is_visible()
-    page.click("#edTabs button[data-tab='dl']")
     assert page.locator("#edMp4").is_visible() and page.locator("#edGoVx").is_visible()
     page.click("#edGoVx")
     assert page.locator("#vxPhone").is_visible()
@@ -439,3 +448,75 @@ def test_vertical_zip_of_kept_clips(page, studio, project):
     names = zipfile.ZipFile(io.BytesIO(open(dl.value.path(), "rb").read())).namelist()
     assert len(names) == 1 and names[0].endswith("_9x16_subs.mp4")
     assert not page.errors
+
+
+# ─── Step rail, header menu, clip strip (2026-11 layout) ────────────────────
+
+def test_title_is_edited_in_place(page, studio, project):
+    open_editor(page, studio)
+    t = page.locator("#edClipTitle")
+    t.click()
+    page.keyboard.press("Control+A")
+    page.keyboard.type("Заголовок з місця")
+    page.keyboard.press("y")  # typing in the title never marks the clip
+    page.keyboard.press("Enter")
+    assert wait_for(page, lambda: clip(2)["title"] == "Заголовок з місцяy")
+    assert clip(2)["review_status"] == ""
+    assert "Заголовок з місцяy" in page.locator("#edList .ed-row").nth(0).inner_text()
+    t.click()
+    page.keyboard.press("Control+A")
+    page.keyboard.press("Delete")
+    page.keyboard.press("Enter")  # an empty title is refused and the old one comes back
+    assert t.text_content() == "Заголовок з місцяy"
+    assert not page.errors
+
+
+def test_rail_folds_and_remembers(page, studio, project):
+    open_editor(page, studio)
+    assert page.locator("#edMode button[data-m='table'] b").is_visible()
+    page.click("#edFold")
+    assert page.evaluate("document.getElementById('editor').classList.contains('rail-mini')")
+    assert not page.locator("#edMode button[data-m='table'] b").is_visible()
+    assert page.locator("#edStep1").inner_text() == "0/4"
+    page.reload()
+    page.locator(".history-item-left", has_text="Тестовий подкаст").click()
+    page.locator("#editor").wait_for(state="visible")
+    assert page.evaluate("document.getElementById('editor').classList.contains('rail-mini')")
+    page.click("#edFold")
+    assert page.locator("#edMode button[data-m='table'] b").is_visible()
+    assert not page.errors
+
+
+def test_more_menu_and_next_button(page, studio, project):
+    open_editor(page, studio)
+    assert page.locator("#edReanalyze").is_hidden()
+    page.click("#edMore")
+    assert page.locator("#edReanalyze").is_visible()
+    page.keyboard.press("Escape")
+    assert page.locator("#edReanalyze").is_hidden()
+    page.click("#edKeep")
+    assert wait_for(page, lambda: clip(2)["review_status"] == "keep")
+    assert "Переглянуто 1 з 4 · обрано 1" in page.locator("#edProgTxt").inner_text()
+    page.click("#edGoNext")  # after a decision: on to the next clip in the strip
+    page.wait_for_function("Editor.state().num === 4")
+    assert not page.errors
+
+
+def test_step_two_strip_lists_kept_clips(page, studio, project):
+    open_editor(page, studio)
+    page.click("#edKeep")
+    assert wait_for(page, lambda: clip(2)["review_status"] == "keep")
+    page.click("#edMode button[data-m='vx']")
+    assert page.locator("#edList .ed-row").count() == 1
+    assert page.locator("#edStripTitle").inner_text().lower() == "обрані кліпи"
+    assert page.locator("#edFilters").is_hidden()
+    page.click("#edMode button[data-m='table']")
+    assert page.locator("#edList .ed-row").count() == 4
+    assert not page.errors
+
+
+def test_clip_thumbnail(studio, project):
+    import urllib.request
+    with urllib.request.urlopen(f"{studio['url']}/api/projects/{PROJECT_ID}/clips/2/thumbnail", timeout=20) as r:
+        assert r.headers["Content-Type"] == "image/jpeg"
+        assert len(r.read()) > 500
