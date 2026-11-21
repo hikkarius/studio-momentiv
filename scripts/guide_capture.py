@@ -137,9 +137,7 @@ with sync_playwright() as pw:
     pg.click("#edPlay"); wait(3); pg.click("#edPlay"); wait(0.5)
     pg.click("#edKeep"); wait(1.2); shot("08-keep")
     pg.keyboard.press("ArrowDown"); wait(1); pg.keyboard.press("y"); wait(1)
-    tab = pg.locator("[aria-controls='edTabDl'], button[data-tab='dl']").first
-    if tab.count():
-        tab.click(); wait(1.2); shot("09-download")
+    pg.hover("#edMp4"); wait(1.2); shot("09-download")  # «Скачати» sits on top of the side panel
     pg.click("#edMode button[data-m='vx']"); wait(1)
     pg.locator("#vxZipClean").scroll_into_view_if_needed(); pg.hover("#vxZipClean"); wait(1.5); shot("10-zip")
     ctx.close()

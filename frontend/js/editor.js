@@ -1,5 +1,5 @@
 /**
- * editor.js — «Монтажний стіл» (variant A, «Простий»).
+ * editor.js — «Монтажний стіл»: step rail on the left (Крок 1 / Крок 2), player and side panel, clip strip at the bottom.
  * Watch a clip, press «Беру» / «Не беру», move on. Right under the video sits the clip track:
  * the words laid out on time, draggable bracket edges, drag anywhere else to scrub, and a word menu
  * (start / end / listen). The playhead never leaves the clip: to hear more, move a bracket.
@@ -56,10 +56,17 @@ const Editor = (() => {
   const visible = () => ordered().filter((i) => matches(st.clips[i]));
 
   // ─── Rendering ─────────────────────────────────────────────────────────────
+  /** On step 2 the strip lists the kept clips (all of them while nothing is kept yet). */
+  function stripClips() {
+    if (st.mode !== "vx") return visible();
+    const kept = byTime().filter((i) => st.clips[i].review_status === "keep");
+    return kept.length ? kept : byTime();
+  }
+
   function renderList() {
     const L = $("edList");
     L.innerHTML = "";
-    const vis = visible();
+    const vis = stripClips();
     vis.forEach((i) => {
       const c = st.clips[i];
       const r = c.review_status || "";
@@ -68,43 +75,67 @@ const Editor = (() => {
       li.tabIndex = 0;
       li.dataset.i = i;
       li.setAttribute("aria-current", String(i === st.cur));
-      li.innerHTML = `<span class="ed-num">№${c.num}</span>
-        <div style="min-width:0"><div class="ed-rt">${esc(c.title)}</div>
-        <div class="ed-rm"><span>${fmtS(c.start_sec)}</span><span>${Math.round(len(c))} с</span>${r ? `<span class="ed-st ${r}">${r === "keep" ? "беру" : "ні"}</span>` : ""}</div></div>
-        <div class="ed-score">${esc(c.virality_score)}<small>оцінка</small></div>`;
+      li.title = c.title || "";
+      li.innerHTML = `<div class="ed-th"><img src="/api/projects/${pid()}/clips/${c.clip_index}/thumbnail?s=${Math.round(c.start_sec * 10)}" alt="" loading="lazy" onerror="this.remove()">
+          <span class="ed-num">№${c.num}</span><span class="ed-dur">${Math.round(len(c))} с</span>${r === "keep" ? '<span class="ed-ok" title="Беру">✓</span>' : ""}</div>
+        <div class="ed-rb"><div class="ed-rt">${esc(c.title)}</div>
+        <div class="ed-rm"><span>${fmtS(c.start_sec)}${r === "drop" ? " · не беру" : ""}</span><span class="s">★ ${esc(c.virality_score)}</span></div></div>`;
       li.addEventListener("click", () => select(i));
       li.addEventListener("keydown", (e) => { if (e.key === "Enter") select(i); });
       L.appendChild(li);
     });
     if (!vis.length) L.innerHTML = `<li class="ed-empty">Тут поки порожньо.</li>`;
+    const anyKept = st.clips.some((c) => c.review_status === "keep");
+    $("edStripTitle").textContent = st.mode === "vx" && anyKept ? "Обрані кліпи" : "Кліпи";
+    const note = document.querySelector("#editor .ed-vx-note");
+    note.textContent = anyKept ? "Тут лише кліпи з позначкою «Беру». Щоб додати ще, повернись на крок 1." : "Ще нічого не обрано: познач кліпи «Беру» на кроці 1, тоді тут будуть лише вони.";
 
     const count = (f) => st.clips.filter((c) => (f === "all" ? true : f === "new" ? !c.review_status : c.review_status === f)).length;
     ["all", "new", "keep", "drop"].forEach((f) => { $(`edCnt_${f}`).textContent = count(f); });
+    renderProgress();
+    updateScroll();
   }
 
-  /** Whole-video strip. Numbers sit on two rows so neighbouring clips never hide each other's number. */
+  /** Header bar and the step counters: how many clips are reviewed and kept. */
+  function renderProgress() {
+    const n = st.clips.length || 1;
+    const kept = st.clips.filter((c) => c.review_status === "keep").length;
+    const seen = st.clips.filter((c) => c.review_status).length;
+    $("edProgKeep").style.width = `${(kept / n) * 100}%`;
+    $("edProgSeen").style.width = `${((seen - kept) / n) * 100}%`;
+    $("edProgTxt").textContent = `Переглянуто ${seen} з ${st.clips.length} · обрано ${kept}`;
+    const mini = $("editor").classList.contains("rail-mini");
+    const allSeen = seen === st.clips.length && st.clips.length > 0;
+    const b1 = document.querySelector('#edMode [data-m="table"]');
+    b1.classList.toggle("done", allSeen && st.mode === "vx");
+    $("edStep1").textContent = allSeen && st.mode === "vx" ? (mini ? `✓ ${kept}` : `✓ обрано ${kept}`) : (mini ? `${seen}/${st.clips.length}` : `переглянуто ${seen}/${st.clips.length}`);
+    $("edStep2").textContent = mini ? String(kept) : st.mode === "vx" ? `${kept} ${kept === 1 ? "кліп" : kept > 1 && kept < 5 ? "кліпи" : "кліпів"}` : `обрано ${kept}`;
+  }
+
+  function updateScroll() {
+    const L = $("edList");
+    const more = L.scrollWidth > L.clientWidth + 4;
+    $("edScrollPrev").hidden = !more || L.scrollLeft < 8;
+    $("edScrollNext").hidden = !more || L.scrollLeft + L.clientWidth >= L.scrollWidth - 8;
+  }
+
+  function scrollToCurrent() {
+    const row = $("edList").querySelector('[aria-current="true"]');
+    if (row) row.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  /** Thin map of the whole video next to the strip filters: every clip numbered by its place in the video. */
   function renderOverview() {
     const el = $("edOv");
-    const W = el.clientWidth || 800;
     const dur = st.project.duration || 1;
-    const sorted = [...st.clips.keys()].sort((a, b) => st.clips[a].start_sec - st.clips[b].start_sec);
-    let h = `<div class="lane">`;
-    sorted.forEach((i) => {
+    let h = "";
+    [...st.clips.keys()].sort((a, b) => st.clips[a].start_sec - st.clips[b].start_sec).forEach((i) => {
       const c = st.clips[i];
+      const w = Math.max(0.6, (len(c) / dur) * 100);
       h += `<div class="c${c.review_status ? " " + c.review_status : ""}${i === st.cur ? " sel" : ""}" data-i="${i}"
-        style="left:${(c.start_sec / dur) * 100}%;width:${Math.max(0.35, (len(c) / dur) * 100)}%" title="№${c.num} ${esc(c.title)} (${fmtS(c.start_sec)})"></div>`;
+        style="left:${(c.start_sec / dur) * 100}%;width:${w}%" title="№${c.num} ${esc(c.title)} (${fmtS(c.start_sec)})"><span class="lab">${c.num}</span></div>`;
     });
-    h += `<div class="pl" id="edPh"></div></div>`;
-    const last = [-99, -99];
-    sorted.forEach((i) => {
-      const c = st.clips[i];
-      const x = ((c.start_sec + c.end_sec) / 2 / dur) * W;
-      const row = x - last[0] >= 24 ? 0 : 1;
-      last[row] = x;
-      h += `<span class="lab r${row}${c.review_status ? " " + c.review_status : ""}${i === st.cur ? " sel" : ""}" data-i="${i}" style="left:${x}px">${c.num}</span>`;
-      if (row === 1) h += `<span class="tick" style="left:${x}px"></span>`;
-    });
-    [0, 0.25, 0.5, 0.75, 1].forEach((f) => { h += `<span class="tm" style="left:${Math.min(Math.max(f * W, 14), W - 16)}px">${fmtS(dur * f)}</span>`; });
+    h += `<div class="pl" id="edPh"></div>`;
     el.innerHTML = h;
     placePlayhead(video().currentTime || 0);
   }
@@ -112,8 +143,10 @@ const Editor = (() => {
   function renderDetails() {
     const c = clip();
     if (!c) return;
-    $("edClipNo").textContent = `№${c.num} · ${c.title || ""}`;
-    $("vxClipNo").textContent = $("edClipNo").textContent;
+    $("edNo").textContent = `№${c.num}`;
+    if (document.activeElement !== $("edClipTitle")) $("edClipTitle").textContent = c.title || "";
+    $("edScore").innerHTML = c.virality_score != null ? `оцінка ШІ <b>★ ${esc(c.virality_score)}</b>` : "";
+    $("vxClipNo").textContent = `№${c.num} · ${c.title || ""}`;
     $("edKeep").setAttribute("aria-pressed", String(c.review_status === "keep"));
     $("edDrop").setAttribute("aria-pressed", String(c.review_status === "drop"));
     $("vxKeep").setAttribute("aria-pressed", String(c.review_status === "keep"));
@@ -124,11 +157,14 @@ const Editor = (() => {
       d.classList.toggle("is-drop", c.review_status === "drop");
       d.querySelector(".ed-verdict-b").textContent = c.review_status === "keep" ? "✓ Беру · у добірці" : c.review_status === "drop" ? "✕ Не беру" : "";
     });
-    $("edWhy").textContent = c.reason || "";
+    $("edWhy").innerHTML = c.reason ? `<b>Чому:</b> ${esc(c.reason)}` : "";
+    $("edStartTc").textContent = fmt(c.start_sec);
+    $("edEndTc").textContent = fmt(c.end_sec);
+    $("edLen").textContent = `${Math.round(len(c))} с`;
     if (document.activeElement !== $("edTitle")) $("edTitle").value = c.title || "";
     if (document.activeElement !== $("edCaption")) $("edCaption").value = c.caption || "";
     if (document.activeElement !== $("edTags")) $("edTags").value = (c.hashtags || []).join(" ");
-    $("edMp4Info").textContent = `MP4 · ${Math.round(len(c))} с`;
+    $("edMp4Info").innerHTML = `${Math.round(len(c))} с<span class="q"> · оригінальна якість</span>`;
     renderTc();
   }
 
@@ -168,7 +204,6 @@ const Editor = (() => {
     document.querySelectorAll("#edTabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === st.tab)));
     $("edTabText").hidden = st.tab !== "text";
     $("edTabPost").hidden = st.tab !== "post";
-    $("edTabDl").hidden = st.tab !== "dl";
   }
 
   /** List order: best score first, or as the clips go in the video. Remembered. */
@@ -186,8 +221,9 @@ const Editor = (() => {
     document.querySelectorAll("#edMode button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.m === st.mode)));
     const vx = st.mode === "vx";
     document.querySelector("#editor .ed-cols").classList.toggle("vx-mode", vx);
-    document.getElementById("editor").classList.toggle("is-vx", vx); // the whole-video strip steps aside: more room for the 9:16 screen
+    document.getElementById("editor").classList.toggle("is-vx", vx);
     $("edVx").hidden = !vx;
+    if (st.project) renderList();
     if (vx) { if (typeof Vertical !== "undefined") Vertical.onShow(); }
     else if (st.project && clip()) { renderOverview(); renderTrack(); }
   }
@@ -251,8 +287,7 @@ const Editor = (() => {
     renderOverview();
     renderDetails();
     renderTrack();
-    const row = $("edList").querySelector('[aria-current="true"]');
-    if (row) row.scrollIntoView({ block: "nearest" });
+    scrollToCurrent();
     seek(clip().start_sec);
     if (typeof Vertical !== "undefined") Vertical.onClip();
     await loadWords();
@@ -338,7 +373,8 @@ const Editor = (() => {
   function onPlayState() {
     const paused = video().paused;
     $("edScreen").classList.toggle("paused", paused);
-    $("edPlay").innerHTML = paused ? "▶ Грати" : "❚❚ Пауза";
+    $("edPlay").textContent = paused ? "▶" : "❚❚";
+    $("edPlay").setAttribute("aria-label", paused ? "Грати" : "Пауза");
     if (paused) { const n = $("edWords").querySelector(".ed-w.now"); if (n) n.classList.remove("now"); }
   }
 
@@ -531,7 +567,7 @@ const Editor = (() => {
   }
 
   function step(dir) {
-    const vis = visible();
+    const vis = stripClips();
     if (!vis.length) return;
     let pos = vis.indexOf(st.cur);
     pos = pos < 0 ? 0 : Math.max(0, Math.min(vis.length - 1, pos + dir));
@@ -560,12 +596,24 @@ const Editor = (() => {
     document.body.appendChild(a); a.click(); a.remove();
   }
 
+  /** The step rail folds to a narrow strip of pictures. Remembered. */
+  function setRail(mini, remember = false) {
+    $("editor").classList.toggle("rail-mini", mini);
+    $("edFold").setAttribute("aria-expanded", String(!mini));
+    $("edFold").title = mini ? "Розгорнути меню" : "Згорнути меню";
+    $("edFold").querySelector(".ed-fold-ic").textContent = mini ? "»" : "«";
+    if (remember) { try { localStorage.setItem("studio-rail", mini ? "mini" : "full"); } catch (_) {} }
+    if (st.project) { renderProgress(); renderOverview(); renderTrack(); updateScroll(); }
+  }
+
+  function closeMore() { $("edMorePop").hidden = true; $("edMore").setAttribute("aria-expanded", "false"); }
+
   // ─── Keyboard ──────────────────────────────────────────────────────────────
   function onKey(e) {
     if ($("editor").hidden) return;
     if (e.key === "Escape") { closePop(); return; }
-    if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.target.closest && e.target.closest(".theme-menu")) return; // the theme drop-down handles its own keys
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target.closest && e.target.closest(".theme-menu, .ed-more")) return; // the theme drop-down handles its own keys
     const k = e.key;
     if (k === " ") { e.preventDefault(); togglePlay(); }
     else if (k === "ArrowDown" || k === "j" || k === "о") { e.preventDefault(); step(1); }
@@ -587,7 +635,7 @@ const Editor = (() => {
     st.tab = "text";
     document.querySelectorAll("#edFilters button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.f === "all")));
     $("edProjTitle").textContent = project.title || "Відео";
-    $("edProjMeta").textContent = ` · ${fmtS(project.duration || 0)} · ${clips.length} кліпів`;
+    $("edProjMeta").textContent = `${fmtS(project.duration || 0)} · ${clips.length} кліпів`;
     const v = video();
     v.src = `/api/media?path=${encodeURIComponent(project.source_path)}`;
     v.load();
@@ -597,6 +645,9 @@ const Editor = (() => {
     let mode = "table";
     try { mode = localStorage.getItem("studio-mode") || "table"; } catch (_) {}
     setMode(mode);
+    let mini = false;
+    try { mini = localStorage.getItem("studio-rail") === "mini"; } catch (_) {}
+    setRail(mini);
     let sort = "score";
     try { sort = localStorage.getItem("studio-sort") || "score"; } catch (_) {}
     setSort(sort);
@@ -620,7 +671,31 @@ const Editor = (() => {
     }
     document.addEventListener("keydown", onKey);
     document.addEventListener("pointerdown", (e) => { if (st.pop && !e.target.closest(".ed-pop")) closePop(); });
-    window.addEventListener("resize", () => { if (!$("editor").hidden && st.project) { renderOverview(); renderTrack(); } });
+    window.addEventListener("resize", () => { if (!$("editor").hidden && st.project) { renderOverview(); renderTrack(); updateScroll(); } });
+    $("edList").addEventListener("scroll", updateScroll, { passive: true });
+    $("edList").addEventListener("wheel", (e) => { // a mouse wheel scrolls the strip sideways
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { e.currentTarget.scrollLeft += e.deltaY; e.preventDefault(); }
+    }, { passive: false });
+    $("edScrollPrev").addEventListener("click", () => { $("edList").scrollLeft -= $("edList").clientWidth * 0.8; });
+    $("edScrollNext").addEventListener("click", () => { $("edList").scrollLeft += $("edList").clientWidth * 0.8; });
+    $("edFold").addEventListener("click", () => setRail(!$("editor").classList.contains("rail-mini"), true));
+    $("edMore").addEventListener("click", (e) => { e.stopPropagation(); const on = $("edMorePop").hidden; $("edMorePop").hidden = !on; $("edMore").setAttribute("aria-expanded", String(on)); });
+    document.addEventListener("click", (e) => { if (!e.target.closest(".ed-more")) closeMore(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMore(); });
+    $("edGoNext").addEventListener("click", () => step(1));
+    const T0 = $("edClipTitle");
+    T0.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); T0.blur(); }
+      else if (e.key === "Escape") { T0.textContent = clip()?.title || ""; T0.blur(); }
+    });
+    T0.addEventListener("blur", () => {
+      const c = clip();
+      if (!c) return;
+      const val = T0.textContent.replace(/\s+/g, " ").trim();
+      if (!val) { T0.textContent = c.title || ""; toast("Заголовок не може бути порожнім", true); return; }
+      if (val === c.title) return;
+      c.title = val; renderList(); renderDetails(); patch({ title: val });
+    });
     const v = video();
     v.addEventListener("timeupdate", onTime);
     v.addEventListener("play", onPlayState);
@@ -668,7 +743,6 @@ const Editor = (() => {
     $("edCopyCaption").addEventListener("click", () => copy($("edCaption").value));
     $("edCopyTags").addEventListener("click", () => copy($("edTags").value));
     $("edCopyPost").addEventListener("click", () => copy(postText()));
-    $("edCopyPost2").addEventListener("click", () => copy(postText()));
     $("edMp4").addEventListener("click", () => { toast("Готуємо відео…"); download(`/api/projects/${pid()}/clips/${clip().clip_index}/download`); });
     $("edSrt").addEventListener("click", () => download(`/api/projects/${pid()}/clips/${clip().clip_index}/export-srt`));
     document.querySelectorAll("#edMode button").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.m)));
@@ -686,6 +760,7 @@ const Editor = (() => {
       if (typeof loadRecentProjects === "function") loadRecentProjects();
     });
     $("edReanalyze").addEventListener("click", () => {
+      closeMore();
       close();
       if (typeof retryAnalysisForCurrentProject === "function") retryAnalysisForCurrentProject();
     });

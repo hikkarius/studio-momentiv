@@ -7,7 +7,7 @@
 const StudioTheme = (() => {
   const KEY = "studio-theme";
   const MODES = ["system", "light", "dark"];
-  const LABELS = { light: "☀ Світла", dark: "☾ Темна", system: "Тема: авто" };
+  const LABELS = { light: "☀ Світла", dark: "☾ Темна", system: "◐ Тема: авто" };
 
   function get() {
     try {

@@ -150,6 +150,17 @@ app.add_middleware(
 )
 
 
+
+@app.middleware("http")
+async def revalidate_interface_files(request, call_next):
+    """Interface files (page, CSS, JS) are always re-checked by the browser, so after an update
+    people see the new look without Ctrl+F5. Unchanged files still come back as a cheap 304."""
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith(("/css/", "/js/")):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 # ─── Pydantic Models ──────────────────────────────────────────────────────────
 
 class UrlUploadRequest(BaseModel):
@@ -666,6 +677,24 @@ def download_clip_slice(project_id: str, clip_index: int):
         media_type="video/mp4",
         filename=slice_filename,
     )
+
+
+@app.get("/api/projects/{project_id}/clips/{clip_index}/thumbnail")
+def get_clip_thumbnail(project_id: str, clip_index: int):
+    """A small picture of the clip for the clip strip: a frame from its first seconds, made once per bounds."""
+    thumb_dir = _safe_project_output_dir(project_id) / "clip_thumbs"
+    proj, target_clip = _get_project_and_clip(project_id, clip_index)
+    start = float(target_clip.get("start_sec") or 0.0)
+    end = float(target_clip.get("end_sec") or start)
+    thumb_path = thumb_dir / f"{int(clip_index)}_{int(round(start * 10))}.jpg"
+    if not thumb_path.exists():
+        source_path = proj.get("source_path", "")
+        if source_path and os.path.exists(source_path):
+            at = start + min(2.0, max(0.0, (end - start) / 3))
+            generate_video_thumbnail(source_path, str(thumb_path), at_sec=at)
+    if thumb_path.exists():
+        return FileResponse(str(thumb_path), media_type="image/jpeg", headers={"Cache-Control": "max-age=86400"})
+    raise HTTPException(status_code=404, detail="Прев'ю недоступне.")
 
 
 class ClipUpdateRequest(BaseModel):
