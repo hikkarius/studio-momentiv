@@ -21,6 +21,15 @@ $Keep = @(".env", "user_settings.json", "studio_data.db", "studio_data.db-wal", 
           ".venv", "tools", "web_output", "web_uploads", ".transcript_cache", ".render_tmp",
           "install.log", "update.log", "shorts_automator.log")
 
+function Run($exe, [string[]]$argv) {
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & $exe @argv 2>&1 | ForEach-Object { "$_" } | Out-Host
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $old
+    return $code
+}
+
 Start-Transcript -Path (Join-Path $Root "update.log") -Force | Out-Null
 try {
     Write-Host "Студія моментів: оновлення" -ForegroundColor Yellow
@@ -73,12 +82,11 @@ try {
         Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 
         Write-Host "Оновлюю бібліотеки..."
-        & $UvExe pip install --python $Py -r (Join-Path $Root "requirements-base.txt")
-        if ($LASTEXITCODE -ne 0) { throw "Не вдалося оновити бібліотеки." }
+        if ((Run $UvExe @("pip", "install", "--python", $Py, "-r", (Join-Path $Root "requirements-base.txt"))) -ne 0) { throw "Не вдалося оновити бібліотеки." }
         if (Test-Path (Join-Path $Root ".venv\Lib\site-packages\nvidia")) {
-            & $UvExe pip install --python $Py -r (Join-Path $Root "requirements-gpu.txt")
+            Run $UvExe @("pip", "install", "--python", $Py, "-r", (Join-Path $Root "requirements-gpu.txt")) | Out-Null
         }
-        & $UvExe cache clean --quiet 2>$null
+        Run $UvExe @("cache", "clean") | Out-Null
         Write-Host "Готово! Оновлено до версії $latest." -ForegroundColor Green
     }
 

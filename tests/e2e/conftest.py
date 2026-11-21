@@ -91,6 +91,9 @@ def studio(tmp_path_factory):
     server.load_transcript_cache = lambda p, **kw: ([], words, "uk")
     subtitles_generator.load_transcript_cache = lambda p, **kw: ([], words, "uk")
     db.init_db()
+    # A key is "saved", so the first-run «встав ключ Gemini» screen stays closed in these tests
+    saved["key"] = os.environ.get("GEMINI_API_KEY")
+    os.environ["GEMINI_API_KEY"] = "e2e-fake-key-" + "x" * 30
 
     port = _free_port()
     cfg = uvicorn.Config(server.app, host="127.0.0.1", port=port, log_level="warning", lifespan="off")
@@ -110,6 +113,10 @@ def studio(tmp_path_factory):
     server.UPLOADS_DIR, server.OUTPUT_DIR = saved["up"], saved["out"]
     job_runner.UPLOADS_DIR, job_runner.OUTPUT_DIR = saved["jup"], saved["jout"]
     server.load_transcript_cache = saved["ltc"]
+    if saved["key"] is None:
+        os.environ.pop("GEMINI_API_KEY", None)
+    else:
+        os.environ["GEMINI_API_KEY"] = saved["key"]
     subtitles_generator.load_transcript_cache = saved["sltc"]
 
 

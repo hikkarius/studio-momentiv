@@ -35,6 +35,17 @@ function Fail($text) {
     exit 1
 }
 
+# Запускає програму так, щоб увесь її вивід (і помилки) потрапили у вікно та в install.log.
+# У PowerShell 5 рядки stderr при ErrorActionPreference=Stop стають фатальними, тому тут Continue.
+function Run($exe, [string[]]$argv) {
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & $exe @argv 2>&1 | ForEach-Object { "$_" } | Out-Host
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $old
+    return $code
+}
+
 function Download($url, $dest) {
     for ($i = 1; $i -le 3; $i++) {
         try {
@@ -53,7 +64,7 @@ try {
     Write-Host "   Студія моментів: встановлення" -ForegroundColor Yellow
     Write-Host "==============================================" -ForegroundColor Yellow
     Write-Host "Папка: $Root"
-    Write-Host "Перше встановлення займає 10-20 хвилин (качається 1-3 ГБ). Не закривай це вікно."
+    Write-Host "Перше встановлення займає 10-30 хвилин (качається 3-5 ГБ). Не закривай це вікно."
 
     if ($Root -match "OneDrive") {
         Warn "Студія лежить у папці OneDrive. Краще перенести її, наприклад, у C:\StudioMomentiv: OneDrive синхронізує гігабайти відео."
@@ -81,8 +92,7 @@ try {
     # 2. Python 3.12 у .venv
     Step 2 $total "Ставлю Python 3.12"
     if (-not (Test-Path $Py)) {
-        & $UvExe venv $Venv --python 3.12 --quiet
-        if ($LASTEXITCODE -ne 0) { Fail "uv не зміг створити середовище Python." }
+        if ((Run $UvExe @("venv", $Venv, "--python", "3.12")) -ne 0) { Fail "uv не зміг створити середовище Python." }
     }
     Ok (& $Py --version)
 
@@ -102,11 +112,9 @@ try {
 
     # 4. Бібліотеки
     Step 4 $total "Ставлю бібліотеки (найдовший крок)"
-    & $UvExe pip install --python $Py -r (Join-Path $Root "requirements-base.txt")
-    if ($LASTEXITCODE -ne 0) { Fail "Не вдалося поставити бібліотеки (requirements-base.txt)." }
+    if ((Run $UvExe @("pip", "install", "--python", $Py, "-r", (Join-Path $Root "requirements-base.txt"))) -ne 0) { Fail "Не вдалося поставити бібліотеки (requirements-base.txt)." }
     if ($gpu) {
-        & $UvExe pip install --python $Py -r (Join-Path $Root "requirements-gpu.txt")
-        if ($LASTEXITCODE -ne 0) { Warn "Бібліотеки для відеокарти не поставились, студія працюватиме на процесорі." }
+        if ((Run $UvExe @("pip", "install", "--python", $Py, "-r", (Join-Path $Root "requirements-gpu.txt"))) -ne 0) { Warn "Бібліотеки для відеокарти не поставились, студія працюватиме на процесорі." }
     }
     Ok "Бібліотеки встановлено"
 
@@ -130,18 +138,26 @@ try {
     # 6. Модель розпізнавання мови, щоб перше відео не чекало завантаження
     Step 6 $total "Качаю модель розпізнавання мови"
     Push-Location $Root
-    & $Py -c "import yaml; from faster_whisper.utils import download_model; m = (yaml.safe_load(open('config.yaml', encoding='utf-8')) or {}).get('whisper', {}).get('model', 'small'); download_model(m); print('model', m)"
+    $code = Run $Py @("-c", "import yaml; from faster_whisper.utils import download_model; m = (yaml.safe_load(open('config.yaml', encoding='utf-8')) or {}).get('whisper', {}).get('model', 'small'); print('model', m); download_model(m)")
     Pop-Location
-    if ($LASTEXITCODE -ne 0) { Warn "Модель докачається під час першого відео." } else { Ok "Модель готова" }
+    if ($code -ne 0) { Warn "Модель докачається під час першого відео." } else { Ok "Модель готова" }
 
-    & $UvExe cache clean --quiet 2>$null
+    Run $UvExe @("cache", "clean") | Out-Null
 
     # Ярлик на робочому столі
     $desktop = [Environment]::GetFolderPath("Desktop")
-    $lnkPath = Join-Path $desktop "Студія моментів.lnk"
     $shell = New-Object -ComObject WScript.Shell
+    $target = Join-Path $Root "Запустити.bat"
+    # Не перезаписуємо ярлик, що веде на іншу копію студії: робимо «Студія моментів 2», «3»...
+    $lnkPath = Join-Path $desktop "Студія моментів.lnk"
+    $n = 1
+    while ((Test-Path $lnkPath) -and ($shell.CreateShortcut($lnkPath).TargetPath -ne $target)) {
+        $n++
+        $lnkPath = Join-Path $desktop "Студія моментів $n.lnk"
+    }
+    if ($n -gt 1) { Warn "На робочому столі вже є ярлик іншої копії студії. Новий названо «Студія моментів $n»." }
     $lnk = $shell.CreateShortcut($lnkPath)
-    $lnk.TargetPath = Join-Path $Root "Запустити.bat"
+    $lnk.TargetPath = $target
     $lnk.WorkingDirectory = $Root
     $lnk.WindowStyle = 7
     $icon = Join-Path $Root "assets\icon.ico"

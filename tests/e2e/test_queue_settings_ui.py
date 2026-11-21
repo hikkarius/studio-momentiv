@@ -106,3 +106,21 @@ def test_disk_tab_shows_sizes_and_cleans_clip_files(page, studio, project):
     page.wait_for_function("!document.querySelector('#diskProjects [data-clean]')")
     assert not d.exists()
     assert not page.errors
+
+
+def test_first_run_asks_for_gemini_key(page, studio, monkeypatch, tmp_path):
+    import os
+    import config_loader
+    from backend import app_update
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(config_loader, "ENV_PATH", tmp_path / ".env")  # never touch the real .env
+    monkeypatch.setattr(config_loader, "ensure_gemini_api_key", lambda: os.environ.get("GEMINI_API_KEY"))
+    monkeypatch.setattr(app_update, "check_gemini_key", lambda k: {"ok": True, "message": "Ключ працює."})
+    page.goto(studio["url"] + "/")
+    page.locator("#welcomeScreen").wait_for(state="visible")
+    page.fill("#welcomeKey", "AIza" + "k" * 35)
+    page.click("#welcomeSave")
+    page.locator("#welcomeMsg.ok").wait_for()
+    page.locator("#welcomeScreen").wait_for(state="hidden")
+    assert os.environ["GEMINI_API_KEY"] == "AIza" + "k" * 35
+    assert (tmp_path / ".env").read_text(encoding="utf-8").strip().endswith("k" * 35)
