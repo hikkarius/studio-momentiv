@@ -545,8 +545,10 @@
       <header class="ed-top">
         <div class="ed-crumb"><b id="edProjTitle"></b><span id="edProjMeta"></span></div>
         <div class="ed-prog" id="edProg">
-          <div class="ed-prog-line"><span>Переглянуто <b id="edProgTxt"></b></span><span class="k">✓ беру <b id="edCntKeep">0</b></span><span class="d">✕ не беру <b id="edCntDrop">0</b></span><span class="l">ще не дивився <b id="edCntLeft">0</b></span></div>
-          <i class="ed-pbar"><b id="edProgKeep"></b><u id="edProgSeen"></u></i>
+          <div class="ed-stat ed-stat-main"><span>Переглянуто</span><b id="edProgTxt"></b><i class="ed-pbar"><b id="edProgKeep"></b><u id="edProgSeen"></u></i></div>
+          <div class="ed-stat keep"><span>Беру</span><b id="edCntKeep">0</b></div>
+          <div class="ed-stat drop"><span>Не беру</span><b id="edCntDrop">0</b></div>
+          <div class="ed-stat"><span>Ще не дивився</span><b id="edCntLeft">0</b></div>
         </div>
         <span class="ed-spacer"></span>
         <button class="ed-reanalyze" id="edReanalyze" type="button" title="Gemini ще раз перегляне розмову і запропонує нові кліпи. Транскрипція береться з кешу, тож це швидко.">
@@ -575,6 +577,7 @@
           <div class="ed-controls">
             <button class="ed-play" id="edPlay" type="button" title="Грати або пауза (Пробіл)" aria-label="Грати">▶</button>
             <span class="ed-tc" id="edTc"></span>
+            <span class="ed-spacer"></span>
             <div class="ed-decide" id="edDecide">
               <button class="ed-btn big keep" id="edKeep" type="button" aria-pressed="false">✓ Беру <kbd>Y</kbd></button>
               <button class="ed-btn big drop" id="edDrop" type="button" aria-pressed="false">✕ Не беру <kbd>N</kbd></button>
