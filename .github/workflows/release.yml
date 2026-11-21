@@ -1,10 +1,13 @@
 name: Release for friends
 
-# Push a tag like v1.0.1 (it must match "version" in version.json) and this builds
-# Studio-Momentiv.zip and attaches it to a GitHub Release. The studio's «Оновити» button downloads it.
+# Raise "version" in version.json and push to main: this builds Studio-Momentiv.zip and publishes
+# GitHub Release v<version> with it. The studio's «Оновити» button downloads that file.
+# Nothing happens if a release for that version already exists.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: [version.json]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -15,12 +18,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check version.json matches the tag
+      - name: Read version
+        id: v
         run: |
           v=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")
-          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "version.json says $v but tag is ${GITHUB_REF_NAME}"; exit 1; }
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          if gh release view "v$v" >/dev/null 2>&1; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Build Studio-Momentiv.zip
+        if: steps.v.outputs.exists == 'false'
         run: |
           mkdir -p dist/Studio-Momentiv
           git ls-files -z | grep -zvE '^(tests/|\.github/|\.agents/|\.antigravity/|review_agent\.py$|pytest\.ini$|\.coveragerc$|\.dockerignore$|requirements-dev\.txt$)' \
@@ -28,7 +36,11 @@ jobs:
           cd dist && python3 -c "import shutil; shutil.make_archive('Studio-Momentiv', 'zip', '.', 'Studio-Momentiv')"
 
       - name: Publish the release
+        if: steps.v.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Студія моментів ${{ steps.v.outputs.tag }}
           files: dist/Studio-Momentiv.zip
           generate_release_notes: true
