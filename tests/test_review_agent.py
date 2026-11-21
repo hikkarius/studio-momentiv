@@ -178,7 +178,9 @@ def test_check_secret_leak_prevention(tmp_path):
     auditor = CodeAuditor(tmp_path)
     config_file = tmp_path / "config.py"
 
-    code_bad = "GEMINI_KEY = 'AIzaSyD-fakeKeyExample12345678901234567'"
+    # Built at runtime so GitHub secret scanning does not mistake this fake key for a real one
+    fake_key = "AI" + "za" + "Sy" + "D-fake" + "0" * 27
+    code_bad = f"GEMINI_KEY = '{fake_key}'"
     auditor.check_secret_leak_prevention(config_file, code_bad)
     assert len(auditor.issues) == 1
     assert "hardcoded Google API key" in auditor.issues[0].message
