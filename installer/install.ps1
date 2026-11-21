@@ -3,6 +3,8 @@
 # нічого не потрапляє в систему, крім ярлика на робочому столі.
 # Повторний запуск безпечний: він лише докачує те, чого бракує.
 
+param([switch]$Quiet)   # -Quiet: без питання «Запустити зараз?» (для автоматичної перевірки)
+
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # інакше Invoke-WebRequest у PowerShell 5 качає в рази повільніше
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -153,7 +155,7 @@ try {
     Write-Host "   «Студія моментів». Запускай студію з нього." -ForegroundColor Green
     Write-Host "==============================================" -ForegroundColor Green
     Write-Host ""
-    $answer = Read-Host "Запустити студію зараз? (Enter = так, n = ні)"
+    $answer = if ($Quiet) { "n" } else { Read-Host "Запустити студію зараз? (Enter = так, n = ні)" }
     if ($answer -ne "n") { Start-Process -FilePath (Join-Path $Root "Запустити.bat") -WorkingDirectory $Root -WindowStyle Minimized }
 }
 catch {
