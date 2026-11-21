@@ -1538,6 +1538,12 @@ if os.path.exists(static_dir):
     if os.path.isdir(os.path.join(static_dir, "fonts")):
         app.mount("/fonts", StaticFiles(directory=os.path.join(static_dir, "fonts")), name="fonts")
 
+    @app.get("/favicon.svg", include_in_schema=False)
+    @app.get("/favicon.ico", include_in_schema=False)
+    def serve_favicon():
+        return FileResponse(os.path.join(static_dir, "favicon.svg"), media_type="image/svg+xml",
+                            headers={"Cache-Control": "max-age=86400"})
+
     @app.get("/")
     def serve_index():
         return FileResponse(os.path.join(static_dir, "index.html"))

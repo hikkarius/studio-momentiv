@@ -76,7 +76,7 @@ const Editor = (() => {
       li.dataset.i = i;
       li.setAttribute("aria-current", String(i === st.cur));
       li.title = c.title || "";
-      li.innerHTML = `<div class="ed-th"><img src="/api/projects/${pid()}/clips/${c.clip_index}/thumbnail?s=${Math.round(c.start_sec * 10)}" alt="" loading="lazy" onerror="this.remove()">
+      li.innerHTML = `<div class="ed-th"><img src="/api/projects/${pid()}/clips/${c.clip_index}/thumbnail?s=${Math.round(c.start_sec * 10)}" alt="" draggable="false" loading="lazy" onerror="this.remove()">
           <span class="ed-num">№${c.num}</span><span class="ed-dur">${Math.round(len(c))} с</span>${r === "keep" ? '<span class="ed-ok" title="Беру">✓</span>' : ""}</div>
         <div class="ed-rb"><div class="ed-rt">${esc(c.title)}</div>
         <div class="ed-rm"><span>${fmtS(c.start_sec)}${r === "drop" ? " · не беру" : ""}</span><span class="s">★ ${esc(c.virality_score)}</span></div></div>`;
@@ -103,7 +103,10 @@ const Editor = (() => {
     const seen = st.clips.filter((c) => c.review_status).length;
     $("edProgKeep").style.width = `${(kept / n) * 100}%`;
     $("edProgSeen").style.width = `${((seen - kept) / n) * 100}%`;
-    $("edProgTxt").textContent = `Переглянуто ${seen} з ${st.clips.length} · обрано ${kept}`;
+    $("edProgTxt").textContent = `${seen} з ${st.clips.length}`;
+    $("edCntKeep").textContent = String(kept);
+    $("edCntDrop").textContent = String(seen - kept);
+    $("edCntLeft").textContent = String(st.clips.length - seen);
     const mini = $("editor").classList.contains("rail-mini");
     const allSeen = seen === st.clips.length && st.clips.length > 0;
     const b1 = document.querySelector('#edMode [data-m="table"]');
@@ -606,14 +609,12 @@ const Editor = (() => {
     if (st.project) { renderProgress(); renderOverview(); renderTrack(); updateScroll(); }
   }
 
-  function closeMore() { $("edMorePop").hidden = true; $("edMore").setAttribute("aria-expanded", "false"); }
-
   // ─── Keyboard ──────────────────────────────────────────────────────────────
   function onKey(e) {
     if ($("editor").hidden) return;
     if (e.key === "Escape") { closePop(); return; }
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.target.closest && e.target.closest(".theme-menu, .ed-more")) return; // the theme drop-down handles its own keys
+    if (e.target.closest && e.target.closest(".theme-menu")) return; // the theme drop-down handles its own keys
     const k = e.key;
     if (k === " ") { e.preventDefault(); togglePlay(); }
     else if (k === "ArrowDown" || k === "j" || k === "о") { e.preventDefault(); step(1); }
@@ -673,15 +674,39 @@ const Editor = (() => {
     document.addEventListener("pointerdown", (e) => { if (st.pop && !e.target.closest(".ed-pop")) closePop(); });
     window.addEventListener("resize", () => { if (!$("editor").hidden && st.project) { renderOverview(); renderTrack(); updateScroll(); } });
     $("edList").addEventListener("scroll", updateScroll, { passive: true });
+    // Grab the strip with the mouse and drag it left or right. A real drag does not open the clip under the cursor.
+    const L0 = $("edList");
+    let drag = null;
+    L0.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "mouse" || e.button !== 0) return;
+      drag = { x: e.clientX, left: L0.scrollLeft, moved: false, id: e.pointerId };
+    });
+    L0.addEventListener("pointermove", (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const dx = e.clientX - drag.x;
+      if (!drag.moved && Math.abs(dx) < 6) return;
+      if (!drag.moved) { drag.moved = true; L0.setPointerCapture(e.pointerId); L0.classList.add("dragging"); }
+      L0.scrollLeft = drag.left - dx;
+    });
+    const endDrag = (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const moved = drag.moved;
+      drag = null;
+      L0.classList.remove("dragging");
+      if (moved) {
+        const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+        window.addEventListener("click", stop, { capture: true, once: true });
+        setTimeout(() => window.removeEventListener("click", stop, { capture: true }), 0);
+      }
+    };
+    L0.addEventListener("pointerup", endDrag);
+    L0.addEventListener("pointercancel", endDrag);
     $("edList").addEventListener("wheel", (e) => { // a mouse wheel scrolls the strip sideways
       if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { e.currentTarget.scrollLeft += e.deltaY; e.preventDefault(); }
     }, { passive: false });
     $("edScrollPrev").addEventListener("click", () => { $("edList").scrollLeft -= $("edList").clientWidth * 0.8; });
     $("edScrollNext").addEventListener("click", () => { $("edList").scrollLeft += $("edList").clientWidth * 0.8; });
     $("edFold").addEventListener("click", () => setRail(!$("editor").classList.contains("rail-mini"), true));
-    $("edMore").addEventListener("click", (e) => { e.stopPropagation(); const on = $("edMorePop").hidden; $("edMorePop").hidden = !on; $("edMore").setAttribute("aria-expanded", String(on)); });
-    document.addEventListener("click", (e) => { if (!e.target.closest(".ed-more")) closeMore(); });
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMore(); });
     $("edGoNext").addEventListener("click", () => step(1));
     const T0 = $("edClipTitle");
     T0.addEventListener("keydown", (e) => {
@@ -760,7 +785,6 @@ const Editor = (() => {
       if (typeof loadRecentProjects === "function") loadRecentProjects();
     });
     $("edReanalyze").addEventListener("click", () => {
-      closeMore();
       close();
       if (typeof retryAnalysisForCurrentProject === "function") retryAnalysisForCurrentProject();
     });

@@ -92,7 +92,8 @@ def test_open_project_shows_editor_sorted_by_score(page, studio, project):
     assert "переглянуто 0/4" in page.locator("#edStep1").inner_text()
     assert page.locator("#edMp4").is_visible()
     assert "Сильний хук" in page.locator("#edWhy").inner_text()
-    assert "Переглянуто 0 з 4" in page.locator("#edProgTxt").inner_text()
+    assert page.locator("#edProgTxt").inner_text() == "0 з 4"
+    assert page.locator("#edCntLeft").inner_text() == "4"
     assert not page.errors
 
 
@@ -487,16 +488,14 @@ def test_rail_folds_and_remembers(page, studio, project):
     assert not page.errors
 
 
-def test_more_menu_and_next_button(page, studio, project):
+def test_reanalyze_visible_and_next_button(page, studio, project):
     open_editor(page, studio)
-    assert page.locator("#edReanalyze").is_hidden()
-    page.click("#edMore")
     assert page.locator("#edReanalyze").is_visible()
-    page.keyboard.press("Escape")
-    assert page.locator("#edReanalyze").is_hidden()
+    assert "Шукати кліпи заново" in page.locator("#edReanalyze").inner_text()
     page.click("#edKeep")
     assert wait_for(page, lambda: clip(2)["review_status"] == "keep")
-    assert "Переглянуто 1 з 4 · обрано 1" in page.locator("#edProgTxt").inner_text()
+    assert page.locator("#edProgTxt").inner_text() == "1 з 4"
+    assert page.locator("#edCntKeep").inner_text() == "1"
     page.click("#edGoNext")  # after a decision: on to the next clip in the strip
     page.wait_for_function("Editor.state().num === 4")
     assert not page.errors
@@ -520,3 +519,31 @@ def test_clip_thumbnail(studio, project):
     with urllib.request.urlopen(f"{studio['url']}/api/projects/{PROJECT_ID}/clips/2/thumbnail", timeout=20) as r:
         assert r.headers["Content-Type"] == "image/jpeg"
         assert len(r.read()) > 500
+
+
+def test_strip_drags_with_mouse(page, studio, project):
+    page.set_viewport_size({"width": 900, "height": 800})
+    open_editor(page, studio)
+    lst = page.locator("#edList")
+    page.evaluate("document.getElementById('edList').style.width = '300px'")
+    before = page.evaluate("document.getElementById('edList').scrollLeft")
+    cur = page.evaluate("Editor.state().cur")
+    lst.scroll_into_view_if_needed()
+    box = lst.bounding_box()
+    y = box["y"] + box["height"] / 2
+    page.mouse.move(box["x"] + 250, y)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 150, y, steps=5)
+    page.mouse.move(box["x"] + 60, y, steps=5)
+    page.mouse.up()
+    page.wait_for_timeout(300)
+    assert page.evaluate("document.getElementById('edList').scrollLeft") > before + 50
+    assert page.evaluate("Editor.state().cur") == cur  # a drag does not open the clip under the mouse
+    assert not page.errors
+
+
+def test_favicon(studio):
+    import urllib.request
+    with urllib.request.urlopen(studio["url"] + "/favicon.svg") as r:
+        assert r.headers["Content-Type"].startswith("image/svg")
+        assert b"<svg" in r.read()

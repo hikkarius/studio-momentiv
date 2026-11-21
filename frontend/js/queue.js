@@ -222,6 +222,13 @@ const Queue = (() => {
     return new Set(items.filter((i) => SHOWN.includes(i.status) && i.project_id).map((i) => i.project_id));
   }
 
+  /** Stage name without its own percent and engine details: the card shows one overall percent. */
+  function stageText(msg) {
+    const m = String(msg || "").replace(/\s*\([^)]*\)/g, "").replace(/:?\s*\d+(?:[.,]\d+)?\s*%\s*$/, "").trim();
+    if (/^Транскрипці/i.test(m)) return "Розпізнаю мову";
+    return m || "Обробляю…";
+  }
+
   /** Steps under the progress bar: download → speech recognition → search for moments. */
   function stepOf(it) {
     if (it.status === "downloading") return 0;
@@ -276,7 +283,7 @@ const Queue = (() => {
       }
       const over = busy ? `
             <div class="q-over">
-              <b>${escapeHtml(it.message || "Обробляю…")}${pct ? ` ${pct}%` : ""}</b>
+              <b>${escapeHtml(stageText(it.message))}${pct ? ` · ${pct}%` : ""}</b>
               <div class="q-bar${it.status === "downloading" && !pct ? " busy" : ""}"><i style="width:${pct}%"></i></div>
               <div class="q-steps">${steps(stepOf(it))}</div>
             </div>` : "";

@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Студія моментів</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/css/style.css">
   <link rel="stylesheet" href="/css/editor.css">
   <link rel="stylesheet" href="/css/queue-settings.css">
@@ -543,14 +544,16 @@
     <div class="ed-main">
       <header class="ed-top">
         <div class="ed-crumb"><b id="edProjTitle"></b><span id="edProjMeta"></span></div>
-        <div class="ed-prog" id="edProg"><i><b id="edProgKeep"></b><u id="edProgSeen"></u></i><span id="edProgTxt"></span></div>
-        <span class="ed-spacer"></span>
-        <div class="ed-more">
-          <button class="ed-dots" id="edMore" type="button" aria-haspopup="true" aria-expanded="false" title="Ще дії" aria-label="Ще дії">⋯</button>
-          <div class="ed-more-pop" id="edMorePop" role="menu" hidden>
-            <button type="button" role="menuitem" id="edReanalyze" title="Транскрипція береться з кешу">↻ Шукати кліпи заново</button>
-          </div>
+        <div class="ed-prog" id="edProg">
+          <div class="ed-stat ed-stat-main"><span>Переглянуто</span><b id="edProgTxt"></b><i class="ed-pbar"><b id="edProgKeep"></b><u id="edProgSeen"></u></i></div>
+          <div class="ed-stat keep"><span>Беру</span><b id="edCntKeep">0</b></div>
+          <div class="ed-stat drop"><span>Не беру</span><b id="edCntDrop">0</b></div>
+          <div class="ed-stat"><span>Ще не дивився</span><b id="edCntLeft">0</b></div>
         </div>
+        <span class="ed-spacer"></span>
+        <button class="ed-reanalyze" id="edReanalyze" type="button" title="Gemini ще раз перегляне розмову і запропонує нові кліпи. Транскрипція береться з кешу, тож це швидко.">
+          <span class="ed-re-ic" aria-hidden="true">↻</span><span><b>Шукати кліпи заново</b><small>інший набір моментів</small></span>
+        </button>
       </header>
 
       <div class="ed-cols">
