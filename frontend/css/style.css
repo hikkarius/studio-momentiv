@@ -122,27 +122,6 @@ body {
   color: var(--text-muted);
 }
 
-.hardware-pill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  color: var(--accent-emerald);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 14px;
-  border-radius: 9999px;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  background: var(--accent-emerald);
-  border-radius: 50%;
-  box-shadow: 0 0 8px var(--accent-emerald);
-}
-
 /* ── Container ────────────────────────────────────────────────────────────── */
 .studio-container {
   max-width: 1440px;

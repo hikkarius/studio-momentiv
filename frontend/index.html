@@ -24,17 +24,17 @@
         </div>
       </div>
       <div class="header-tools">
-      <div class="theme-switch" role="group" aria-label="Тема">
-        <button type="button" data-theme="light">☀ Світла</button>
-        <button type="button" data-theme="dark">☾ Темна</button>
-        <button type="button" data-theme="system">Авто</button>
-      </div>
       <button type="button" class="btn btn-primary btn-sm update-pill" id="btnUpdate" hidden onclick="Welcome.update()">⬆ Оновити</button>
       <button type="button" class="btn btn-secondary btn-settings" id="btnOpenSettings" onclick="Settings.open()">⚙ Налаштування</button>
-      <div id="hwBadge" class="hardware-pill">
-        <span class="status-dot"></span>
-        <span id="hwText">Зондування прискорення...</span>
-      </div>
+      <div class="theme-menu">
+          <button type="button" class="theme-menu-btn" aria-haspopup="true" aria-expanded="false" title="Тема оформлення"><span class="theme-menu-cur">Тема: авто</span><span class="theme-menu-caret" aria-hidden="true">▾</span></button>
+          <div class="theme-switch theme-menu-pop" role="group" aria-label="Тема" hidden>
+            <span class="theme-menu-cap">Тема</span>
+            <button type="button" data-theme="light">☀ Світла</button>
+            <button type="button" data-theme="dark">☾ Темна</button>
+            <button type="button" data-theme="system">Авто, як у системі</button>
+          </div>
+        </div>
       </div>
     </div>
   </header>
@@ -149,7 +149,6 @@
     <section class="videos-section" id="historyCard" style="display:none;">
       <div class="videos-head">
         <h2>Твої відео <span id="historyCount">0</span></h2>
-        <span class="videos-hint">Клік по картці відкриває відео</span>
       </div>
       <div id="historyContent">
         <div class="videos-grid" id="historyList"></div>
@@ -466,23 +465,26 @@
     <div class="ed-main">
       <header class="ed-top">
         <button class="ed-btn ghost" id="edBack" type="button">← Усі відео</button>
-        <div class="ed-logo"><i></i>Студія моментів</div>
         <div class="ed-crumb"><b id="edProjTitle"></b><span id="edProjMeta"></span></div>
         <div class="ed-mode" id="edMode" role="tablist" aria-label="Режим">
           <button type="button" role="tab" data-m="table" aria-selected="true">✂ Монтажний стіл</button>
           <button type="button" role="tab" data-m="vx" aria-selected="false">📱 Вертикальні кліпи</button>
         </div>
         <button class="ed-btn sm" id="edReanalyze" type="button" title="Шукати кліпи заново (транскрипція береться з кешу)">↻ Шукати заново</button>
-        <div class="theme-switch" role="group" aria-label="Тема">
-          <button type="button" data-theme="light">☀ Світла</button>
-          <button type="button" data-theme="dark">☾ Темна</button>
-          <button type="button" data-theme="system">Авто</button>
+        <div class="theme-menu">
+          <button type="button" class="theme-menu-btn" aria-haspopup="true" aria-expanded="false" title="Тема оформлення"><span class="theme-menu-cur">Тема: авто</span><span class="theme-menu-caret" aria-hidden="true">▾</span></button>
+          <div class="theme-switch theme-menu-pop" role="group" aria-label="Тема" hidden>
+            <span class="theme-menu-cap">Тема</span>
+            <button type="button" data-theme="light">☀ Світла</button>
+            <button type="button" data-theme="dark">☾ Темна</button>
+            <button type="button" data-theme="system">Авто, як у системі</button>
+          </div>
         </div>
       </header>
 
       <section class="ed-panel ed-overview" aria-label="Усе відео">
         <div class="ed-ov-head">
-          <h2>Усе відео · номер кліпу = його місце у відео</h2>
+          <h2>Усе відео</h2>
           <div class="ed-legend"><span><i style="background:var(--ed-cand)"></i>ще не дивився</span><span><i style="background:var(--ed-keep)"></i>беру</span><span><i style="background:var(--ed-drop);opacity:.4"></i>не беру</span><span><i style="background:var(--ed-accent)"></i>відкритий</span></div>
         </div>
         <div class="ed-ov" id="edOv" title="Клік по кліпу або номеру відкриває його"></div>
@@ -505,27 +507,16 @@
         </section>
 
         <section class="ed-panel ed-stage" aria-label="Перегляд кліпу">
-          <div class="ed-stage-head"><span class="t" id="edClipNo"></span><span class="m" id="edClipMeta"></span></div>
+          <div class="ed-stage-head"><span class="t" id="edClipNo"></span></div>
           <div class="ed-screen paused" id="edScreen" title="Клік: грати або пауза">
             <video id="edVideo" preload="metadata" playsinline></video>
             <div class="ed-bigplay" aria-hidden="true">▶</div>
           </div>
           <div class="ed-trim" id="edTrim" aria-label="Межі кліпу">
             <div class="ed-track" id="edTrack" title="Тягни по доріжці: перемотка в межах кліпу. Тягни жовті дужки: початок і кінець. Клік по слову: почати чи закінчити ним."></div>
-            <div class="ed-bounds">
-              <div class="ed-bound start"><span class="ic" aria-hidden="true"></span><span class="lbl">Початок<br>кліпу</span><span class="v" id="edStartTc"></span>
-                <button class="ed-btn sm" type="button" data-nudge="start:-0.5" title="Почати раніше на пів секунди">−0,5</button>
-                <button class="ed-btn sm" type="button" data-nudge="start:0.5" title="Почати пізніше на пів секунди">+0,5</button></div>
-              <span class="ed-len" id="edLen" title="Тривалість кліпу"></span>
-              <div class="ed-bound end"><button class="ed-btn sm" type="button" data-nudge="end:-0.5" title="Закінчити раніше на пів секунди">−0,5</button>
-                <button class="ed-btn sm" type="button" data-nudge="end:0.5" title="Закінчити пізніше на пів секунди">+0,5</button>
-                <span class="v" id="edEndTc"></span><span class="lbl">Кінець<br>кліпу</span><span class="ic" aria-hidden="true"></span></div>
-            </div>
           </div>
           <div class="ed-controls">
-            <button class="ed-btn round" id="edPrev" type="button" title="Попередній кліп (↑)" aria-label="Попередній кліп">↑</button>
             <button class="ed-btn primary" id="edPlay" type="button" title="Грати або пауза (Пробіл)">▶ Грати</button>
-            <button class="ed-btn round" id="edNext" type="button" title="Наступний кліп (↓)" aria-label="Наступний кліп">↓</button>
             <span class="ed-tc" id="edTc"></span>
             <span class="ed-spacer"></span>
             <div class="ed-decide" id="edDecide">
@@ -569,11 +560,11 @@
               <button class="ed-btn" id="edCopyPost2" type="button">⧉ Текст допису <span>копіювати</span></button>
               <button class="ed-btn" id="edGoVx" type="button">📱 Вертикальний кліп 9:16 <span>окремий екран</span></button>
             </div>
-            <div class="ed-small">Відео ріжеться з оригіналу без втрати якості, з тими межами, що зараз. Усі обрані кліпи разом: кнопка «Скачати обрані» внизу. Вертикальні кліпи із субтитрами: режим «📱 Вертикальні кліпи» вгорі.</div>
+            <div class="ed-small">Відео ріжеться з оригіналу без втрати якості, з тими межами, що зараз.</div>
           </div>
         </section>
         <section class="ed-panel ed-vx" id="edVx" aria-label="Вертикальний кліп" hidden>
-          <div class="ed-stage-head vx-head"><span class="t" id="vxClipNo"></span><span class="m" id="vxClipMeta"></span>
+          <div class="ed-stage-head vx-head"><span class="t" id="vxClipNo"></span>
             <div class="vx-decide" id="vxDecide">
               <button type="button" class="ed-btn keep" id="vxKeep" aria-pressed="false">✓ Беру <kbd>Y</kbd></button>
               <button type="button" class="ed-btn drop" id="vxDrop" aria-pressed="false">✕ Не беру <kbd>N</kbd></button>
@@ -740,11 +731,6 @@
       </div>
     </div>
 
-    <footer class="ed-bar">
-      <div class="sum" id="edSum"></div>
-      <div class="keys"><kbd>Пробіл</kbd> грати · <kbd>↑</kbd><kbd>↓</kbd> кліпи · <kbd>←</kbd><kbd>→</kbd> ±2 с · <kbd>Y</kbd> беру · <kbd>N</kbd> не беру</div>
-      <button class="ed-btn primary" id="edZip" type="button" disabled>↓ Скачати обрані (ZIP)</button>
-    </footer>
     <div class="ed-toast" id="edToast" role="status" aria-live="polite"></div>
   </section>
 

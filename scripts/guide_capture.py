@@ -140,7 +140,8 @@ with sync_playwright() as pw:
     tab = pg.locator("[aria-controls='edTabDl'], button[data-tab='dl']").first
     if tab.count():
         tab.click(); wait(1.2); shot("09-download")
-    pg.hover("#edZip"); wait(1.5); shot("10-zip")
+    pg.click("#edMode button[data-m='vx']"); wait(1)
+    pg.locator("#vxZipClean").scroll_into_view_if_needed(); pg.hover("#vxZipClean"); wait(1.5); shot("10-zip")
     ctx.close()
     b.close()
 srv.should_exit = True

@@ -8,27 +8,9 @@ let currentClips = [];
 let activeEventSource = null;
 
 document.addEventListener("DOMContentLoaded", () => {
-  checkHardware();
   initDropzone();
   loadRecentProjects();
 });
-
-// ─── Hardware Check ──────────────────────────────────────────────────────────
-
-async function checkHardware() {
-  const hwText = document.getElementById("hwText");
-  try {
-    const res = await fetch("/api/health");
-    const data = await res.json();
-    if (data.has_nvenc || data.has_cuda) {
-      hwText.textContent = `⚡ GPU прискорення активне (${data.gpu_name})`;
-    } else {
-      hwText.textContent = `💻 CPU режим (${data.gpu_name})`;
-    }
-  } catch (e) {
-    hwText.textContent = "⚡ Сервер онлайн";
-  }
-}
 
 // ─── Recent Sessions / History ───────────────────────────────────────────────
 
@@ -134,7 +116,6 @@ async function openProject(projectId) {
     showToast("Вибір сесії знято.");
     return;
   }
-  showToast("Завантажуємо сесію...");
   await loadProjectResults(projectId);
   await loadRecentProjects();
 }
