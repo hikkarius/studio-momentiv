@@ -312,121 +312,171 @@
   <!-- ═══ Налаштування ═══ -->
   <div class="settings-backdrop" id="settingsScreen" hidden>
     <section class="settings-sheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
-      <header class="settings-head">
+      <nav class="settings-tabs" role="tablist" aria-label="Розділи налаштувань">
         <h2 id="settingsTitle">Налаштування</h2>
-        <span class="settings-saved" id="settingsSaved" aria-live="polite"></span>
-        <button type="button" class="modal-close-btn" onclick="Settings.close()" aria-label="Закрити">✕</button>
-      </header>
-      <nav class="settings-tabs" role="tablist">
-        <button type="button" role="tab" data-tab="clips" aria-selected="true">Кліпи</button>
-        <button type="button" role="tab" data-tab="ai" aria-selected="false">Розпізнавання й ШІ</button>
-        <button type="button" role="tab" data-tab="disk" aria-selected="false">Місце на диску</button>
+        <button type="button" role="tab" data-tab="clips" aria-selected="true"><i aria-hidden="true">✂</i>Кліпи</button>
+        <button type="button" role="tab" data-tab="ai" aria-selected="false"><i aria-hidden="true">✨</i>Ключ і розпізнавання<span class="set-dot" id="setKeyDot" hidden></span></button>
+        <button type="button" role="tab" data-tab="disk" aria-selected="false"><i aria-hidden="true">💾</i>Місце на диску</button>
+        <button type="button" role="tab" data-tab="about" aria-selected="false"><i aria-hidden="true">ℹ</i>Про студію</button>
+        <span class="settings-nav-note">Зміни зберігаються одразу</span>
       </nav>
 
-      <div class="settings-body" data-panel="clips">
-        <div class="set-group">
-          <h3>Довжина кліпів</h3>
-          <div class="set-row two">
-            <label>Найкоротший, секунд<input type="number" min="5" max="300" class="input-number" data-key="clips.default_min_len"></label>
-            <label>Найдовший, секунд<input type="number" min="10" max="600" class="input-number" data-key="clips.default_max_len"></label>
-          </div>
-          <label class="set-row">Скільки секунд можуть мати спільного два кліпи
-            <input type="number" min="0" max="30" step="0.5" class="input-number" data-key="clips.max_overlap_sec">
-            <small>0 — кліпи зовсім не перетинаються.</small>
-          </label>
-        </div>
-        <div class="set-group">
-          <h3>Для нових відео</h3>
-          <label class="set-row">Скільки кліпів шукати
-            <select class="input-select" data-key="studio.default_clips" data-type="int">
-              <option value="0">Авто: приблизно 1 на кожні 25 секунд відео</option>
-              <option value="5">5</option><option value="10">10</option><option value="15">15</option>
-              <option value="20">20</option><option value="30">30</option><option value="40">40</option>
-              <option value="50">50</option><option value="75">75</option><option value="100">100</option>
-            </select>
-          </label>
-          <label class="set-row">Що шукати
-            <select class="input-select" data-key="studio.default_filter" id="setFilter"></select>
-          </label>
-          <small class="set-note">Це те, що буде вибрано на головній. Для окремого відео можна змінити там же.</small>
-        </div>
-      </div>
+      <div class="settings-main">
+        <header class="settings-head">
+          <h3 id="settingsSection">Кліпи</h3>
+          <span class="settings-saved" id="settingsSaved" aria-live="polite"></span>
+          <button type="button" class="modal-close-btn" onclick="Settings.close()" aria-label="Закрити">✕</button>
+        </header>
 
-      <div class="settings-body" data-panel="ai" hidden>
-        <div class="set-group">
-          <h3>Розпізнавання мови (Whisper)</h3>
-          <label class="set-row">Якість розпізнавання
-            <select class="input-select" data-key="whisper.model" id="setModel"></select>
-            <small>Після зміни наступне відео розпізнається заново, навіть якщо вже оброблялося.</small>
-          </label>
-          <label class="set-row">Мова відео
-            <select class="input-select" data-key="whisper.language" id="setLang"></select>
-          </label>
-        </div>
-        <div class="set-group">
-          <h3>Пошук моментів (Gemini)</h3>
-          <div class="set-row">
-            <span>Ключ Gemini: <b id="setKeyState">…</b></span>
-            <div class="set-key">
-              <input type="password" id="setKeyInput" class="input-text" placeholder="Встав новий ключ, щоб замінити" autocomplete="off">
-              <button type="button" class="btn btn-secondary" onclick="Settings.saveKey()">Зберегти ключ</button>
-            </div>
-            <small>Ключ зберігається тільки на цьому комп’ютері, у файлі .env.</small>
-          </div>
-          <label class="set-check"><input type="checkbox" data-key="gemini.rerank">
-            <span>Другий прохід: ШІ порівнює всі знайдені кліпи між собою й уточнює оцінки <small>(точніше, але на один запит більше)</small></span></label>
-        </div>
-      </div>
-
-      <div class="settings-body" data-panel="disk" hidden>
-        <div class="set-group">
-          <div class="disk-top">
-            <h3>Студія займає <b id="diskStudio">…</b></h3>
-            <span class="disk-free" id="diskFree"></span>
-          </div>
-          <div class="disk-bar" id="diskBar" aria-hidden="true"></div>
-          <ul class="disk-legend" id="diskLegend"></ul>
-        </div>
-        <div class="set-group">
-          <h3>Прибрати</h3>
-          <div class="disk-action">
-            <div><b>Сміття <span id="diskJunk"></span></b><small>Недокачані файли, тимчасовий звук, залишки видалених відео. Нічого потрібного.</small></div>
-            <button type="button" class="btn btn-secondary" id="btnCleanJunk" onclick="Settings.cleanJunk()">Прибрати</button>
-          </div>
-          <div class="disk-action">
-            <div><b>Готові файли кліпів <span id="diskClips"></span></b><small>Нарізані 16:9 і вертикальні кліпи. Кліпи, позначки й налаштування лишаються: файл зробиться знову, коли натиснеш «Скачати».</small></div>
-            <div class="disk-action-ctl">
-              <select class="input-select" id="diskOlder">
-                <option value="0">усі</option><option value="7">старші за 7 днів</option>
-                <option value="30" selected>старші за 30 днів</option><option value="90">старші за 90 днів</option>
-              </select>
-              <button type="button" class="btn btn-secondary" onclick="Settings.cleanClips()">Видалити</button>
+        <div class="settings-body" data-panel="clips" data-title="Кліпи">
+          <div class="set-grp">
+            <h4>Довжина кліпу</h4>
+            <div class="set-box">
+              <div class="set-line">
+                <span class="set-big" id="setLenBig">15–60 с</span>
+                <div class="set-seg" id="setLenPresets" role="group" aria-label="Готові варіанти довжини">
+                  <button type="button" data-min="15" data-max="30">Коротко 15–30</button>
+                  <button type="button" data-min="15" data-max="60">Shorts 15–60</button>
+                  <button type="button" data-min="30" data-max="90">Довше 30–90</button>
+                </div>
+              </div>
+              <div class="set-range" id="setLenRange">
+                <div class="set-range-track"><i id="setLenFill"></i></div>
+                <input type="range" min="5" max="180" step="1" data-key="clips.default_min_len" aria-label="Найкоротший кліп, секунд">
+                <input type="range" min="5" max="180" step="1" data-key="clips.default_max_len" aria-label="Найдовший кліп, секунд">
+              </div>
+              <div class="set-ticks"><span>5 с</span><span>1 хв</span><span>2 хв</span><span>3 хв</span></div>
             </div>
           </div>
-          <label class="set-row">Прибирати автоматично при запуску студії
-            <select class="input-select" data-key="studio.cleanup_days" data-type="int">
-              <option value="0">Ні</option>
-              <option value="7">Так: сміття і файли кліпів, старші за 7 днів</option>
-              <option value="14">Так: сміття і файли кліпів, старші за 14 днів</option>
-              <option value="30">Так: сміття і файли кліпів, старші за 30 днів</option>
-              <option value="60">Так: сміття і файли кліпів, старші за 60 днів</option>
-            </select>
-          </label>
+          <div class="set-grp">
+            <h4>Що шукати в нових відео</h4>
+            <div class="set-cards" data-key="studio.default_filter" role="radiogroup" aria-label="Що шукати">
+              <button type="button" role="radio" data-v="Viral Hooks"><b>🔥 Вірусні гачки</b><small>Сильний початок, суперечка, несподіванка. Для Shorts і TikTok.</small></button>
+              <button type="button" role="radio" data-v="Actionable Advice"><b>💡 Корисні поради</b><small>Завершена думка, яку можна застосувати.</small></button>
+              <button type="button" role="radio" data-v="Storytelling"><b>🎭 Емоційні історії</b><small>Розповідь з початком і розв’язкою.</small></button>
+            </div>
+          </div>
+          <div class="set-grp">
+            <h4>Скільки кліпів шукати</h4>
+            <div class="set-box">
+              <div class="set-line">
+                <div class="set-l"><b>Кількість</b><small>«Авто»: приблизно один кліп на кожні 25 секунд відео</small></div>
+                <div class="set-seg" data-key="studio.default_clips" data-type="int" role="radiogroup" aria-label="Кількість кліпів">
+                  <button type="button" data-v="0">Авто</button><button type="button" data-v="10">10</button><button type="button" data-v="20">20</button><button type="button" data-v="40">40</button><button type="button" data-v="100">100</button>
+                </div>
+              </div>
+              <div class="set-line">
+                <div class="set-l"><b>Кліпи можуть трохи перекриватися</b><small id="setOverlapNote">Сусідні кліпи можуть мати кілька секунд спільного</small></div>
+                <div class="set-seg" data-key="clips.max_overlap_sec" data-type="num" role="radiogroup" aria-label="Перекриття">
+                  <button type="button" data-v="0">Ні</button><button type="button" data-v="2">2 с</button><button type="button" data-v="5">5 с</button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="set-group">
-          <h3>Відео за розміром</h3>
-          <ul class="disk-projects" id="diskProjects"></ul>
+
+        <div class="settings-body" data-panel="ai" data-title="Ключ і розпізнавання" hidden>
+          <div class="set-key-status" id="setKeyBox" data-state="unknown">
+            <div class="set-key-ic" id="setKeyIc" aria-hidden="true">…</div>
+            <div class="set-l"><b id="setKeyState">Ключ Gemini</b><small id="setKeyMsg"></small></div>
+            <button type="button" class="btn btn-secondary" id="setKeyCheck" onclick="Settings.checkSavedKey()">Перевірити</button>
+            <button type="button" class="btn btn-secondary" id="setKeyChange" onclick="Settings.showKeyInput()">Замінити</button>
+          </div>
+          <div class="set-key" id="setKeyEdit" hidden>
+            <input type="password" id="setKeyInput" class="input-text" placeholder="Встав ключ Gemini" autocomplete="off" spellcheck="false">
+            <button type="button" class="btn btn-primary" id="setKeySave" onclick="Settings.saveKey()">Перевірити й зберегти</button>
+            <a class="linkish" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Де взяти ключ ↗</a>
+          </div>
+          <div class="set-grp">
+            <h4>Розпізнавання мови</h4>
+            <div class="set-cards" data-key="whisper.model" id="setModel" role="radiogroup" aria-label="Якість розпізнавання">
+              <button type="button" role="radio" data-v="small"><b>Швидко</b><small>Для слабких комп’ютерів. Можуть траплятися помилки в словах.</small></button>
+              <button type="button" role="radio" data-v="medium"><b>Збалансовано</b><small>Добре для чистого звуку, удвічі швидше.</small></button>
+              <button type="button" role="radio" data-v="large-v3-turbo"><span class="set-tag">Рекомендовано</span><b>Найточніше</b><small>Найкраще для подкастів і стендапу.</small></button>
+            </div>
+            <small class="set-note">Після зміни наступне відео розпізнається заново, навіть якщо вже оброблялося.</small>
+            <div class="set-box">
+              <label class="set-line"><span class="set-l"><b>Мова відео</b><small>Якою мовою говорять у відео</small></span>
+                <select class="input-select" data-key="whisper.language" id="setLang"></select></label>
+              <div class="set-line"><div class="set-l"><b>Прискорення</b><small>Студія сама використовує відеокарту NVIDIA, якщо вона є</small></div>
+                <div class="set-hw" id="setHw"><i aria-hidden="true">…</i><span>Перевіряю…</span></div></div>
+            </div>
+          </div>
+          <div class="set-grp">
+            <h4>Пошук моментів</h4>
+            <div class="set-box">
+              <label class="set-line set-switch-line"><span class="set-l"><b>Точніші оцінки</b><small>ШІ ще раз порівнює всі кліпи між собою. Точніше, але на один запит до Gemini більше.</small></span>
+                <input type="checkbox" class="set-switch" data-key="gemini.rerank" role="switch"></label>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-body" data-panel="disk" data-title="Місце на диску" hidden>
+          <div class="set-box">
+            <div class="disk-top">
+              <h4 class="set-big2">Студія займає <b id="diskStudio">…</b></h4>
+              <span class="disk-free" id="diskFree"></span>
+            </div>
+            <div class="disk-bar" id="diskBar" aria-hidden="true"></div>
+            <ul class="disk-legend" id="diskLegend"></ul>
+          </div>
+          <div class="set-grp">
+            <h4>Звільнити місце</h4>
+            <div class="set-box">
+              <div class="set-line">
+                <div class="set-l"><b>Прибрати сміття <span id="diskJunk"></span></b><small>Недокачані файли, тимчасовий звук, залишки видалених відео. Нічого потрібного.</small></div>
+                <button type="button" class="btn btn-primary" id="btnCleanJunk" onclick="Settings.cleanJunk()">Прибрати</button>
+              </div>
+              <div class="set-line">
+                <div class="set-l"><b>Видалити готові файли кліпів <span id="diskClips"></span></b><small>Кліпи й позначки лишаються: файл зробиться знову, коли натиснеш «Скачати».</small></div>
+                <div class="disk-action-ctl">
+                  <select class="input-select" id="diskOlder">
+                    <option value="0">усі</option><option value="7">старші за 7 днів</option>
+                    <option value="30" selected>старші за 30 днів</option><option value="90">старші за 90 днів</option>
+                  </select>
+                  <button type="button" class="btn btn-secondary" onclick="Settings.cleanClips()">Видалити</button>
+                </div>
+              </div>
+              <div class="set-line">
+                <div class="set-l"><b>Прибирати автоматично</b><small id="setAutoNote">При кожному запуску студії: сміття і файли кліпів, старші за 30 днів</small></div>
+                <div class="disk-action-ctl">
+                  <select class="input-select" id="setAutoDays" aria-label="Старші за">
+                    <option value="7">старші за 7 днів</option><option value="14">старші за 14 днів</option>
+                    <option value="30" selected>старші за 30 днів</option><option value="60">старші за 60 днів</option>
+                  </select>
+                  <input type="checkbox" class="set-switch" id="setAutoOn" role="switch" aria-label="Прибирати автоматично">
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="set-grp">
+            <h4>Відео за розміром</h4>
+            <ul class="disk-projects set-box" id="diskProjects"></ul>
+          </div>
+        </div>
+
+        <div class="settings-body" data-panel="about" data-title="Про студію" hidden>
+          <div class="set-box">
+            <div class="set-line">
+              <div class="set-l"><b class="set-big2" id="setVersion">Студія моментів</b><small id="setVersionNote">Перевіряю оновлення…</small></div>
+              <button type="button" class="btn btn-primary" id="setUpdate" hidden onclick="Settings.update()">⬆ Оновити</button>
+            </div>
+          </div>
+          <div class="set-grp">
+            <h4>Щось не працює?</h4>
+            <div class="set-box">
+              <div class="set-line">
+                <div class="set-l"><b>Зібрати звіт про проблему</b><small>Файл для того, хто дав тобі студію. Ключ Gemini у звіт не потрапляє.</small></div>
+                <a class="btn btn-secondary" id="btnReport" href="/api/support-report" download>🧰 Зібрати звіт</a>
+              </div>
+              <div class="set-line">
+                <div class="set-l"><b>Повернути всі налаштування як було</b><small>Ключ, відео й кліпи не зачіпаються</small></div>
+                <button type="button" class="btn btn-secondary" onclick="Settings.resetAll()">Повернути</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-
-      <footer class="settings-foot">
-        <button type="button" class="btn btn-secondary btn-sm" onclick="Settings.resetAll()">Повернути все як було спочатку</button>
-        <span>Зміни зберігаються одразу.</span>
-      </footer>
-      <footer class="settings-foot report-foot">
-        <span>Щось не працює? Збери звіт і надішли його тому, хто дав тобі студію. Ключ Gemini у звіт не потрапляє.</span>
-        <a class="btn btn-secondary btn-sm" id="btnReport" href="/api/support-report" download>🧰 Зібрати звіт про проблему</a>
-      </footer>
     </section>
   </div>
 
