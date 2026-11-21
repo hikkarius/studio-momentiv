@@ -318,8 +318,9 @@ def test_download_single_clip_and_zip(page, studio, project):
     page.keyboard.press("ArrowDown")
     page.keyboard.press("y")
     assert wait_for(page, lambda: sum(c["review_status"] == "keep" for c in db.get_candidate_clips(PROJECT_ID)) == 2)
-    page.click("#edMode button[data-m='vx']")  # the ZIP of kept clean clips lives on «Вертикальні кліпи»
+    page.click("#edMode button[data-m='vx']")  # the ZIP of kept clean clips lives on «Вертикальні кліпи» → «Ще»
     with page.expect_download(timeout=30000) as dl:
+        page.click("#vxMoreBtn")
         page.click("#vxZipClean")
     path = dl.value.path()
     names = zipfile.ZipFile(io.BytesIO(open(path, "rb").read())).namelist()
@@ -351,6 +352,17 @@ def test_editor_fits_phone_and_dark_theme(browser, studio, project):
 
 # ─── Vertical 9:16 export ────────────────────────────────────────────────────
 
+def vx_tab(page, t):
+    """«Вертикальні кліпи» shows one settings tab at a time: Кадр, Стиль, Заголовок, Текст, Тонко."""
+    page.click(f"#vxTabs button[data-t='{t}']")
+
+
+def vx_more(page, item):
+    """Rarer downloads live under «Ще ▾» next to the big download button."""
+    page.click("#vxMoreBtn")
+    page.click(item)
+
+
 def test_vertical_preview_settings_and_download(page, studio, project):
     open_editor(page, studio)
     page.click("#edMode button[data-m='vx']")
@@ -360,17 +372,21 @@ def test_vertical_preview_settings_and_download(page, studio, project):
     assert page.locator("#vxNote").is_visible()
 
     # Pick a caption style and framing: saved per clip.
+    assert page.locator("#vxStyle button[data-v='one'] .vx-tile").is_visible()  # «Стиль» is the first tab, styles as pictures
     page.click("#vxStyle button[data-v='one']")
+    vx_tab(page, "frame")
     page.click("#vxFrame button[data-v='blur']")
     idx = page.evaluate("Editor.state().clipIndex")
     assert wait_for(page, lambda: clip(idx).get("vertical_opts", {}).get("style") == "one"
                     and clip(idx)["vertical_opts"].get("frame") == "blur")
 
     # Fix a word in the captions.
+    vx_tab(page, "text")
     page.locator("#vxWords button").first.click()
     page.fill("#vxWinput", "ВИПРАВЛЕНО")
     page.click("#vxWsave")
     assert wait_for(page, lambda: any(e.get("w") == "ВИПРАВЛЕНО" for e in clip(idx)["vertical_opts"].get("edits", {}).values()))
+    assert "dot" in page.get_attribute("#vxTabText", "class")  # the «Текст» tab shows there are fixes
     page.click("#vxPhone")  # click on the preview plays it
     page.wait_for_function("Vertical.state().cap.length > 0", timeout=8000)
     page.wait_for_function("!document.getElementById('edVideo').paused")
@@ -407,11 +423,13 @@ def test_vertical_title_size_colour_and_scrub(page, studio, project):
     page.click("#edMode button[data-m='vx']")
     page.wait_for_function("Vertical.state().layout", timeout=20000)
     idx = page.evaluate("Editor.state().clipIndex")
+    vx_tab(page, "hook")
     page.check("#vxHookOn")
     page.fill("#vxHookText", "МІЙ ЗАГОЛОВОК")
     page.keyboard.press("Enter")
     page.click("#vxHookStyle button[data-v='black']")
     page.click("#vxHookDur button[data-v='all']")
+    vx_tab(page, "fine")
     page.click("#vxColor button[data-v='FF4D4D']")
     page.locator("#vxSize").fill("130")
     page.locator("#vxSize").dispatch_event("change")
@@ -431,6 +449,7 @@ def test_vertical_title_size_colour_and_scrub(page, studio, project):
     # Rounded plates with a white edge, for captions and for the title
     page.click("#vxRound button[data-v='1']")
     page.click("#vxStroke button[data-v='FFFFFF']")
+    vx_tab(page, "hook")
     page.click("#vxHookRound button[data-v='1']")
     page.click("#vxHookStroke button[data-v='000000']")
     assert wait_for(page, lambda: (lambda o: o.get("round") is True and o.get("stroke") == "FFFFFF" and o.get("hook_round") is True
@@ -445,7 +464,7 @@ def test_vertical_zip_of_kept_clips(page, studio, project):
     assert wait_for(page, lambda: sum(c["review_status"] == "keep" for c in db.get_candidate_clips(PROJECT_ID)) == 1)
     page.click("#edMode button[data-m='vx']")
     with page.expect_download(timeout=180000) as dl:
-        page.click("#vxZip")
+        vx_more(page, "#vxZip")
     names = zipfile.ZipFile(io.BytesIO(open(dl.value.path(), "rb").read())).namelist()
     assert len(names) == 1 and names[0].endswith("_9x16_subs.mp4")
     assert not page.errors
@@ -547,3 +566,43 @@ def test_favicon(studio):
     with urllib.request.urlopen(studio["url"] + "/favicon.svg") as r:
         assert r.headers["Content-Type"].startswith("image/svg")
         assert b"<svg" in r.read()
+
+
+def test_vertical_tabs_more_menu_and_prev_next(page, studio, project):
+    open_editor(page, studio)
+    page.keyboard.press("y")
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("y")
+    assert wait_for(page, lambda: sum(c["review_status"] == "keep" for c in db.get_candidate_clips(PROJECT_ID)) == 2)
+    page.click("#edMode button[data-m='vx']")
+    page.wait_for_function("Vertical.state().layout", timeout=20000)
+    # The header speaks about step 2
+    assert page.locator(".ed-stat-vx").is_visible() and not page.locator("#edCntLeft").is_visible()
+    # One tab at a time, remembered
+    vx_tab(page, "hook")
+    assert page.locator("#vxHookOn").is_visible() and not page.locator("#vxStyle").is_visible()
+    page.click("#edMode button[data-m='table']")
+    page.click("#edMode button[data-m='vx']")
+    assert page.locator("#vxHookOn").is_visible()
+    # Height of the captions stays a slider on «Стиль»
+    vx_tab(page, "style")
+    assert page.locator("#vxPos").is_visible()
+    # «Ще ▾» opens and closes
+    assert page.locator("#vxZip").is_hidden()
+    page.click("#vxMoreBtn")
+    assert page.locator("#vxZip").is_visible() and page.locator("#vxDlClean").is_visible()
+    page.keyboard.press("Escape")
+    assert page.locator("#vxZip").is_hidden()
+    # Previous / next kept clip
+    # (the current clip may be first or last by time, so go whichever way moves)
+    first = page.evaluate("Editor.state().clipIndex")
+    page.click("#vxNext")
+    page.wait_for_timeout(300)
+    go, back = ("#vxNext", "#vxPrev")
+    if page.evaluate("Editor.state().clipIndex") == first:
+        go, back = ("#vxPrev", "#vxNext")
+        page.click(go)
+    page.wait_for_function(f"Editor.state().clipIndex !== {first}")
+    page.click(back)
+    page.wait_for_function(f"Editor.state().clipIndex === {first}")
+    assert not page.errors

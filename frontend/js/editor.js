@@ -107,6 +107,7 @@ const Editor = (() => {
     $("edCntKeep").textContent = String(kept);
     $("edCntDrop").textContent = String(seen - kept);
     $("edCntLeft").textContent = String(st.clips.length - seen);
+    $("edCntPick").textContent = `${kept} ${kept === 1 ? "кліп" : kept > 1 && kept < 5 ? "кліпи" : "кліпів"}`;
     const mini = $("editor").classList.contains("rail-mini");
     const allSeen = seen === st.clips.length && st.clips.length > 0;
     const b1 = document.querySelector('#edMode [data-m="table"]');
@@ -149,7 +150,8 @@ const Editor = (() => {
     $("edNo").textContent = `№${c.num}`;
     if (document.activeElement !== $("edClipTitle")) $("edClipTitle").textContent = c.title || "";
     $("edScore").innerHTML = c.virality_score != null ? `оцінка ШІ <b>★ ${esc(c.virality_score)}</b>` : "";
-    $("vxClipNo").textContent = `№${c.num} · ${c.title || ""}`;
+    $("vxNo").textContent = `№${c.num} · ${Math.round(len(c))} с`;
+    $("vxClipNo").textContent = c.title || "";
     $("edKeep").setAttribute("aria-pressed", String(c.review_status === "keep"));
     $("edDrop").setAttribute("aria-pressed", String(c.review_status === "drop"));
     $("vxKeep").setAttribute("aria-pressed", String(c.review_status === "keep"));
@@ -779,6 +781,23 @@ const Editor = (() => {
     $("vxMp4").addEventListener("click", () => $("edMp4").click());
     $("vxSrt").addEventListener("click", () => $("edSrt").click());
     $("vxCopyPost").addEventListener("click", () => copy(postText()));
+    // «Вертикальні кліпи»: one settings tab at a time (remembered), «Ще ▾» downloads, previous / next kept clip
+    const vxTab = (t) => {
+      document.querySelectorAll("#vxTabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.t === t)));
+      document.querySelectorAll("#edVx .vx-pane").forEach((p) => { p.hidden = p.dataset.t !== t; });
+      try { localStorage.setItem("studio-vx-tab", t); } catch (_) {}
+    };
+    let savedTab = "style";
+    try { savedTab = localStorage.getItem("studio-vx-tab") || "style"; } catch (_) {}
+    vxTab(document.querySelector(`#vxTabs button[data-t="${savedTab}"]`) ? savedTab : "style");
+    $("vxTabs").addEventListener("click", (e) => { const b = e.target.closest("button[data-t]"); if (b) vxTab(b.dataset.t); });
+    const closeVxMore = () => { $("vxMorePop").hidden = true; $("vxMoreBtn").setAttribute("aria-expanded", "false"); };
+    $("vxMoreBtn").addEventListener("click", (e) => { e.stopPropagation(); const on = $("vxMorePop").hidden; $("vxMorePop").hidden = !on; $("vxMoreBtn").setAttribute("aria-expanded", String(on)); });
+    $("vxMorePop").addEventListener("click", (e) => { if (e.target.closest("button")) closeVxMore(); });
+    document.addEventListener("click", (e) => { if (!e.target.closest(".vx-more")) closeVxMore(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeVxMore(); });
+    $("vxPrev").addEventListener("click", () => step(-1));
+    $("vxNext").addEventListener("click", () => step(1));
     $("edBack").addEventListener("click", () => {
       close();
       if (typeof resetStudioState === "function") resetStudioState();
