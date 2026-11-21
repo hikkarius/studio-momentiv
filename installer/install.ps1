@@ -92,7 +92,7 @@ try {
     # 2. Python 3.12 у .venv
     Step 2 $total "Ставлю Python 3.12"
     if (-not (Test-Path $Py)) {
-        if ((Run $UvExe @("venv", $Venv, "--python", "3.12")) -ne 0) { Fail "uv не зміг створити середовище Python." }
+        if ((Run $UvExe @("venv", $Venv, "--python", "3.12", "--python-preference", "only-managed")) -ne 0) { Fail "uv не зміг створити середовище Python." }
     }
     Ok (& $Py --version)
 
@@ -155,7 +155,7 @@ try {
         $n++
         $lnkPath = Join-Path $desktop "Студія моментів $n.lnk"
     }
-    if ($n -gt 1) { Warn "На робочому столі вже є ярлик іншої копії студії. Новий названо «Студія моментів $n»." }
+    if ($n -gt 1 -and -not (Test-Path $lnkPath)) { Warn "На робочому столі вже є ярлик іншої копії студії. Новий названо «Студія моментів $n»." }
     $lnk = $shell.CreateShortcut($lnkPath)
     $lnk.TargetPath = $target
     $lnk.WorkingDirectory = $Root
