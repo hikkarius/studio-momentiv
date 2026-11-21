@@ -151,6 +151,30 @@ GEMINI_UNAVAILABLE_MESSAGE = (
     "Транскрипцію збережено, спробуйте ще раз через кілька хвилин."
 )
 
+GEMINI_QUOTA_MESSAGE = (
+    "Ліміт безкоштовного ключа Gemini на зараз вичерпано. Транскрипцію збережено. "
+    "Спробуй ще раз за годину, а якщо закінчився денний ліміт, то після 10:00 за Києвом "
+    "(Google оновлює його опівночі за тихоокеанським часом)."
+)
+
+GEMINI_BAD_KEY_MESSAGE = (
+    "Google не приймає ключ Gemini. Відкрий «Налаштування → Розпізнавання й ШІ» "
+    "і встав ключ з AI Studio ще раз, повністю. Транскрипцію збережено."
+)
+
+_QUOTA_MARKERS = ("429", "resource_exhausted", "quota", "rate limit", "exceeded")
+_BAD_KEY_MARKERS = ("api_key_invalid", "api key not valid", "api key expired", "permission_denied", "unauthenticated")
+
+
+def _gemini_error_kind(err_str: str) -> str:
+    low = err_str.lower()
+    if any(m in low for m in _BAD_KEY_MARKERS):
+        return "bad_key"
+    if any(m in low for m in _QUOTA_MARKERS):
+        return "quota"
+    return "other"
+
+
 # Pauses (seconds) before the 2nd and 3rd full pass over all candidate models
 _RETRY_PASS_DELAYS: tuple[float, ...] = (5.0, 20.0)
 
@@ -237,8 +261,11 @@ def _call_gemini_single_window(
 """
     last_err = ""
     total_passes = len(_RETRY_PASS_DELAYS) + 1
+    error_kinds: list[str] = []
 
     for pass_idx in range(total_passes):
+        if error_kinds and all(k == "bad_key" for k in error_kinds):
+            break  # a wrong key will not start working after a pause
         if pass_idx > 0:
             delay = _RETRY_PASS_DELAYS[pass_idx - 1]
             log.warning(
@@ -265,6 +292,7 @@ def _call_gemini_single_window(
                     continue
             except Exception as e:
                 last_err = f"{model_name}: {e}"
+                error_kinds.append(_gemini_error_kind(str(e)))
                 if _is_transient_error(str(e)):
                     log.info(f"⚡ Модель {model_name} тимчасово недоступна ({e}), перемикаємось на наступну...")
                 else:
@@ -280,6 +308,10 @@ def _call_gemini_single_window(
                 log.warning(f"Помилка парсингу відповіді {model_name}: {e}. Пробуємо наступну модель...")
 
     log.error(f"Усі моделі Gemini недоступні після {total_passes} проходів. Остання помилка: {last_err}")
+    if error_kinds and all(k == "bad_key" for k in error_kinds):
+        raise GeminiUnavailableError(GEMINI_BAD_KEY_MESSAGE)
+    if error_kinds and all(k == "quota" for k in error_kinds):
+        raise GeminiUnavailableError(GEMINI_QUOTA_MESSAGE)
     raise GeminiUnavailableError(GEMINI_UNAVAILABLE_MESSAGE)
 
 

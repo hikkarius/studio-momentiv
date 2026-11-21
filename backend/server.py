@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 import subtitles_generator
 import vertical_render
-from backend import app_update, db, job_runner, queue_runner, storage
+from backend import app_update, db, job_runner, queue_runner, storage, support_report
 from constants import resolve_filter_mode
 from state import app_state
 from transcription import load_transcript_cache
@@ -1296,6 +1296,53 @@ def check_key(payload: _KeyCheck):
     if result["ok"] and payload.save:
         save_gemini_api_key(key)
     return {**result, "settings": _settings_view()}
+
+
+def _log_file_path() -> Path:
+    for h in logging.getLogger("shorts_core").handlers + logging.getLogger().handlers:
+        name = getattr(h, "baseFilename", None)
+        if name:
+            return Path(name)
+    return Path(os.environ.get("SHORTS_LOG_FILE") or (Path(__file__).resolve().parent.parent / "shorts_automator.log"))
+
+
+@app.get("/api/support-report")
+def get_support_report():
+    """«Зібрати звіт про проблему»: a ZIP with version, system, settings, recent errors and logs, key removed."""
+    info: Dict[str, Any] = {}
+    try:
+        info["версія"] = app_update.app_info()
+    except Exception as e:
+        info["версія"] = f"помилка: {e}"
+    try:
+        info["відеокарта"] = get_health()
+    except Exception as e:
+        info["відеокарта"] = f"помилка: {e}"
+    try:
+        view = _settings_view()
+        info["налаштування"] = {"values": view["values"], "ключ Gemini збережено": view["gemini_key"]["set"]}
+    except Exception as e:
+        info["налаштування"] = f"помилка: {e}"
+    try:
+        items = db.list_queue_items()[:15]
+        info["черга (останні)"] = [
+            {k: it.get(k) for k in ("title", "source_url", "status", "message", "error")} for it in items
+        ]
+    except Exception as e:
+        info["черга (останні)"] = f"помилка: {e}"
+    try:
+        du = shutil.disk_usage(str(OUTPUT_DIR if Path(OUTPUT_DIR).exists() else "."))
+        info["диск"] = {"вільно ГБ": round(du.free / 1e9, 1), "усього ГБ": round(du.total / 1e9, 1)}
+    except Exception as e:
+        info["диск"] = f"помилка: {e}"
+
+    data = support_report.build_report(info, _log_file_path())
+    name = f"studio-report-{datetime.now().strftime('%Y%m%d-%H%M')}.zip"
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
 
 
 @app.get("/api/app-info")

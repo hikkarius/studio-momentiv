@@ -248,3 +248,39 @@ def test_rerank_failure_keeps_original_scores():
     client.models.generate_content.side_effect = RuntimeError("503 UNAVAILABLE")
     out = rerank_clips(clips, client=client)
     assert [c["score"] for c in out] == [70, 65]
+
+
+_SEGMENTS = [
+    {"start": 0.0, "end": 15.0, "text": "Вступна частина відео"},
+    {"start": 15.0, "end": 35.0, "text": "Головна ідея та інсайти"},
+    {"start": 35.0, "end": 55.0, "text": "Висновки та підсумки"},
+]
+
+
+def test_free_key_quota_gets_its_own_message(no_sleep):
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = Exception(
+        "429 RESOURCE_EXHAUSTED. You exceeded your current quota")
+    with pytest.raises(GeminiUnavailableError) as exc:
+        analyze_and_find_clips(client=mock_client, segments=_SEGMENTS, count=2, min_len=15, max_len=30)
+    assert "Ліміт безкоштовного ключа" in str(exc.value)
+
+
+def test_wrong_key_fails_fast_with_settings_hint(no_sleep):
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = Exception(
+        "400 INVALID_ARGUMENT API key not valid. Please pass a valid API key. API_KEY_INVALID")
+    with pytest.raises(GeminiUnavailableError) as exc:
+        analyze_and_find_clips(client=mock_client, segments=_SEGMENTS, count=2, min_len=15, max_len=30)
+    assert "Налаштування" in str(exc.value)
+    assert no_sleep == []  # no pointless 25 s of retries for a wrong key
+
+
+def test_mixed_errors_fall_back_to_overloaded_message(no_sleep):
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = [
+        Exception("429 RESOURCE_EXHAUSTED") if i % 2 else Exception("503 UNAVAILABLE") for i in range(40)
+    ]
+    with pytest.raises(GeminiUnavailableError) as exc:
+        analyze_and_find_clips(client=mock_client, segments=_SEGMENTS, count=2, min_len=15, max_len=30)
+    assert "перевантажений" in str(exc.value)
