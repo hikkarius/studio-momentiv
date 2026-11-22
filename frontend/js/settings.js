@@ -120,6 +120,16 @@ const Settings = (() => {
     const v = view.values;
     const hc = $("heroClips");
     const hf = $("heroFilter");
+    const hl = $("heroLang");
+    if (hl) {
+      const keep = hl.dataset.touched ? hl.value : null;
+      if (hl.options.length !== view.choices.language.length) {
+        hl.innerHTML = "";
+        options(hl, view.choices.language);
+      }
+      hl.value = keep || v.whisper.language;
+      if (!hl.value) hl.value = "uk";
+    }
     if (hc && !hc.dataset.touched) {
       const val = String(v.studio.default_clips);
       if (![...hc.options].some((o) => o.value === val)) hc.add(new Option(val, val));
@@ -477,7 +487,7 @@ const Settings = (() => {
     $("setAutoDays").addEventListener("change", onAutoClean);
     $("setKeyInput").addEventListener("keydown", (e) => { if (e.key === "Enter") saveKey(); });
     $("diskProjects").addEventListener("click", onProjectAction);
-    ["heroClips", "heroFilter"].forEach((id) => {
+    ["heroClips", "heroFilter", "heroLang"].forEach((id) => {
       const el = $(id);
       if (el) el.addEventListener("change", () => { el.dataset.touched = "1"; });
     });

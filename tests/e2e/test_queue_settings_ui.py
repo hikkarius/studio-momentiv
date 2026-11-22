@@ -25,7 +25,7 @@ def clean_queue_and_settings(tmp_path):
     config_loader._assign_in_place(config_loader.app_config, saved_cfg)
 
 
-def _fake_analyze(job_id, project_id, clips_count, filter_mode, engine="whisper_local"):
+def _fake_analyze(job_id, project_id, clips_count, filter_mode, engine="whisper_local", language=None):
     db.update_project_status(project_id, "ready")
     job_runner.broadcast_update(job_id, {"status": "completed", "progress": 1.0, "message": "Готово!"})
 
@@ -191,3 +191,20 @@ def test_first_run_asks_for_gemini_key(page, studio, monkeypatch, tmp_path):
     page.locator("#welcomeScreen").wait_for(state="hidden")
     assert os.environ["GEMINI_API_KEY"] == "AIza" + "k" * 35
     assert (tmp_path / ".env").read_text(encoding="utf-8").strip().endswith("k" * 35)
+
+
+def test_language_choice_on_home_goes_into_queue(page, studio, project):
+    config_loader.save_user_settings({"whisper": {"language": "en"}})
+    page.goto(studio["url"] + "/")
+    page.wait_for_function("document.getElementById('heroLang').value === 'en'")   # default from settings
+    labels = page.eval_on_selector_all("#heroLang option", "els => els.map(e => e.textContent)")
+    assert "Автоматично" in labels and "Німецька" in labels
+
+    page.click("#homeOptsEdit")
+    page.select_option("#heroLang", "auto")
+    assert "мова: автоматично" in page.locator("#heroHint").inner_text()
+    page.fill("#urlInput", "https://youtu.be/english-talk")
+    page.click("#urlDownloadBtn")
+    page.locator("#queueList .q-item").first.wait_for()
+    assert [i["language"] for i in db.list_queue_items()] == ["auto"]
+    assert not page.errors

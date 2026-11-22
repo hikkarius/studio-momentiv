@@ -183,7 +183,9 @@ const Home = (() => {
     const f = $("heroFilter"), c = $("heroClips");
     const filter = f.options[f.selectedIndex]?.text.toLowerCase() || "";
     const count = c.value === "0" ? "кількість: авто" : `кліпів: ${c.value}`;
-    const chips = [filter, `кліпи ${defaults.min}–${defaults.max} с`, count, `мова: ${defaults.lang}`];
+    const l = $("heroLang");
+    const lang = (l && l.options[l.selectedIndex]?.text.toLowerCase()) || defaults.lang;
+    const chips = [filter, `кліпи ${defaults.min}–${defaults.max} с`, count, `мова: ${lang}`];
     $("heroHint").innerHTML = chips.map((t) => `<span class="home-chip">${escapeHtml(t)}</span>`).join("");
   }
 
@@ -216,7 +218,7 @@ const Home = (() => {
   function init() {
     initDrop();
     renderOpts();
-    ["heroFilter", "heroClips"].forEach((id) => $(id).addEventListener("change", renderOpts));
+    ["heroFilter", "heroClips", "heroLang"].forEach((id) => $(id).addEventListener("change", renderOpts));
     $("homeOptsEdit").addEventListener("click", () => {
       const panel = $("homeOptsPanel");
       panel.hidden = !panel.hidden;

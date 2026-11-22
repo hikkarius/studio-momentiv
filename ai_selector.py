@@ -13,6 +13,7 @@ from typing import Optional
 from config_loader import CANDIDATE_MODELS, get_gemini_client
 from clip_refiner import rubric_score
 from constants import FILTER_INSTRUCTIONS, FilterMode, resolve_filter_mode
+from languages import language_name
 
 log = logging.getLogger("shorts_core")
 
@@ -224,9 +225,19 @@ def _call_gemini_single_window(
     canonical_mode = resolve_filter_mode(filter_mode)
     filter_hint = FILTER_INSTRUCTIONS.get(canonical_mode, "Цікаві завершені думки")
 
+    lang = language_name(detected_lang)
+    if (detected_lang or "uk").lower() == "uk":
+        lang_rule = "Усі тексти ('title', 'reason', 'hook_text', 'caption', 'hashtags') пиши українською."
+    else:
+        lang_rule = (
+            f"Мова відео — {lang}. 'title', 'hook_text', 'caption' і 'hashtags' пиши МОВОЮ ВІДЕО ({lang}): "
+            "вони підуть у публікацію для глядачів цього відео. 'reason' пиши українською: це пояснення для автора. "
+            "Приклад JSON нижче українською лише для формату."
+        )
+
     prompt = f"""\
 Ти — топ-продюсер вертикального контенту (Shorts/Reels/TikTok).
-Ось транскрипція фрагмента відео (мова: {detected_lang}) з таймкодами:
+Ось транскрипція фрагмента відео (мова: {lang}) з таймкодами:
 {transcript_text}
 
 Параметри завдання:
@@ -244,7 +255,7 @@ def _call_gemini_single_window(
 
 Вимоги до кожного знайденого кліпу:
 1. 'start' і 'end' — точні секунди (числа) з таймкодів транскрипції.
-2. 'title' — короткий чіпкий заголовок КАПСЛОКОМ тією ж мовою ({detected_lang}), що розкриває головну тему моменту (до 5 слів).
+2. 'title' — короткий чіпкий заголовок КАПСЛОКОМ мовою відео, що розкриває головну тему моменту (до 5 слів).
 3. 'category' — одне з: "content" (корисний момент), "intro" (вступ/привітання), "outro" (прощання, заклик підписатися), "ad" (реклама, інтеграція, промокод).
 4. Оцінки від 1 до 10 (цілі числа), будь СУВОРИМ і використовуй усю шкалу — середній момент це 5, а не 8:
    'hook' — наскільки перші 3 секунди змушують дивитися далі;
@@ -255,6 +266,8 @@ def _call_gemini_single_window(
 6. 'hook_text' — точна перша фраза з транскрипції, з якої починається фрагмент.
 7. 'caption' — захоплюючий текст-опис для публікації в соцмережах (1-2 речення).
 8. 'hashtags' — список із 4 релевантних хештегів, наприклад: ["#shorts", "#інсайти", "#тренди", "#мотивація"].
+
+Мова: {lang_rule}
 
 Поверни результат ВИКЛЮЧНО у валідному JSON масиві об'єктів:
 [{{"start": 10.0, "end": 42.5, "title": "ГОЛОВНА ПОМИЛКА", "category": "content", "hook": 8, "emotion": 6, "standalone": 9, "value": 7, "reason": "Розповідає про фатальну помилку підприємців і чим вона закінчилась.", "hook_text": "Найбільша помилка, якої припускаються майже всі...", "caption": "Головна помилка, якої припускаються майже всі! Дивіться до кінця.", "hashtags": ["#shorts", "#помилки", "#інсайти", "#тренди"]}}]
@@ -440,7 +453,7 @@ def rerank_clips(
             )
         prompt = (
             "Ти — продюсер Shorts/Reels. Нижче всі кліпи, вирізані з одного відео "
-            f"(мова: {detected_lang}). Критерій: {filter_hint}\n\n" + "\n".join(lines) + "\n\n"
+            f"(мова: {language_name(detected_lang)}). Критерій: {filter_hint}\n\n" + "\n".join(lines) + "\n\n"
             "Порівняй кліпи МІЖ СОБОЮ і дай кожному оцінку від 0 до 100, наскільки він набере перегляди. "
             "Використовуй усю шкалу: найкращий близько 95, найслабший близько 30, не став однакові оцінки без причини.\n"
             'Поверни ВИКЛЮЧНО JSON масив: [{"n": 1, "score": 87}, ...] для всіх кліпів.'

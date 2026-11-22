@@ -87,7 +87,14 @@
             <option value="50">50</option><option value="75">75</option><option value="100">100</option>
           </select>
         </label>
-        <span class="home-opts-note">Це для наступних відео. Довжину кліпів і мову змінюй у <button type="button" class="linkish" onclick="Settings.open()">Налаштуваннях</button>.</span>
+        <label class="hero-opt">Мова відео
+          <select id="heroLang" class="input-select" title="Мова, якою говорять у відео. Субтитри, заголовки й описи будуть цією мовою.">
+            <option value="uk">Українська</option>
+            <option value="auto">Автоматично</option>
+            <option value="en">Англійська</option>
+          </select>
+        </label>
+        <span class="home-opts-note">Це для наступних відео. Довжину кліпів і мову за замовчуванням змінюй у <button type="button" class="linkish" onclick="Settings.open()">Налаштуваннях</button>.</span>
       </div>
 
       <ol class="home-how home-hero-only">
@@ -397,7 +404,7 @@
             </div>
             <small class="set-note">Після зміни наступне відео розпізнається заново, навіть якщо вже оброблялося.</small>
             <div class="set-box">
-              <label class="set-line"><span class="set-l"><b>Мова відео</b><small>Якою мовою говорять у відео</small></span>
+              <label class="set-line"><span class="set-l"><b>Мова відео</b><small>Якою мовою говорять у відео. Для окремого відео можна змінити на головній, у «Змінити».</small></span>
                 <select class="input-select" data-key="whisper.language" id="setLang"></select></label>
               <div class="set-line"><div class="set-l"><b>Прискорення</b><small>Студія сама використовує відеокарту NVIDIA, якщо вона є</small></div>
                 <div class="set-hw" id="setHw"><i aria-hidden="true">…</i><span>Перевіряю…</span></div></div>
