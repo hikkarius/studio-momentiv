@@ -92,8 +92,10 @@ def test_open_project_shows_editor_sorted_by_score(page, studio, project):
     assert "переглянуто 0/4" in page.locator("#edStep1").inner_text()
     assert page.locator("#edMp4").is_visible()
     assert "Сильний хук" in page.locator("#edWhy").inner_text()
-    assert page.locator("#edProgTxt").inner_text() == "0 з 4"
-    assert page.locator("#edCntLeft").inner_text() == "4"
+    # four status shelves on top; the strip opens on «Нові»
+    assert page.locator("#edCnt_new").inner_text() == "4"
+    assert page.locator("#edShelves [data-f='new'][aria-pressed='true']").is_visible()
+    assert page.locator("#edFilters").count() == 0
     assert not page.errors
 
 
@@ -109,31 +111,50 @@ def test_editor_theme_menu(page, studio, project):
 
 # ─── Reviewing ───────────────────────────────────────────────────────────────
 
-def test_keep_and_drop_with_buttons_and_keys(page, studio, project):
+def test_status_menu_shelves_and_keys(page, studio, project):
     open_editor(page, studio)
-    page.click("#edKeep")  # best clip (#2) → keep; it stays open and the buttons turn into its status
+    assert page.locator("#edStatus").inner_text().startswith("Нове")
+    page.click("#edStatus")  # the menu lists all four statuses
+    assert page.locator("#edStatusMenu").is_visible()
+    assert page.locator("#edStatusMenu button").count() == 4
+    page.click("#edStatusMenu button[data-s='keep']")  # best clip (#2) → В роботі; it stays open
     assert wait_for(page, lambda: clip(2)["review_status"] == "keep")
+    assert page.locator("#edStatusMenu").is_hidden()
     assert head(page).startswith("№2")
-    assert not page.locator("#edKeep").is_visible() and not page.locator("#edDrop").is_visible()
-    assert "Беру" in page.locator("#edDecide .ed-verdict-b").inner_text()
+    assert page.locator("#edStatus").inner_text().startswith("В роботі")
+    # it left the «Нові» shelf: the strip shows the other three, the counters moved
+    assert page.locator("#edList .ed-row").count() == 3
+    assert page.locator("#edCnt_new").inner_text() == "3" and page.locator("#edCnt_keep").inner_text() == "1"
+    assert "В роботі" in page.locator("#edShelfNote").inner_text()
 
-    page.keyboard.press("ArrowDown")  # move on by hand
+    page.keyboard.press("ArrowDown")  # on to the next new clip, where №2 was
     assert head(page).startswith("№4")
-    page.keyboard.press("n")  # second best (#4) → drop
+    page.keyboard.press("n")  # second best (#4) → Не беру
     assert wait_for(page, lambda: clip(4)["review_status"] == "drop")
+    assert page.locator("#edToast .ed-toast-undo").is_visible()
+    page.click("#edToast .ed-toast-undo")  # ↶ Повернути
+    assert wait_for(page, lambda: clip(4)["review_status"] == "")
+    page.keyboard.press("u")  # U → Виконано
+    assert wait_for(page, lambda: clip(4)["review_status"] == "done")
 
-    page.click("#edFilters button[data-f='keep']")
+    page.click("#edShelves [data-f='keep']")
     assert page.locator("#edList .ed-row").count() == 1
-    assert "1" in page.locator("#edCnt_keep").inner_text()
+    assert head(page).startswith("№2")
     assert page.locator("#edOv .c.keep").count() == 1
-    assert page.locator("#edOv .c.drop").count() == 1
+    assert page.locator("#edOv .c.done").count() == 1
+    # a clip picked on the map opens its own shelf
+    page.locator("#edOv .c.done").click()
+    assert page.locator("#edShelves [data-f='done'][aria-pressed='true']").is_visible()
+    page.keyboard.press("0")  # 0 → back to Нове
+    assert wait_for(page, lambda: clip(4)["review_status"] == "")
+    assert not page.errors
 
-    # «Змінити» on a kept clip removes the mark and brings the buttons back
-    page.click("#edFilters button[data-f='all']")
-    page.locator("#edList .ed-row", has_text="Найкращий момент").click()
-    page.click("#edDecide .ed-change")
-    assert wait_for(page, lambda: clip(2)["review_status"] == "")
-    assert page.locator("#edKeep").is_visible()
+
+def test_trim_silence_button(page, studio, project):
+    open_editor(page, studio)  # best clip №2: 30-50 s, words every 0.5 s, so there is (almost) no silence
+    page.click("#edSilence")
+    page.wait_for_function("document.getElementById('edToast').textContent.includes('тиші')")
+    assert clip(2)["start_sec"] >= 30.0 and clip(2)["end_sec"] <= 50.0
     assert not page.errors
 
 
@@ -442,10 +463,11 @@ def test_vertical_title_size_colour_and_scrub(page, studio, project):
     t = page.evaluate("Editor.state().time - Editor.state().start")
     assert abs(t - 8) < 0.3
     # «Беру» right here, and the clip stays open
-    page.click("#vxKeep")
+    page.click("#vxStatus")
+    page.click("#edStatusMenu button[data-s='keep']")
     assert wait_for(page, lambda: clip(idx)["review_status"] == "keep")
     assert page.evaluate("Editor.state().clipIndex") == idx
-    assert page.locator("#vxDecide .ed-verdict").is_visible() and not page.locator("#vxKeep").is_visible()
+    assert page.locator("#vxStatus").inner_text().startswith("В роботі")
     # Rounded plates with a white edge, for captions and for the title
     page.click("#vxRound button[data-v='1']")
     page.click("#vxStroke button[data-v='FFFFFF']")
@@ -511,10 +533,10 @@ def test_reanalyze_visible_and_next_button(page, studio, project):
     open_editor(page, studio)
     assert page.locator("#edReanalyze").is_visible()
     assert "Шукати кліпи заново" in page.locator("#edReanalyze").inner_text()
-    page.click("#edKeep")
+    page.keyboard.press("y")
     assert wait_for(page, lambda: clip(2)["review_status"] == "keep")
-    assert page.locator("#edProgTxt").inner_text() == "1 з 4"
-    assert page.locator("#edCntKeep").inner_text() == "1"
+    assert "1/4" in page.locator("#edStep1").inner_text()
+    assert page.locator("#edCnt_keep").inner_text() == "1"
     page.click("#edGoNext")  # after a decision: on to the next clip in the strip
     page.wait_for_function("Editor.state().num === 4")
     assert not page.errors
@@ -522,14 +544,14 @@ def test_reanalyze_visible_and_next_button(page, studio, project):
 
 def test_step_two_strip_lists_kept_clips(page, studio, project):
     open_editor(page, studio)
-    page.click("#edKeep")
+    page.keyboard.press("y")
     assert wait_for(page, lambda: clip(2)["review_status"] == "keep")
     page.click("#edMode button[data-m='vx']")
     assert page.locator("#edList .ed-row").count() == 1
     assert page.locator("#edStripTitle").inner_text().lower() == "обрані кліпи"
-    assert page.locator("#edFilters").is_hidden()
+    assert page.locator("#edShelves").is_hidden()
     page.click("#edMode button[data-m='table']")
-    assert page.locator("#edList .ed-row").count() == 4
+    assert page.locator("#edList .ed-row").count() == 3  # the «Нові» shelf
     assert not page.errors
 
 
@@ -577,7 +599,7 @@ def test_vertical_tabs_more_menu_and_prev_next(page, studio, project):
     page.click("#edMode button[data-m='vx']")
     page.wait_for_function("Vertical.state().layout", timeout=20000)
     # The header speaks about step 2
-    assert page.locator(".ed-stat-vx").is_visible() and not page.locator("#edCntLeft").is_visible()
+    assert page.locator(".ed-stat-vx").is_visible() and not page.locator("#edShelves").is_visible()
     # One tab at a time, remembered
     vx_tab(page, "hook")
     assert page.locator("#vxHookOn").is_visible() and not page.locator("#vxStyle").is_visible()

@@ -1,6 +1,7 @@
 /**
  * editor.js — «Монтажний стіл»: step rail on the left (Крок 1 / Крок 2), player and side panel, clip strip at the bottom.
- * Watch a clip, press «Беру» / «Не беру», move on. Right under the video sits the clip track:
+ * Watch a clip, set its status (Нове → В роботі → Виконано, or Не беру) from the status menu, move on.
+ * The four status tiles at the top count the clips and choose which «shelf» the strip at the bottom shows. Right under the video sits the clip track:
  * the words laid out on time, draggable bracket edges, drag anywhere else to scrub, and a word menu
  * (start / end / listen). The playhead never leaves the clip: to hear more, move a bracket.
  * Clips are numbered by their place in the video (№1 = earliest), the same in the list and the strip.
@@ -10,7 +11,7 @@
 const Editor = (() => {
   const $ = (id) => document.getElementById(id);
   const st = {
-    project: null, clips: [], cur: -1, filter: "all", tab: "text", sort: "score", mode: "table",
+    project: null, clips: [], cur: -1, filter: "new", anchor: 0, tab: "text", sort: "score", mode: "table",
     words: [], wordsFor: null, stopAt: null, backToStart: false, saveTimer: null,
     zoom: { lo: 0, hi: 1 }, drag: null, scrub: null, pop: null,
   };
@@ -52,7 +53,12 @@ const Editor = (() => {
   const byScore = () => [...st.clips.keys()].sort((a, b) => (st.clips[b].virality_score || 0) - (st.clips[a].virality_score || 0) || st.clips[a].num - st.clips[b].num);
   const byTime = () => [...st.clips.keys()].sort((a, b) => st.clips[a].num - st.clips[b].num);
   const ordered = () => (st.sort === "time" ? byTime() : byScore());
-  const matches = (c) => st.filter === "all" || (st.filter === "new" ? !c.review_status : c.review_status === st.filter);
+  /** Clip statuses, like a todo list. '' = Нове, keep = В роботі, done = Виконано, drop = Не беру. */
+  const STATUS = { "": "Нове", keep: "В роботі", done: "Виконано", drop: "Не беру" };
+  const SHELVES = ["new", "keep", "done", "drop"];
+  const shelfOf = (c) => c.review_status || "new";
+  const matches = (c) => shelfOf(c) === st.filter;
+  const kb = (n) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} КБ` : n < 1024 ** 3 ? `${Math.round(n / 1024 ** 2)} МБ` : `${(n / 1024 ** 3).toFixed(1).replace(".", ",")} ГБ`);
   const visible = () => ordered().filter((i) => matches(st.clips[i]));
 
   // ─── Rendering ─────────────────────────────────────────────────────────────
@@ -84,29 +90,30 @@ const Editor = (() => {
       li.addEventListener("keydown", (e) => { if (e.key === "Enter") select(i); });
       L.appendChild(li);
     });
-    if (!vis.length) L.innerHTML = `<li class="ed-empty">Тут поки порожньо.</li>`;
+    if (!vis.length) {
+      const empty = { new: "Нових кліпів немає: усі розібрано.", keep: "У роботі поки нічого. Познач кліп «В роботі» в меню статусу.",
+        done: "Виконаних ще немає.", drop: "Відкинутих кліпів немає." };
+      L.innerHTML = `<li class="ed-empty">${st.mode === "vx" ? "Тут поки порожньо." : empty[st.filter]}</li>`;
+    }
     const anyKept = st.clips.some((c) => c.review_status === "keep");
     $("edStripTitle").textContent = st.mode === "vx" && anyKept ? "Обрані кліпи" : "Кліпи";
     const note = document.querySelector("#editor .ed-vx-note");
-    note.textContent = anyKept ? "Тут лише кліпи з позначкою «Беру». Щоб додати ще, повернись на крок 1." : "Ще нічого не обрано: познач кліпи «Беру» на кроці 1, тоді тут будуть лише вони.";
+    note.textContent = anyKept ? "Тут лише кліпи «В роботі». Щоб додати ще, повернись на крок 1." : "Ще нічого не обрано: познач кліпи «В роботі» на кроці 1, тоді тут будуть лише вони.";
 
-    const count = (f) => st.clips.filter((c) => (f === "all" ? true : f === "new" ? !c.review_status : c.review_status === f)).length;
-    ["all", "new", "keep", "drop"].forEach((f) => { $(`edCnt_${f}`).textContent = count(f); });
+    SHELVES.forEach((f) => {
+      $(`edCnt_${f}`).textContent = st.clips.filter((c) => shelfOf(c) === f).length;
+      document.querySelector(`#edShelves [data-f="${f}"]`).setAttribute("aria-pressed", String(st.filter === f));
+    });
+    const cur = clip();
+    $("edShelfNote").textContent = cur && !matches(cur) && st.mode !== "vx" ? `№${cur.num} тепер на полиці «${shelfName(shelfOf(cur))}»` : "";
     renderProgress();
     updateScroll();
   }
 
   /** Header bar and the step counters: how many clips are reviewed and kept. */
   function renderProgress() {
-    const n = st.clips.length || 1;
     const kept = st.clips.filter((c) => c.review_status === "keep").length;
     const seen = st.clips.filter((c) => c.review_status).length;
-    $("edProgKeep").style.width = `${(kept / n) * 100}%`;
-    $("edProgSeen").style.width = `${((seen - kept) / n) * 100}%`;
-    $("edProgTxt").textContent = `${seen} з ${st.clips.length}`;
-    $("edCntKeep").textContent = String(kept);
-    $("edCntDrop").textContent = String(seen - kept);
-    $("edCntLeft").textContent = String(st.clips.length - seen);
     $("edCntPick").textContent = `${kept} ${kept === 1 ? "кліп" : kept > 1 && kept < 5 ? "кліпи" : "кліпів"}`;
     const mini = $("editor").classList.contains("rail-mini");
     const allSeen = seen === st.clips.length && st.clips.length > 0;
@@ -152,15 +159,11 @@ const Editor = (() => {
     $("edScore").innerHTML = c.virality_score != null ? `оцінка ШІ <b>★ ${esc(c.virality_score)}</b>` : "";
     $("vxNo").textContent = `№${c.num} · ${Math.round(len(c))} с`;
     $("vxClipNo").textContent = c.title || "";
-    $("edKeep").setAttribute("aria-pressed", String(c.review_status === "keep"));
-    $("edDrop").setAttribute("aria-pressed", String(c.review_status === "drop"));
-    $("vxKeep").setAttribute("aria-pressed", String(c.review_status === "keep"));
-    $("vxDrop").setAttribute("aria-pressed", String(c.review_status === "drop"));
-    ["edDecide", "vxDecide"].forEach((id) => {
-      const d = $(id);
-      d.classList.toggle("is-keep", c.review_status === "keep");
-      d.classList.toggle("is-drop", c.review_status === "drop");
-      d.querySelector(".ed-verdict-b").textContent = c.review_status === "keep" ? "✓ Беру · у добірці" : c.review_status === "drop" ? "✕ Не беру" : "";
+    ["edStatus", "vxStatus"].forEach((id) => {
+      const b = $(id);
+      b.dataset.s = c.review_status || "";
+      b.querySelector(".ed-sdot").dataset.s = c.review_status || "";
+      b.querySelector(".ed-sbtn-l").textContent = STATUS[c.review_status || ""];
     });
     $("edWhy").innerHTML = c.reason ? `<b>Чому:</b> ${esc(c.reason)}` : "";
     $("edStartTc").textContent = fmt(c.start_sec);
@@ -284,6 +287,7 @@ const Editor = (() => {
   async function select(i, autoplay = false) {
     if (i < 0 || i >= st.clips.length) return;
     st.cur = i;
+    if (st.mode !== "vx" && !matches(st.clips[i])) st.filter = shelfOf(st.clips[i]); // a clip picked on the map opens its own shelf
     video().pause();
     st.stopAt = null;
     st.words = [];
@@ -560,22 +564,100 @@ const Editor = (() => {
     }
   }
 
-  async function mark(status) {
-    const c = clip();
-    const nextStatus = c.review_status === status ? "" : status;
-    c.review_status = nextStatus;
+  const shelfName = (f) => ({ new: "Нові", keep: "В роботі", done: "Виконані", drop: "Не беру" })[f];
+
+  /**
+   * Sets the clip status. The clip stays open (↓ moves on). «Виконано» and «Не беру» delete the clip's
+   * rendered files on the server; its bounds, text and style stay, so «Скачати» makes them again.
+   */
+  async function mark(status, c = clip(), { undo = true } = {}) {
+    closeStatusMenu();
+    if (!c) return;
+    const prev = c.review_status || "";
+    if (prev === status) return;
+    const vis = stripClips();
+    if (c === clip() && vis.includes(st.cur)) st.anchor = vis.indexOf(st.cur);
+    c.review_status = status;
     renderList(); renderOverview(); renderDetails();
-    toast(nextStatus === "keep" ? "✓ Беру. Наступний кліп: ↓" : nextStatus === "drop" ? "✕ Не беру. Наступний кліп: ↓" : "Позначку знято, обери знову");
-    // stay on this clip: the person moves on with ↓ or a click when ready
-    await patch({ review_status: nextStatus }, true, c);
+    try {
+      const data = await api(`/api/projects/${pid()}/clips/${c.clip_index}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ review_status: status }),
+      });
+      const freed = data.freed_bytes || 0;
+      const msg = { "": "Знову «Нове»", keep: "✓ В роботі. Наступний кліп: ↓", done: "✓ Виконано", drop: "✕ Не беру" }[status]
+        + (freed ? `. Звільнено ${kb(freed)}` : "");
+      if (undo && prev !== status) toastUndo(msg, () => mark(prev, c, { undo: false }));
+      else toast(msg);
+    } catch (e) {
+      c.review_status = prev;
+      renderList(); renderOverview(); renderDetails();
+      toast("Не вдалося змінити статус: " + e.message, true);
+    }
     renderList();
+  }
+
+  function toastUndo(msg, onUndo) {
+    const t = $("edToast");
+    t.innerHTML = `<span></span><button type="button" class="ed-toast-undo">↶ Повернути</button>`;
+    t.firstChild.textContent = msg;
+    t.classList.remove("err");
+    t.classList.add("on", "act");
+    t.querySelector("button").addEventListener("click", () => { t.classList.remove("on", "act"); onUndo(); }, { once: true });
+    clearTimeout(t._h);
+    t._h = setTimeout(() => t.classList.remove("on", "act"), 5000);
+  }
+
+  // ─── Status menu (one drop-down shared by step 1 and step 2) ──────────────
+  function openStatusMenu(btn) {
+    const m = $("edStatusMenu");
+    const c = clip();
+    if (!c) return;
+    m.querySelectorAll("[data-s]").forEach((b) => { if (b.tagName === "BUTTON") b.setAttribute("aria-checked", String(b.dataset.s === (c.review_status || ""))); });
+    m.hidden = false;
+    const r = btn.getBoundingClientRect();
+    const h = m.offsetHeight, w = m.offsetWidth;
+    const top = r.top - h - 8 > 8 ? r.top - h - 8 : Math.min(window.innerHeight - h - 8, r.bottom + 8);
+    m.style.top = `${Math.max(8, top)}px`;
+    m.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w))}px`;
+    btn.setAttribute("aria-expanded", "true");
+    st.menuBtn = btn;
+    (m.querySelector('[aria-checked="true"]') || m.querySelector("button")).focus();
+  }
+  function closeStatusMenu() {
+    const m = $("edStatusMenu");
+    if (!m || m.hidden) return;
+    m.hidden = true;
+    if (st.menuBtn) { st.menuBtn.setAttribute("aria-expanded", "false"); st.menuBtn = null; }
+  }
+
+  // ─── «Підрізати тишу» ──────────────────────────────────────────────────────
+  async function trimSilence() {
+    const c = clip();
+    if (!c) return;
+    const btn = $("edSilence");
+    btn.disabled = true;
+    try {
+      const data = await api(`/api/projects/${pid()}/clips/${c.clip_index}/trim-silence`, { method: "POST" });
+      if (data.status !== "updated") { toast("На краях кліпу тиші немає"); return; }
+      if (clip() === c) setBounds(data.clip.start_sec, data.clip.end_sec, { save: false });
+      else { c.start_sec = data.clip.start_sec; c.end_sec = data.clip.end_sec; c.duration = c.end_sec - c.start_sec; }
+      renderOverview(); renderList(); renderWords();
+      toast(`✂ Прибрано ${String(data.trimmed_sec.toFixed(1)).replace(".", ",")} с тиші`);
+      if (typeof Vertical !== "undefined" && clip() === c) Vertical.onClip();
+    } catch (e) {
+      toast("Не вдалося підрізати: " + e.message, true);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   function step(dir) {
     const vis = stripClips();
     if (!vis.length) return;
     let pos = vis.indexOf(st.cur);
-    pos = pos < 0 ? 0 : Math.max(0, Math.min(vis.length - 1, pos + dir));
+    // the open clip may have just left this shelf: carry on from the place where it was
+    if (pos < 0) pos = Math.max(0, Math.min(vis.length - 1, dir > 0 ? st.anchor : st.anchor - 1));
+    else pos = Math.max(0, Math.min(vis.length - 1, pos + dir));
     if (vis[pos] !== st.cur) select(vis[pos]);
   }
 
@@ -614,7 +696,7 @@ const Editor = (() => {
   // ─── Keyboard ──────────────────────────────────────────────────────────────
   function onKey(e) {
     if ($("editor").hidden) return;
-    if (e.key === "Escape") { closePop(); return; }
+    if (e.key === "Escape") { closePop(); closeStatusMenu(); return; }
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.target.closest && e.target.closest(".theme-menu")) return; // the theme drop-down handles its own keys
     const k = e.key;
@@ -624,7 +706,9 @@ const Editor = (() => {
     else if (k === "ArrowLeft") { e.preventDefault(); seek(video().currentTime - 2); }
     else if (k === "ArrowRight") { e.preventDefault(); seek(video().currentTime + 2); }
     else if (/^[yYнН]$/.test(k)) mark("keep");
+    else if (/^[uUгГ]$/.test(k)) mark("done");
     else if (/^[nNтТ]$/.test(k)) mark("drop");
+    else if (k === "0") mark("");
     else if (k === "[" || k === "х") boundToPlayhead("start");
     else if (k === "]" || k === "ї") boundToPlayhead("end");
   }
@@ -634,9 +718,10 @@ const Editor = (() => {
     st.project = project;
     st.clips = clips.map((c) => ({ ...c, review_status: c.review_status || "" }));
     assignNumbers();
-    st.filter = "all";
+    // open on the first shelf that has clips: new ones first, then the ones in work
+    st.filter = SHELVES.find((f) => st.clips.some((c) => shelfOf(c) === f)) || "new";
+    st.anchor = 0;
     st.tab = "text";
-    document.querySelectorAll("#edFilters button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.f === "all")));
     $("edProjTitle").textContent = project.title || "Відео";
     $("edProjMeta").textContent = `${fmtS(project.duration || 0)} · ${clips.length} кліпів`;
     const v = video();
@@ -654,7 +739,7 @@ const Editor = (() => {
     let sort = "score";
     try { sort = localStorage.getItem("studio-sort") || "score"; } catch (_) {}
     setSort(sort);
-    select(ordered()[0] ?? 0);
+    select(visible()[0] ?? ordered()[0] ?? 0);
   }
 
   function close() {
@@ -663,6 +748,7 @@ const Editor = (() => {
     v.removeAttribute("src");
     v.load();
     closePop();
+    closeStatusMenu();
     $("editor").hidden = true;
     document.body.style.overflow = "";
   }
@@ -729,8 +815,19 @@ const Editor = (() => {
     v.addEventListener("pause", onPlayState);
     $("edScreen").addEventListener("click", togglePlay);
     $("edPlay").addEventListener("click", togglePlay);
-    $("edKeep").addEventListener("click", () => mark("keep"));
-    $("edDrop").addEventListener("click", () => mark("drop"));
+    ["edStatus", "vxStatus"].forEach((id) => $(id).addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (st.menuBtn === e.currentTarget) closeStatusMenu(); else { closeStatusMenu(); openStatusMenu(e.currentTarget); }
+    }));
+    $("edStatusMenu").addEventListener("click", (e) => { const b = e.target.closest("button[data-s]"); if (b) mark(b.dataset.s); });
+    $("edStatusMenu").addEventListener("keydown", (e) => {
+      const items = [...$("edStatusMenu").querySelectorAll("button")];
+      const i = items.indexOf(document.activeElement);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus(); }
+      else if (e.key === "Tab") closeStatusMenu();
+    });
+    document.addEventListener("click", (e) => { if (!e.target.closest("#edStatusMenu")) closeStatusMenu(); });
+    $("edSilence").addEventListener("click", trimSilence);
     const T = $("edTrack");
     T.addEventListener("pointerdown", onTrackDown);
     T.addEventListener("pointermove", onTrackMove);
@@ -745,10 +842,13 @@ const Editor = (() => {
       st.clips.forEach((c, i) => { const d = Math.min(Math.abs(c.start_sec - t), Math.abs(c.end_sec - t)); if (d < bd) { bd = d; best = i; } });
       select(best);
     });
-    document.querySelectorAll("#edFilters button").forEach((b) => b.addEventListener("click", () => {
+    document.querySelectorAll("#edShelves button").forEach((b) => b.addEventListener("click", () => {
       st.filter = b.dataset.f;
-      document.querySelectorAll("#edFilters button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      const vis = visible();
+      st.anchor = 0;
       renderList();
+      $("edList").scrollLeft = 0;
+      if (vis.length && !vis.includes(st.cur)) select(vis[0]); // open the first clip of the shelf
     }));
     document.querySelectorAll("#edTabs button").forEach((b) => b.addEventListener("click", () => {
       st.tab = b.dataset.tab;
@@ -773,9 +873,6 @@ const Editor = (() => {
     $("edMp4").addEventListener("click", () => { toast("Готуємо відео…"); download(`/api/projects/${pid()}/clips/${clip().clip_index}/download`); });
     $("edSrt").addEventListener("click", () => download(`/api/projects/${pid()}/clips/${clip().clip_index}/export-srt`));
     document.querySelectorAll("#edMode button").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.m)));
-    $("vxKeep").addEventListener("click", () => mark("keep"));
-    $("vxDrop").addEventListener("click", () => mark("drop"));
-    document.querySelectorAll(".ed-change").forEach((b) => b.addEventListener("click", () => { const c = clip(); if (c && c.review_status) mark(c.review_status); }));
     document.querySelectorAll("#edSort button").forEach((b) => b.addEventListener("click", () => setSort(b.dataset.s)));
     $("edGoVx").addEventListener("click", () => setMode("vx"));
     $("vxMp4").addEventListener("click", () => $("edMp4").click());
