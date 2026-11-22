@@ -25,6 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+import pauses
 import subtitles_generator
 import vertical_render
 from backend import app_update, db, job_runner, queue_runner, storage, support_report
@@ -687,12 +688,42 @@ def _get_project_and_clip(project_id: str, clip_index: int) -> tuple[Dict[str, A
     return proj, clip
 
 
+def _clip_cuts(clip: Dict[str, Any]) -> List[tuple]:
+    """The clip's pauses to cut, cleaned against its current bounds."""
+    return pauses.normalize_cuts(clip.get("cuts"), float(clip["start_sec"]), float(clip["end_sec"]))
+
+
+def _ensure_clip_file(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any], raw: bool = False) -> tuple[str, str]:
+    """The 16:9 clip to hand out: without its cut pauses when it has any (re-encoded), else the lossless slice."""
+    cuts = [] if raw else _clip_cuts(clip)
+    if not cuts:
+        return _ensure_clip_slice(project_id, proj, clip)
+    source_path = proj["source_path"]
+    if not os.path.exists(source_path):
+        raise HTTPException(status_code=404, detail="Вихідне відео не знайдено на диску.")
+    slices_dir = _safe_project_output_dir(project_id) / "slices"
+    slices_dir.mkdir(parents=True, exist_ok=True)
+    stem = _clip_file_stem(clip)
+    path = slices_dir / f"{stem}_cut{pauses.cuts_key(cuts)}.mp4"
+    lock = _get_slice_path_lock(str(path))
+    with lock:
+        if not path.exists():
+            for old in slices_dir.glob(f"clip_{clip['clip_index']}_*_cut*.mp4"):
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+            pauses.render_with_cuts(source_path, float(clip["start_sec"]), float(clip["end_sec"]), cuts, str(path),
+                                    has_nvenc=app_state.get_gpu_capabilities().has_nvenc)
+    return str(path), f"{stem}_bez_pauz.mp4"
+
+
 @app.get("/api/projects/{project_id}/clips/{clip_index}/download")
-def download_clip_slice(project_id: str, clip_index: int):
-    """Atomic, concurrency-safe lossless stream-copy extraction (-c copy) of a moment slice."""
+def download_clip_slice(project_id: str, clip_index: int, raw: bool = False):
+    """The 16:9 clip: lossless stream copy, or without its cut pauses (raw=1 always gives the untouched cut)."""
     _safe_project_output_dir(project_id)
     proj, target_clip = _get_project_and_clip(project_id, clip_index)
-    output_slice_path, slice_filename = _ensure_clip_slice(project_id, proj, target_clip)
+    output_slice_path, slice_filename = _ensure_clip_file(project_id, proj, target_clip, raw=raw)
     return FileResponse(
         output_slice_path,
         media_type="video/mp4",
@@ -724,13 +755,16 @@ class ClipUpdateRequest(BaseModel):
     caption: Optional[str] = Field(default=None, max_length=2000)
     hashtags: Optional[List[str]] = Field(default=None, max_length=30)
     vertical_opts: Optional[Dict[str, Any]] = None
+    cuts: Optional[List[List[float]]] = Field(default=None, max_length=300)
 
 
 @app.patch("/api/projects/{project_id}/clips/{clip_index}")
 def update_clip(project_id: str, clip_index: int, payload: ClipUpdateRequest):
     """Marks a clip as kept/rejected and edits its title, caption and hashtags."""
-    _get_project_and_clip(project_id, clip_index)
+    proj, current = _get_project_and_clip(project_id, clip_index)
     fields = payload.model_dump(exclude_none=True)
+    if "cuts" in fields:
+        fields["cuts"] = pauses.normalize_cuts(fields["cuts"], float(current["start_sec"]), float(current["end_sec"]))
     if "vertical_opts" in fields:
         fields["vertical_opts"] = vertical_render.normalize_opts(fields["vertical_opts"])
     if "title" in fields and not fields["title"].strip():
@@ -769,6 +803,63 @@ def _drop_clip_files(project_id: str, clip_index: int, vertical: bool = False) -
     if freed:
         log.info(f"Кліп {clip_index} ({project_id}): звільнено {freed / 1e6:.1f} МБ.")
     return freed
+
+
+def _levels(project_id: str, proj: Dict[str, Any], lo: float, hi: float) -> List[float]:
+    """Loudness of [lo, hi] (50 values a second), cached on disk."""
+    adir = _safe_project_output_dir(project_id) / "audio"
+    adir.mkdir(parents=True, exist_ok=True)
+    path = adir / f"levels_{lo:.2f}_{hi:.2f}.json"
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    if not os.path.exists(proj["source_path"]):
+        raise HTTPException(status_code=404, detail="Вихідне відео не знайдено на диску.")
+    levels = pauses.audio_levels(proj["source_path"], lo, hi)
+    if levels:
+        olds = sorted(adir.glob("levels_*.json"), key=lambda f: f.stat().st_mtime)
+        for old in olds[:-40]:  # keep the cache small
+            try:
+                old.unlink()
+            except OSError:
+                pass
+        path.write_text(json.dumps(levels), encoding="utf-8")
+    return levels
+
+
+@app.get("/api/projects/{project_id}/clips/{clip_index}/levels")
+def get_clip_levels(project_id: str, clip_index: int, pad: float = 10.0):
+    """Audio loudness around a clip (clip ± pad) for the waveform on the word track."""
+    proj, clip = _get_project_and_clip(project_id, clip_index)
+    pad = max(0.0, min(float(pad), 30.0))
+    dur = float(proj.get("duration") or 0.0) or float(clip["end_sec"]) + pad
+    lo = round(max(0.0, float(clip["start_sec"]) - pad), 2)
+    hi = round(min(dur, float(clip["end_sec"]) + pad), 2)
+    levels = _levels(project_id, proj, lo, hi)
+    return {"start": lo, "rate": pauses.LEVEL_RATE, "db": levels,
+            "threshold": round(pauses.silence_threshold(levels), 1) if levels else None}
+
+
+class PausesRequest(BaseModel):
+    min_gap: float = Field(default=pauses.DEFAULT_MIN_GAP, ge=0.3, le=3.0)
+
+
+@app.post("/api/projects/{project_id}/clips/{clip_index}/pauses")
+def cut_clip_pauses(project_id: str, clip_index: int, payload: PausesRequest):
+    """«Прибрати паузи»: finds pauses longer than min_gap inside the clip and saves them as cuts."""
+    proj, clip = _get_project_and_clip(project_id, clip_index)
+    start, end = float(clip["start_sec"]), float(clip["end_sec"])
+    levels = _levels(project_id, proj, round(start, 2), round(end, 2))
+    cached = load_transcript_cache(proj["source_path"], any_model=True)
+    words = cached[1] if cached else []
+    if not levels and not words:
+        raise HTTPException(status_code=409, detail="Не вдалося прочитати звук і немає транскрипції, тож паузи не видно.")
+    cuts = pauses.find_pauses(start, end, levels=levels, words=words, min_gap=payload.min_gap)
+    updated = db.update_clip_fields(project_id, clip_index, cuts=cuts)
+    return {"cuts": [list(c) for c in cuts], "count": len(cuts), "removed_sec": pauses.removed(cuts),
+            "clip": updated, "by": "audio" if levels else "words"}
 
 
 @app.get("/api/projects/{project_id}/clips/{clip_index}/words")
@@ -821,11 +912,12 @@ def export_selected_zip(project_id: str, clips: str = ""):
     try:
         with zipfile.ZipFile(tmp_zip, "w", compression=zipfile.ZIP_STORED) as zf:
             for rank, c in enumerate(chosen, 1):
-                slice_path, slice_name = _ensure_clip_slice(project_id, proj, c)
+                slice_path, slice_name = _ensure_clip_file(project_id, proj, c)
                 prefix = f"{rank:02d}_"
                 zf.write(slice_path, arcname=prefix + slice_name)
                 srt = subtitles_generator.generate_srt_for_clip(
                     video_path=proj["source_path"], start_sec=c["start_sec"], end_sec=c["end_sec"], target_words_per_cue=3,
+                    cuts=_clip_cuts(c),
                 )
                 zf.writestr(prefix + slice_name[:-4] + ".srt", srt)
                 s_m, s_s = divmod(int(c["start_sec"]), 60)
@@ -876,6 +968,7 @@ def export_clip_srt(project_id: str, clip_index: int):
         end_sec=target_clip["end_sec"],
         output_path=output_srt_path,
         target_words_per_cue=3,
+        cuts=_clip_cuts(target_clip),
     )
 
     return FileResponse(
@@ -971,7 +1064,9 @@ def _ensure_vertical(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any]
     """Renders (once, cached by settings) the vertical MP4 of a clip. Returns (path, filename)."""
     opts = vertical_render.normalize_opts(clip.get("vertical_opts"))
     subs = subs and opts["style"] != "none"
-    key = vertical_render.cache_key(clip["start_sec"], clip["end_sec"], opts, subs, clip.get("title", ""))
+    cuts = _clip_cuts(clip)
+    cuts_rel = pauses.relative(cuts, float(clip["start_sec"]))
+    key = vertical_render.cache_key(clip["start_sec"], clip["end_sec"], opts, subs, clip.get("title", "")) + pauses.cuts_key(cuts)
     idx = clip["clip_index"]
     vdir = _vertical_dir(project_id)
     stem = _clip_file_stem(clip)
@@ -982,9 +1077,19 @@ def _ensure_vertical(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any]
     faces = _clip_faces(project_id, proj, clip)
     duration = clip["end_sec"] - clip["start_sec"]
     layout = vertical_render.plan_layout(faces, opts["frame"], duration)
+    if cuts_rel:
+        # the camera path and the captions move to the timeline without the pauses
+        if layout.keyframes:
+            keys: Dict[float, float] = {}
+            for t, x in layout.keyframes:
+                keys[round(pauses.map_time_clamped(t, cuts_rel), 3)] = x  # a move inside a cut lands on the cut
+            layout.keyframes = sorted(keys.items())
+        duration -= pauses.removed(cuts)
     ass = None
     if subs:
         words = _clip_caption_words(proj, clip, opts)
+        if cuts_rel:
+            words = pauses.remap_words(words, cuts_rel)
         pos = opts["pos"] if opts["pos"] is not None else (50 if layout.kind == "split" else None)
         ass = vertical_render.build_ass(
             words, duration, opts["style"], pos,
@@ -999,7 +1104,7 @@ def _ensure_vertical(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any]
     with vertical_render.RENDER_LOCK:
         if not path.exists():
             vertical_render.render_vertical(proj["source_path"], clip["start_sec"], clip["end_sec"], str(path), layout, ass,
-                                            has_nvenc=caps.has_nvenc)
+                                            has_nvenc=caps.has_nvenc, cuts_rel=cuts_rel or None)
     # Old renders of this clip with other settings are no longer reachable.
     for old in vdir.glob(f"clip_{idx}_*_{'s' if subs else 'n'}.mp4"):
         if old != path:

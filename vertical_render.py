@@ -835,8 +835,13 @@ def render_vertical(
     ass_text: Optional[str],
     has_nvenc: bool = False,
     timeout: int = 900,
+    cuts_rel: Optional[Sequence[Tuple[float, float]]] = None,
 ) -> str:
-    """Renders one vertical clip. Writes to a temp file and renames, so a half-written file is never served."""
+    """
+    Renders one vertical clip. Writes to a temp file and renames, so a half-written file is never served.
+    cuts_rel: clip-relative pauses to take out («Прибрати паузи»); layout and subtitles must already be
+    on the cut timeline (see pauses.map_time).
+    """
     src_w, src_h = probe_size(source)
     work = RENDER_TMP / uuid.uuid4().hex[:10]
     work.mkdir(parents=True, exist_ok=True)
@@ -851,10 +856,17 @@ def render_vertical(
         fonts_rel = os.path.relpath(FONTS_DIR, work).replace("\\", "/")
         fc = video_filter(layout, src_w, src_h, ass_name, fonts_rel)
         dur = max(0.5, end - start)
+        amap = ["-map", "0:a?"]
+        if cuts_rel:
+            import pauses
+            audio = pauses.has_audio(source)
+            segs = pauses.relative(pauses.kept_segments(0.0, dur, cuts_rel), 0.0)
+            fc = pauses.concat_filter(segs, audio) + ";" + fc.replace("[0:v]", "[cv]")
+            amap = ["-map", "[ca]"] if audio else []
         last_err = ""
         for enc in _encoders(has_nvenc):
             cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{start:.3f}", "-i", os.path.abspath(source), "-t", f"{dur:.3f}",
-                   "-filter_complex", fc, "-map", "[v]", "-map", "0:a?", *enc,
+                   "-filter_complex", fc, "-map", "[v]", *amap, *enc,
                    "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", str(tmp_out.resolve())]
             proc = subprocess.run(cmd, cwd=str(work), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
             if proc.returncode == 0 and tmp_out.exists() and tmp_out.stat().st_size > 1000:
