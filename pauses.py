@@ -70,6 +70,14 @@ def silence_threshold(levels: Sequence[float]) -> float:
     return floor + max(6.0, 0.35 * (loud - floor))
 
 
+def has_dynamics(levels: Sequence[float], min_db: float = 10.0) -> bool:
+    """True when loud and quiet parts differ enough for the audio to show pauses."""
+    import numpy as np
+
+    arr = np.asarray(levels, dtype=float)
+    return float(np.percentile(arr, 90) - np.percentile(arr, 10)) >= min_db
+
+
 # ─── Finding pauses ───────────────────────────────────────────────────────────
 
 def _word_starts(words: Optional[Sequence[Dict[str, Any]]], lo: float, hi: float) -> List[float]:
@@ -105,6 +113,8 @@ def find_pauses(
     lo, hi = start + EDGE, end - EDGE
     starts = _word_starts(words, start, end)
     cuts: List[Cut] = []
+    if levels and not has_dynamics(levels):
+        levels = None  # flat sound (music bed, constant noise): the audio can't tell speech from pause
     if levels:
         thr = silence_threshold(levels)
         quiet = [v < thr for v in levels]

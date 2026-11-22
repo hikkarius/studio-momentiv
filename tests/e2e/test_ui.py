@@ -84,7 +84,7 @@ def test_open_project_shows_editor_sorted_by_score(page, studio, project):
     assert page.locator("#edTrack").is_visible()  # the clip track sits right under the video
     screen = page.locator("#edScreen").bounding_box()
     track = page.locator("#edTrack").bounding_box()
-    assert 0 <= track["y"] - (screen["y"] + screen["height"]) < 50  # only the «Початок · с · Кінець» line between
+    assert 0 <= track["y"] - (screen["y"] + screen["height"]) < 75  # only the «Початок · с · Кінець» line and the time ruler between
     # trimmed screen: no score line next to the title, no ±0,5 / ↑↓ buttons, no bottom bar with the ZIP
     assert page.locator("#edClipMeta, [data-nudge], #edPrev, #edNext, .ed-bar, #edZip, #hwBadge").count() == 0
     # step rail with both steps, download always on top of the side panel, «Чому» under the title
@@ -150,11 +150,21 @@ def test_status_menu_shelves_and_keys(page, studio, project):
     assert not page.errors
 
 
-def test_trim_silence_button(page, studio, project):
-    open_editor(page, studio)  # best clip №2: 30-50 s, words every 0.5 s, so there is (almost) no silence
-    page.click("#edSilence")
-    page.wait_for_function("document.getElementById('edToast').textContent.includes('тиші')")
-    assert clip(2)["start_sec"] >= 30.0 and clip(2)["end_sec"] <= 50.0
+def test_pauses_button_and_track(page, studio, project):
+    open_editor(page, studio)  # best clip №2: 30-50 s, words every 0.5 s, so there are no long pauses
+    assert page.locator("#edRuler b").count() > 0  # time ruler
+    assert page.locator("#edTrack canvas.wave").count() == 1
+    page.click("#edPauses")
+    page.wait_for_function("document.getElementById('edToast').textContent.includes('Пауз')")
+    assert clip(2)["cuts"] == [] and page.locator("#edPauseBar").is_hidden()
+    # a saved cut shows as a band; clicking it restores the pause
+    db.update_clip_fields(PROJECT_ID, 2, cuts=[[35.0, 36.0]])
+    open_editor(page, studio)
+    page.locator("#edTrack .cut").first.wait_for(state="visible")
+    assert page.locator("#edPauseBar").is_visible() and page.locator("#edMp4Raw").is_visible()
+    page.locator("#edTrack .cut").first.click()
+    assert wait_for(page, lambda: clip(2)["cuts"] == [])
+    assert page.locator("#edTrack .cut.ghost").count() == 1
     assert not page.errors
 
 

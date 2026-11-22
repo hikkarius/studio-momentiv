@@ -36,6 +36,11 @@ def test_quiet_speech_is_not_a_pause():
     assert pauses.find_pauses(100.0, 110.0, levels=lv, words=words) == []
 
 
+def test_flat_audio_falls_back_to_words():
+    words = [{"start": 0.5, "end": 1.0, "word": "а"}, {"start": 2.5, "end": 9.0, "word": "б"}]
+    assert pauses.find_pauses(0.0, 10.0, levels=_levels((10, -30)), words=words) == [(1.1, 2.4)]
+
+
 def test_find_pauses_by_words_without_audio():
     words = [{"start": 0.5, "end": 1.0, "word": "а"}, {"start": 2.5, "end": 3.0, "word": "б"}, {"start": 3.2, "end": 9.0, "word": "в"}]
     assert pauses.find_pauses(0.0, 10.0, levels=None, words=words) == [(1.1, 2.4)]

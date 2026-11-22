@@ -13,7 +13,7 @@ const Editor = (() => {
   const st = {
     project: null, clips: [], cur: -1, filter: "new", anchor: 0, tab: "text", sort: "score", mode: "table",
     words: [], wordsFor: null, stopAt: null, backToStart: false, saveTimer: null,
-    zoom: { lo: 0, hi: 1 }, drag: null, scrub: null, pop: null,
+    zoom: { lo: 0, hi: 1 }, zoomManual: false, levels: null, restored: [], drag: null, scrub: null, pop: null,
   };
   const MIN_LEN = 3;
 
@@ -168,11 +168,11 @@ const Editor = (() => {
     $("edWhy").innerHTML = c.reason ? `<b>Чому:</b> ${esc(c.reason)}` : "";
     $("edStartTc").textContent = fmt(c.start_sec);
     $("edEndTc").textContent = fmt(c.end_sec);
-    $("edLen").textContent = `${Math.round(len(c))} с`;
+    renderPauses();
     if (document.activeElement !== $("edTitle")) $("edTitle").value = c.title || "";
     if (document.activeElement !== $("edCaption")) $("edCaption").value = c.caption || "";
     if (document.activeElement !== $("edTags")) $("edTags").value = (c.hashtags || []).join(" ");
-    $("edMp4Info").innerHTML = `${Math.round(len(c))} с<span class="q"> · оригінальна якість</span>`;
+
     renderTc();
   }
 
@@ -246,22 +246,29 @@ const Editor = (() => {
   function renderTrack() {
     const c = clip();
     if (!c) return;
-    if (!st.drag) st.zoom = computeZoom();
+    if (!st.drag && !st.zoomManual) st.zoom = computeZoom();
     const { lo, hi } = st.zoom;
     const T = $("edTrack");
     const W = T.clientWidth || 600;
     const p = (t) => ((t - lo) / (hi - lo)) * 100;
-    let h = "";
-    const end = [-1e9, -1e9];
+    let h = `<canvas class="wave" aria-hidden="true"></canvas>`;
+    // words in one row, left to right; a word with no room left becomes a tick (zoom in to read it)
+    let end = -1e9;
     st.words.forEach((w, j) => {
       if (w.start < lo || w.start > hi) return;
       const x = (p(w.start) / 100) * W;
-      const wd = w.word.length * 7 + 14;
-      const row = x >= end[0] + 3 ? 0 : x >= end[1] + 3 ? 1 : -1;
-      if (row < 0) { h += `<span class="wt" style="left:${p(w.start)}%"></span>`; return; }
-      end[row] = x + wd;
+      if (x < end + 4) { h += `<span class="wt" style="left:${p(w.start)}%"></span>`; return; }
+      end = x + w.word.length * 7.2 + 12;
       const inside = w.start >= c.start_sec - 0.05 && w.start < c.end_sec;
-      h += `<span class="w${inside ? " in" : ""}${row ? " row2" : ""}" data-j="${j}" style="left:${p(w.start)}%">${esc(w.word)}</span>`;
+      h += `<span class="w${inside ? " in" : ""}" data-j="${j}" style="left:${p(w.start)}%">${esc(w.word)}</span>`;
+    });
+    cutsOf(c).forEach(([a, b], k) => {
+      if (b < lo || a > hi) return;
+      h += `<div class="cut" data-k="${k}" style="left:${p(a)}%;width:${p(b) - p(a)}%" title="Пауза ${fmt1(b - a + 0.2)} с вирізана. Клік: повернути"></div>`;
+    });
+    st.restored.forEach(([a, b], k) => {
+      if (b < lo || a > hi || a < c.start_sec || b > c.end_sec) return;
+      h += `<div class="cut ghost" data-r="${k}" style="left:${p(a)}%;width:${p(b) - p(a)}%" title="Пауза повернута. Клік: вирізати знову"></div>`;
     });
     h += `<div class="shade" style="left:0;width:${p(c.start_sec)}%"></div><div class="shade" style="left:${p(c.end_sec)}%;right:0"></div>`;
     h += `<div class="rg" style="left:${p(c.start_sec)}%;width:${p(c.end_sec) - p(c.start_sec)}%"></div>`;
@@ -269,7 +276,73 @@ const Editor = (() => {
     h += `<div class="hd" data-h="end" style="left:${p(c.end_sec)}%" title="Тягни: кінець кліпу"></div>`;
     h += `<div class="zph" id="edZph"></div>`;
     T.innerHTML = h;
+    drawWave();
+    renderRuler();
     placePlayhead(video().currentTime || 0);
+  }
+
+  /** Time ruler above the track: a tick every second (or more when zoomed out), labels every 5 s or more. */
+  function renderRuler() {
+    const { lo, hi } = st.zoom;
+    const span = hi - lo;
+    const [minor, major] = span <= 70 ? [1, 5] : span <= 200 ? [5, 30] : [10, 60];
+    const p = (t) => ((t - lo) / span) * 100;
+    let h = "";
+    for (let t = Math.ceil(lo / minor) * minor; t <= hi; t += minor) {
+      const big = t % major === 0;
+      h += `<i class="${big ? "big" : ""}" style="left:${p(t)}%"></i>`;
+      if (big) h += `<b style="left:${p(t)}%">${fmtS(t)}</b>`;
+    }
+    $("edRuler").innerHTML = h;
+  }
+
+  /** Sound wave behind the words: where people talk, laugh and where it is quiet. */
+  function drawWave() {
+    const cv = $("edTrack").querySelector("canvas.wave");
+    const L = st.levels;
+    if (!cv || !L || !L.db.length) return;
+    const c = clip();
+    const W = cv.clientWidth, H = cv.clientHeight;
+    if (!W || !H) return;
+    const dpr = window.devicePixelRatio || 1;
+    cv.width = W * dpr; cv.height = H * dpr;
+    const g = cv.getContext("2d");
+    g.scale(dpr, dpr);
+    const css = getComputedStyle($("editor"));
+    const colIn = css.getPropertyValue("--ed-accent").trim() || "#d4a944";
+    const colOut = css.getPropertyValue("--ed-faint").trim() || "#6b665e";
+    const floor = L.floor, top = L.top;
+    const { lo, hi } = st.zoom;
+    const step = 3;
+    for (let x = 0; x < W; x += step) {
+      const t0 = lo + (x / W) * (hi - lo), t1 = lo + ((x + step) / W) * (hi - lo);
+      const i0 = Math.floor((t0 - L.start) * L.rate), i1 = Math.max(i0 + 1, Math.ceil((t1 - L.start) * L.rate));
+      if (i1 <= 0 || i0 >= L.db.length) continue;
+      let m = -120;
+      for (let i = Math.max(0, i0); i < Math.min(L.db.length, i1); i++) if (L.db[i] > m) m = L.db[i];
+      const a = Math.max(0, Math.min(1, (m - floor) / (top - floor || 1)));
+      const bh = Math.max(1.5, a * (H - 2));
+      const tm = (t0 + t1) / 2;
+      const inClip = tm >= c.start_sec && tm <= c.end_sec;
+      g.globalAlpha = inClip ? 0.85 : 0.45;
+      g.fillStyle = inClip ? colIn : colOut;
+      g.fillRect(x, (H - bh) / 2, step - 1, bh);
+    }
+  }
+
+  async function loadLevels() {
+    const c = clip();
+    if (!c) return;
+    const key = `${c.clip_index}:${c.start_sec}:${c.end_sec}`;
+    if (st.levels && st.levels.key === key) return;
+    try {
+      const d = await api(`/api/projects/${pid()}/clips/${c.clip_index}/levels?pad=30`);
+      if (clip() !== c || !d.db || !d.db.length) return;
+      const sorted = [...d.db].sort((a, b) => a - b);
+      const q = (f) => sorted[Math.min(sorted.length - 1, Math.floor(f * sorted.length))];
+      st.levels = { key, start: d.start, rate: d.rate, db: d.db, floor: q(0.1) - 3, top: q(0.97) };
+      drawWave();
+    } catch (_) { /* no sound wave: words still work */ }
   }
 
   function placePlayhead(t) {
@@ -287,6 +360,9 @@ const Editor = (() => {
   async function select(i, autoplay = false) {
     if (i < 0 || i >= st.clips.length) return;
     st.cur = i;
+    st.zoomManual = false;
+    st.restored = [];
+    st.levels = null;
     if (st.mode !== "vx" && !matches(st.clips[i])) st.filter = shelfOf(st.clips[i]); // a clip picked on the map opens its own shelf
     video().pause();
     st.stopAt = null;
@@ -300,6 +376,7 @@ const Editor = (() => {
     seek(clip().start_sec);
     if (typeof Vertical !== "undefined") Vertical.onClip();
     await loadWords();
+    loadLevels();
     if (autoplay) playClip();
   }
 
@@ -361,6 +438,7 @@ const Editor = (() => {
       seek(t);
       t = clamp(t);
     }
+    skipCuts();
     placePlayhead(t);
     renderTc(t);
     if (st.stopAt != null && t >= st.stopAt && !v.paused) {
@@ -383,6 +461,7 @@ const Editor = (() => {
     const paused = video().paused;
     $("edScreen").classList.toggle("paused", paused);
     $("edPlay").textContent = paused ? "▶" : "❚❚";
+    if (!paused) requestAnimationFrame(skipLoop);
     $("edPlay").setAttribute("aria-label", paused ? "Грати" : "Пауза");
     if (paused) { const n = $("edWords").querySelector(".ed-w.now"); if (n) n.classList.remove("now"); }
   }
@@ -473,6 +552,20 @@ const Editor = (() => {
   function onTrackDown(e) {
     if (e.button > 0) return;
     e.preventDefault();
+    const cutEl = e.target.closest(".cut");
+    if (cutEl) {
+      const c = clip();
+      const cuts = cutsOf(c);
+      if (cutEl.dataset.k != null) {
+        const k = Number(cutEl.dataset.k);
+        st.restored.push(cuts[k]);
+        savePauses(c, cuts.filter((_, i) => i !== k), "Паузу повернуто");
+      } else {
+        const r = st.restored.splice(Number(cutEl.dataset.r), 1)[0];
+        savePauses(c, [...cuts, r].sort((a, b) => a[0] - b[0]), "Паузу знову вирізано");
+      }
+      return;
+    }
     closePop();
     $("edTrack").setPointerCapture(e.pointerId);
     const h = e.target.closest(".hd");
@@ -630,26 +723,87 @@ const Editor = (() => {
     if (st.menuBtn) { st.menuBtn.setAttribute("aria-expanded", "false"); st.menuBtn = null; }
   }
 
-  // ─── «Підрізати тишу» ──────────────────────────────────────────────────────
-  async function trimSilence() {
+  // ─── «Прибрати паузи» (jump cut) ───────────────────────────────────────────
+  const fmt1 = (x) => (Math.round(x * 10) / 10).toFixed(1).replace(".", ",");
+  /** The clip's cut pauses that still lie inside its bounds. */
+  const cutsOf = (c) => (c?.cuts || []).filter(([a, b]) => a >= c.start_sec && b <= c.end_sec && b > a);
+  const removedOf = (c) => cutsOf(c).reduce((s, [a, b]) => s + (b - a), 0);
+  function pauseGap() { try { return Number(localStorage.getItem("studio-pause-gap")) || 0.6; } catch (_) { return 0.6; } }
+
+  function renderPauses() {
     const c = clip();
     if (!c) return;
-    const btn = $("edSilence");
-    btn.disabled = true;
+    const cuts = cutsOf(c);
+    const rm = removedOf(c);
+    $("edLen").textContent = cuts.length ? `${Math.round(len(c))} с → ${fmt1(len(c) - rm)} с` : `${Math.round(len(c))} с`;
+    const btn = $("edPauses");
+    btn.classList.toggle("on", cuts.length > 0);
+    btn.textContent = cuts.length ? "✂ Паузи прибрано" : "✂ Прибрати паузи";
+    const bar = $("edPauseBar");
+    const show = cuts.length > 0 || st.restored.length > 0;
+    bar.hidden = !show;
+    $("edTrackHint").hidden = show;
+    if (show) {
+      const gap = pauseGap();
+      bar.innerHTML = `<span class="res">Прибрано <b>${cuts.length} ${cuts.length === 1 ? "паузу" : cuts.length > 1 && cuts.length < 5 ? "паузи" : "пауз"} · −${fmt1(rm)} с</b></span>
+        <span>довші за</span><span class="seg" role="group" aria-label="Поріг паузи">${[0.4, 0.6, 1].map((g) => `<button type="button" data-g="${g}" aria-pressed="${g === gap}">${fmt1(g)} с</button>`).join("")}</span>
+        <span class="hint">· клік по смужці повертає паузу</span><button type="button" class="link" data-a="all">↶ Повернути все</button>`;
+    }
+    $("edMp4Lab").textContent = cuts.length ? "⬇ Кліп 16:9 · без пауз" : "⬇ Кліп 16:9 · MP4";
+    $("edMp4Info").innerHTML = cuts.length ? `${fmt1(len(c) - rm)} с` : `${Math.round(len(c))} с<span class="q"> · оригінальна якість</span>`;
+    $("edMp4Raw").hidden = !cuts.length;
+  }
+
+  async function savePauses(c, cuts, msg) {
+    const prev = c.cuts;
+    c.cuts = cuts;
+    if (clip() === c) { renderTrack(); renderPauses(); }
     try {
-      const data = await api(`/api/projects/${pid()}/clips/${c.clip_index}/trim-silence`, { method: "POST" });
-      if (data.status !== "updated") { toast("На краях кліпу тиші немає"); return; }
-      if (clip() === c) setBounds(data.clip.start_sec, data.clip.end_sec, { save: false });
-      else { c.start_sec = data.clip.start_sec; c.end_sec = data.clip.end_sec; c.duration = c.end_sec - c.start_sec; }
-      renderOverview(); renderList(); renderWords();
-      toast(`✂ Прибрано ${String(data.trimmed_sec.toFixed(1)).replace(".", ",")} с тиші`);
+      const d = await api(`/api/projects/${pid()}/clips/${c.clip_index}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cuts }),
+      });
+      c.cuts = d.clip.cuts;
+      if (msg) toast(msg);
       if (typeof Vertical !== "undefined" && clip() === c) Vertical.onClip();
     } catch (e) {
-      toast("Не вдалося підрізати: " + e.message, true);
+      c.cuts = prev;
+      toast("Не вдалося зберегти паузи: " + e.message, true);
+    }
+    if (clip() === c) { renderTrack(); renderPauses(); }
+  }
+
+  async function findPauses(gap = pauseGap()) {
+    const c = clip();
+    if (!c) return;
+    const btn = $("edPauses");
+    btn.disabled = true;
+    btn.textContent = "Шукаю паузи…";
+    try {
+      const d = await api(`/api/projects/${pid()}/clips/${c.clip_index}/pauses`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ min_gap: gap }),
+      });
+      c.cuts = d.cuts;
+      st.restored = [];
+      toast(d.count ? `✂ Прибрано ${d.count} ${d.count === 1 ? "паузу" : d.count < 5 ? "паузи" : "пауз"} · −${fmt1(d.removed_sec)} с` : `Пауз, довших за ${fmt1(gap)} с, немає`);
+      if (typeof Vertical !== "undefined" && clip() === c) Vertical.onClip();
+    } catch (e) {
+      toast("Не вдалося знайти паузи: " + e.message, true);
     } finally {
       btn.disabled = false;
+      if (clip() === c) { renderTrack(); renderPauses(); }
     }
   }
+
+  /** While playing, jump over the cut pauses, so you hear the clip as it will be. */
+  function skipCuts() {
+    const v = video();
+    const c = clip();
+    if (!c || v.paused || st.drag || st.scrub) return;
+    const t = v.currentTime;
+    const cut = cutsOf(c).find(([a, b]) => t >= a && t < b - 0.03);
+    if (cut) { try { v.currentTime = cut[1]; } catch (_) {} }
+  }
+  function skipLoop() { skipCuts(); if (!video().paused) requestAnimationFrame(skipLoop); }
 
   function step(dir) {
     const vis = stripClips();
@@ -827,7 +981,28 @@ const Editor = (() => {
       else if (e.key === "Tab") closeStatusMenu();
     });
     document.addEventListener("click", (e) => { if (!e.target.closest("#edStatusMenu")) closeStatusMenu(); });
-    $("edSilence").addEventListener("click", trimSilence);
+    $("edPauses").addEventListener("click", () => findPauses());
+    $("edPauseBar").addEventListener("click", (e) => {
+      const g = e.target.closest("button[data-g]");
+      if (g) { try { localStorage.setItem("studio-pause-gap", g.dataset.g); } catch (_) {} findPauses(Number(g.dataset.g)); return; }
+      if (e.target.closest("button[data-a='all']")) { const c = clip(); st.restored = []; savePauses(c, [], "Усі паузи повернуто"); }
+    });
+    $("edMp4Raw").addEventListener("click", () => { toast("Готуємо відео…"); download(`/api/projects/${pid()}/clips/${clip().clip_index}/download?raw=1`); });
+    // mouse wheel over the track: zoom in and out around the pointer
+    $("edTrack").addEventListener("wheel", (e) => {
+      if (!clip() || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+      e.preventDefault();
+      const t = trackTime(e);
+      const { lo, hi } = st.zoom;
+      const f = e.deltaY > 0 ? 1.25 : 0.8;
+      const dur = st.project.duration || hi;
+      const span = Math.max(3, Math.min(dur, (hi - lo) * f));
+      let nlo = t - (t - lo) * (span / (hi - lo));
+      nlo = Math.max(0, Math.min(dur - span, nlo));
+      st.zoom = { lo: nlo, hi: nlo + span };
+      st.zoomManual = true;
+      renderTrack();
+    }, { passive: false });
     const T = $("edTrack");
     T.addEventListener("pointerdown", onTrackDown);
     T.addEventListener("pointermove", onTrackMove);
