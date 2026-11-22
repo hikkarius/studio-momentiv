@@ -100,7 +100,7 @@
       <ol class="home-how home-hero-only">
         <li><i>1</i><b>Додай відео</b>Посилання або файл, від 10 хвилин до 3 годин.</li>
         <li><i>2</i><b>Зачекай</b>Студія розпізнає мову і знайде моменти. Можна закрити вкладку, поки студія запущена.</li>
-        <li><i>3</i><b>Обери й скачай</b>Переглянь кліпи, тисни «Беру» і скачай звичайні або вертикальні з субтитрами.</li>
+        <li><i>3</i><b>Обери й скачай</b>Переглянь кліпи, познач потрібні «В роботі» і скачай звичайні або вертикальні з субтитрами.</li>
       </ol>
 
       <!-- Video Loaded Info Box -->
@@ -552,10 +552,12 @@
       <header class="ed-top">
         <div class="ed-crumb"><b id="edProjTitle"></b><span id="edProjMeta"></span></div>
         <div class="ed-prog" id="edProg">
-          <div class="ed-stat ed-stat-main"><span>Переглянуто</span><b id="edProgTxt"></b><i class="ed-pbar"><b id="edProgKeep"></b><u id="edProgSeen"></u></i></div>
-          <div class="ed-stat keep"><span>Беру</span><b id="edCntKeep">0</b></div>
-          <div class="ed-stat drop"><span>Не беру</span><b id="edCntDrop">0</b></div>
-          <div class="ed-stat"><span>Ще не дивився</span><b id="edCntLeft">0</b></div>
+          <div class="ed-shelves" id="edShelves" role="group" aria-label="Полиці кліпів: що показати внизу">
+            <button type="button" class="ed-shelf" data-f="new" aria-pressed="true" title="Кліпи, які ти ще не розібрав"><span><i class="ed-sdot" data-s=""></i>Нові</span><b id="edCnt_new">0</b></button>
+            <button type="button" class="ed-shelf" data-f="keep" aria-pressed="false" title="Беру, буду монтувати"><span><i class="ed-sdot" data-s="keep"></i>В роботі</span><b id="edCnt_keep">0</b></button>
+            <button type="button" class="ed-shelf" data-f="done" aria-pressed="false" title="Опубліковані: їхні файли прибрано, межі й текст лишились"><span><i class="ed-sdot" data-s="done"></i>Виконані</span><b id="edCnt_done">0</b></button>
+            <button type="button" class="ed-shelf" data-f="drop" aria-pressed="false" title="Відкинуті кліпи"><span><i class="ed-sdot" data-s="drop"></i>Не беру</span><b id="edCnt_drop">0</b></button>
+          </div>
           <div class="ed-stat keep ed-stat-vx"><span>У добірці</span><b id="edCntPick">0</b></div>
         </div>
         <span class="ed-spacer"></span>
@@ -578,7 +580,7 @@
             <div class="ed-bigplay" aria-hidden="true">▶</div>
           </div>
           <div class="ed-trim" id="edTrim" aria-label="Межі кліпу">
-            <div class="ed-trim-info"><span>Початок <b id="edStartTc"></b></span><span class="ed-len" id="edLen"></span><span>Кінець <b id="edEndTc"></b></span></div>
+            <div class="ed-trim-info"><span>Початок <b id="edStartTc"></b></span><span class="ed-len" id="edLen"></span><button type="button" class="ed-silence" id="edSilence" title="Прибрати тишу на початку і в кінці кліпу: межі стануть одразу перед першим і після останнього слова">✂ Підрізати тишу</button><span>Кінець <b id="edEndTc"></b></span></div>
             <div class="ed-track" id="edTrack" title="Тягни по доріжці: перемотка в межах кліпу. Тягни краї рамки: початок і кінець. Клік по слову: почати чи закінчити ним."></div>
             <div class="ed-small">Тягни краї рамки, щоб змінити межі. Клік по слову: почати або закінчити ним.</div>
           </div>
@@ -587,9 +589,8 @@
             <span class="ed-tc" id="edTc"></span>
             <span class="ed-spacer"></span>
             <div class="ed-decide" id="edDecide">
-              <button class="ed-btn big keep" id="edKeep" type="button" aria-pressed="false">✓ Беру <kbd>Y</kbd></button>
-              <button class="ed-btn big drop" id="edDrop" type="button" aria-pressed="false">✕ Не беру <kbd>N</kbd></button>
-              <div class="ed-verdict"><span class="ed-verdict-b"></span><button type="button" class="ed-btn ed-change" title="Зняти позначку">Змінити</button><button type="button" class="ed-btn ed-gonext" id="edGoNext" title="Наступний кліп (↓)">Наступний <kbd>↓</kbd></button></div>
+              <button class="ed-sbtn" id="edStatus" type="button" aria-haspopup="menu" aria-expanded="false" title="Статус кліпу"><i class="ed-sdot"></i><span class="ed-sbtn-l">Нове</span><small aria-hidden="true">▾</small></button>
+              <button type="button" class="ed-btn ed-gonext" id="edGoNext" title="Наступний кліп (↓)">Наступний <kbd>↓</kbd></button>
             </div>
           </div>
         </section>
@@ -632,9 +633,7 @@
                 <span class="ed-no" id="vxNo"></span>
                 <b class="vx-stitle" id="vxClipNo"></b>
                 <div class="vx-decide" id="vxDecide">
-                  <button type="button" class="ed-btn keep" id="vxKeep" aria-pressed="false">✓ Беру <kbd>Y</kbd></button>
-                  <button type="button" class="ed-btn drop" id="vxDrop" aria-pressed="false">✕ Не беру <kbd>N</kbd></button>
-                  <div class="ed-verdict"><span class="ed-verdict-b"></span><button type="button" class="ed-btn sm ed-change" title="Зняти позначку">Змінити</button></div>
+                  <button class="ed-sbtn sm" id="vxStatus" type="button" aria-haspopup="menu" aria-expanded="false" title="Статус кліпу"><i class="ed-sdot"></i><span class="ed-sbtn-l">Нове</span><small aria-hidden="true">▾</small></button>
                 </div>
                 <div class="vx-nav">
                   <button type="button" class="ed-btn sm" id="vxPrev" title="Попередній обраний кліп (↑)">↑ Попередній</button>
@@ -782,13 +781,8 @@
       <section class="ed-strip" aria-label="Кліпи">
         <div class="ed-strip-head">
           <h2 id="edStripTitle">Кліпи</h2>
-          <div class="ed-filters" id="edFilters" role="group" aria-label="Фільтр">
-            <button type="button" data-f="all" aria-pressed="true">Усі<span id="edCnt_all"></span></button>
-            <button type="button" data-f="new" aria-pressed="false">Нові<span id="edCnt_new"></span></button>
-            <button type="button" data-f="keep" aria-pressed="false">Беру<span id="edCnt_keep"></span></button>
-            <button type="button" data-f="drop" aria-pressed="false">Ні<span id="edCnt_drop"></span></button>
-          </div>
-          <span class="ed-small ed-vx-note">Тут лише кліпи з позначкою «Беру». Щоб додати ще, повернись на крок 1.</span>
+          <span class="ed-small ed-shelf-note" id="edShelfNote"></span>
+          <span class="ed-small ed-vx-note">Тут лише кліпи «В роботі». Щоб додати ще, повернись на крок 1.</span>
           <div class="ed-ov" id="edOv" title="Усе відео: де кожен кліп. Клік відкриває кліп"></div>
           <div class="ed-sort" id="edSort" role="group" aria-label="Порядок">
             <button type="button" data-s="score" aria-pressed="true" title="Найвища оцінка спершу">Найкращі</button>
@@ -804,6 +798,12 @@
     </div>
 
     <div class="ed-toast" id="edToast" role="status" aria-live="polite"></div>
+    <div class="ed-smenu" id="edStatusMenu" role="menu" aria-label="Статус кліпу" hidden>
+      <button type="button" role="menuitemradio" data-s=""><i class="ed-sdot" data-s=""></i><span><b>Нове</b><small>ще не вирішив</small></span><kbd>0</kbd></button>
+      <button type="button" role="menuitemradio" data-s="keep"><i class="ed-sdot" data-s="keep"></i><span><b>В роботі</b><small>беру, буду монтувати</small></span><kbd>Y</kbd></button>
+      <button type="button" role="menuitemradio" data-s="done"><i class="ed-sdot" data-s="done"></i><span><b>Виконано</b><small>опублікував, файли прибрати</small></span><kbd>U</kbd></button>
+      <button type="button" role="menuitemradio" data-s="drop"><i class="ed-sdot" data-s="drop"></i><span><b>Не беру</b><small>сховати, файли прибрати</small></span><kbd>N</kbd></button>
+    </div>
   </section>
 
   <script src="/js/app.js"></script>

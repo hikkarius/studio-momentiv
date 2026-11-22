@@ -109,7 +109,7 @@ def init_db():
         if "hashtags" not in columns:
             conn.execute("ALTER TABLE candidate_clips ADD COLUMN hashtags TEXT NOT NULL DEFAULT '[]';")
         if "review_status" not in columns:
-            # '' = not reviewed yet, 'keep' = going to publish, 'drop' = rejected
+            # '' = new, 'keep' = in work, 'done' = finished (files freed), 'drop' = rejected
             conn.execute("ALTER TABLE candidate_clips ADD COLUMN review_status TEXT NOT NULL DEFAULT '';")
         if "vertical_opts" not in columns:
             # JSON: vertical 9:16 export settings of the clip (caption style, framing, word edits)
@@ -241,12 +241,14 @@ def update_clip_bounds(
         return _clip_row(row)
 
 
-REVIEW_STATUSES = ("", "keep", "drop")
+REVIEW_STATUSES = ("", "keep", "done", "drop")
+# Statuses whose rendered files are deleted to free disk space (bounds and texts stay).
+FREED_STATUSES = ("done", "drop")
 
 
 def update_clip_fields(project_id: str, clip_index: int, **fields: Any) -> Optional[Dict[str, Any]]:
     """
-    Updates editable clip fields: review_status ('', 'keep', 'drop'), title, caption, hashtags (list).
+    Updates editable clip fields: review_status ('', 'keep', 'done', 'drop'), title, caption, hashtags (list).
     Unknown fields are ignored. Returns the updated clip or None when it does not exist.
     """
     sets: List[str] = []
@@ -399,7 +401,8 @@ def list_recent_projects(limit: int = 25, include_test: Optional[bool] = None) -
         query = """
         SELECT p.*, COUNT(c.id) AS clips_count,
                SUM(CASE WHEN COALESCE(c.review_status, '') != '' THEN 1 ELSE 0 END) AS reviewed_count,
-               SUM(CASE WHEN c.review_status = 'keep' THEN 1 ELSE 0 END) AS kept_count
+               SUM(CASE WHEN c.review_status = 'keep' THEN 1 ELSE 0 END) AS kept_count,
+               SUM(CASE WHEN c.review_status = 'done' THEN 1 ELSE 0 END) AS done_count
         FROM projects p
         LEFT JOIN candidate_clips c ON p.id = c.project_id
         GROUP BY p.id
