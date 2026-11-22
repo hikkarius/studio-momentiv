@@ -931,3 +931,66 @@ def test_export_zip_of_kept_clips(tmp_path, monkeypatch):
     one = zipfile.ZipFile(io.BytesIO(client.get(f"/api/projects/{pid}/export-zip?clips=1").content))
     assert sum(n.endswith(".mp4") for n in one.namelist()) == 1
     assert client.get(f"/api/projects/{pid}/export-zip?clips=a,b").status_code == 400
+
+
+# ─── Clip statuses (todo-like) and «Підрізати тишу» ──────────────────────────
+
+def test_done_and_drop_free_rendered_files_but_keep_clip(tmp_path):
+    pid, _ = _make_review_project(tmp_path)
+    out = server.OUTPUT_DIR / pid
+    files = {
+        "slices/clip_2_40s_x.mp4": 1000, "subtitles/clip_2_40s_x.srt": 10,
+        "vertical/clip_2_abc_s.mp4": 3000, "vertical/faces2_2_40.00_62.00.json": 5,
+        "slices/clip_1_10s_y.mp4": 700, "slices/clip_22_10s_z.mp4": 50,
+    }
+    for rel, size in files.items():
+        (out / rel).parent.mkdir(parents=True, exist_ok=True)
+        (out / rel).write_bytes(b"x" * size)
+    try:
+        res = client.patch(f"/api/projects/{pid}/clips/2", json={"review_status": "keep"})
+        assert res.json()["freed_bytes"] == 0 and (out / "slices/clip_2_40s_x.mp4").exists()
+
+        res = client.patch(f"/api/projects/{pid}/clips/2", json={"review_status": "done"})
+        assert res.status_code == 200
+        assert res.json()["freed_bytes"] == 4010
+        assert not (out / "slices/clip_2_40s_x.mp4").exists()
+        assert not (out / "vertical/clip_2_abc_s.mp4").exists()
+        # Other clips and the face cache stay; the clip itself keeps bounds and texts
+        assert (out / "slices/clip_1_10s_y.mp4").exists() and (out / "slices/clip_22_10s_z.mp4").exists()
+        assert (out / "vertical/faces2_2_40.00_62.00.json").exists()
+        c2 = next(c for c in db.get_candidate_clips(pid) if c["clip_index"] == 2)
+        assert (c2["review_status"], c2["start_sec"], c2["title"]) == ("done", 40.0, "Другий")
+
+        res = client.patch(f"/api/projects/{pid}/clips/1", json={"review_status": "drop"})
+        assert res.json()["freed_bytes"] == 700
+        proj = next(p for p in db.list_recent_projects(limit=500, include_test=True) if p["id"] == pid)
+        assert proj["done_count"] == 1
+    finally:
+        shutil.rmtree(out, ignore_errors=True)
+
+
+def test_trim_silence_bounds():
+    from clip_refiner import trim_silence
+    words = [{"start": 12.0, "end": 12.4, "word": "Привіт"}, {"start": 20.0, "end": 27.5, "word": "друзі."}]
+    assert trim_silence(words, 10.0, 30.0) == (11.85, 27.85)
+    # Never extends the clip, and a word cut by the bound keeps the bound
+    assert trim_silence([{"start": 9.5, "end": 10.3, "word": "а"}, {"start": 29.8, "end": 30.6, "word": "б"}], 10.0, 30.0) is None
+    assert trim_silence([], 10.0, 30.0) is None
+    # Would leave less than 5 s of clip
+    assert trim_silence([{"start": 15.0, "end": 16.0, "word": "так"}], 10.0, 30.0) is None
+
+
+def test_trim_silence_endpoint(tmp_path, monkeypatch):
+    pid, _ = _make_review_project(tmp_path)
+    words = [{"start": 13.0, "end": 13.5, "word": "Ну"}, {"start": 24.0, "end": 25.0, "word": "все."}]
+    monkeypatch.setattr("backend.server.load_transcript_cache", lambda p, **kw: ([], words, "uk"))
+    data = client.post(f"/api/projects/{pid}/clips/1/trim-silence").json()
+    assert data["status"] == "updated"
+    assert (data["clip"]["start_sec"], data["clip"]["end_sec"]) == (12.85, 25.35)
+    assert data["trimmed_sec"] == round(2.85 + 4.65, 2)
+    # Second press: nothing left to trim
+    assert client.post(f"/api/projects/{pid}/clips/1/trim-silence").json()["status"] == "unchanged"
+
+    monkeypatch.setattr("backend.server.load_transcript_cache", lambda p, **kw: None)
+    assert client.post(f"/api/projects/{pid}/clips/1/trim-silence").status_code == 409
+    assert client.post(f"/api/projects/{pid}/clips/99/trim-silence").status_code == 404

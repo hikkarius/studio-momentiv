@@ -340,3 +340,30 @@ def refine_clips(
         f"max overlap {max_overlap:.0f}s)"
     )
     return result
+
+
+def trim_silence(
+    words: Iterable[dict] | None,
+    start: float,
+    end: float,
+    lead: float = _START_PAD,
+    tail: float = _END_PAD,
+    min_len: float = 5.0,
+    min_gain: float = 0.1,
+) -> tuple[float, float] | None:
+    """
+    Tightens clip bounds to the speech: from just before the first word to just after the last one.
+    Only shrinks the clip (never extends it), keeps at least min_len seconds.
+    Returns (new_start, new_end), or None when there is nothing worth trimming or no words.
+    """
+    inside = [w for w in _clean_words(words) if w["end"] > start and w["start"] < end]
+    if not inside:
+        return None
+    new_start = max(start, inside[0]["start"] - lead)
+    new_end = min(end, inside[-1]["end"] + tail)
+    if new_end - new_start < min_len:
+        return None
+    new_start, new_end = round(new_start, 2), round(new_end, 2)
+    if (new_start - start) + (end - new_end) < min_gain:
+        return None
+    return new_start, new_end

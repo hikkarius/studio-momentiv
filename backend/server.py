@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 import subtitles_generator
 import vertical_render
 from backend import app_update, db, job_runner, queue_runner, storage, support_report
+from clip_refiner import trim_silence
 from constants import resolve_filter_mode
 from state import app_state
 from transcription import load_transcript_cache
@@ -718,7 +719,7 @@ def get_clip_thumbnail(project_id: str, clip_index: int):
 
 
 class ClipUpdateRequest(BaseModel):
-    review_status: Optional[str] = Field(default=None, pattern=r"^(|keep|drop)$")
+    review_status: Optional[str] = Field(default=None, pattern=r"^(|keep|done|drop)$")
     title: Optional[str] = Field(default=None, max_length=200)
     caption: Optional[str] = Field(default=None, max_length=2000)
     hashtags: Optional[List[str]] = Field(default=None, max_length=30)
@@ -737,7 +738,37 @@ def update_clip(project_id: str, clip_index: int, payload: ClipUpdateRequest):
     clip = db.update_clip_fields(project_id, clip_index, **fields)
     if not clip:
         raise HTTPException(status_code=404, detail="Кліп не знайдено.")
-    return {"status": "updated", "clip": clip}
+    freed = 0
+    if fields.get("review_status") in db.FREED_STATUSES:
+        # Finished or rejected: the rendered files are not needed any more. Bounds, texts and
+        # vertical settings stay in the DB, so «Скачати» simply renders the clip again.
+        freed = _drop_clip_files(project_id, clip_index, vertical=True)
+    return {"status": "updated", "clip": clip, "freed_bytes": freed}
+
+
+def _drop_clip_files(project_id: str, clip_index: int, vertical: bool = False) -> int:
+    """Deletes cached 16:9 slices and SRTs of a clip (and its 9:16 renders when vertical=True). Returns freed bytes."""
+    out_dir = _safe_project_output_dir(project_id)
+    groups = [("slices", f"clip_{clip_index}_*"), ("subtitles", f"clip_{clip_index}_*")]
+    if vertical:
+        groups.append(("vertical", f"clip_{clip_index}_*.mp4"))
+    freed = 0
+    for sub, pattern in groups:
+        d = out_dir / sub
+        if not d.is_dir():
+            continue
+        for f in d.glob(pattern):
+            if not f.is_file() or not f.resolve().is_relative_to(out_dir):
+                continue
+            try:
+                size = f.stat().st_size
+                f.unlink()
+                freed += size
+            except OSError:
+                pass
+    if freed:
+        log.info(f"Кліп {clip_index} ({project_id}): звільнено {freed / 1e6:.1f} МБ.")
+    return freed
 
 
 @app.get("/api/projects/{project_id}/clips/{clip_index}/words")
@@ -1131,23 +1162,13 @@ def trim_clip(project_id: str, clip_index: int, payload: TrimClipRequest):
     if not updated_clip:
         raise HTTPException(status_code=404, detail="Кліп не знайдено.")
 
-    # Invalidate cached MP4 slices or SRTs for this clip in project_out_dir
-    project_out_dir = _safe_project_output_dir(project_id)
-    slices_dir = project_out_dir / "slices"
-    if slices_dir.exists():
-        for f in slices_dir.glob(f"clip_{clip_index}_*"):
-            try:
-                f.unlink()
-            except OSError:
-                pass
+    return {"status": "updated", "clip": _after_bounds_change(project_id, clip_index, updated_clip)}
 
-    subs_dir = project_out_dir / "subtitles"
-    if subs_dir.exists():
-        for f in subs_dir.glob(f"clip_{clip_index}_*"):
-            try:
-                f.unlink()
-            except OSError:
-                pass
+
+def _after_bounds_change(project_id: str, clip_index: int, updated_clip: Dict[str, Any]) -> Dict[str, Any]:
+    """Drops stale slices/SRTs of a clip, syncs metadata.json and adds formatted fields for the UI."""
+    _drop_clip_files(project_id, clip_index)
+    project_out_dir = _safe_project_output_dir(project_id)
 
     # Format fields for API response
     s = updated_clip["start_sec"]
@@ -1166,8 +1187,26 @@ def trim_clip(project_id: str, clip_index: int, payload: TrimClipRequest):
             json_path.write_text(json.dumps(all_clips, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as ex:
             log.warning(f"Could not update metadata.json after trim: {ex}")
+    return updated_clip
 
-    return {"status": "updated", "clip": updated_clip}
+
+@app.post("/api/projects/{project_id}/clips/{clip_index}/trim-silence")
+def trim_clip_silence(project_id: str, clip_index: int):
+    """«Підрізати тишу»: moves the clip bounds to the first and last spoken word (pauses inside stay)."""
+    proj, clip = _get_project_and_clip(project_id, clip_index)
+    cached = load_transcript_cache(proj["source_path"], any_model=True)
+    if not cached:
+        raise HTTPException(status_code=409, detail="Немає транскрипції слів для цього відео, тому не видно, де тиша.")
+    _, words, _ = cached
+    start, end = float(clip["start_sec"]), float(clip["end_sec"])
+    bounds = trim_silence(words, start, end)
+    if not bounds:
+        return {"status": "unchanged", "clip": clip, "trimmed_sec": 0.0}
+    updated = db.update_clip_bounds(project_id, clip_index, bounds[0], bounds[1])
+    if not updated:
+        raise HTTPException(status_code=404, detail="Кліп не знайдено.")
+    trimmed = round((bounds[0] - start) + (end - bounds[1]), 2)
+    return {"status": "updated", "clip": _after_bounds_change(project_id, clip_index, updated), "trimmed_sec": trimmed}
 
 
 # ─── Safe Media Streaming (HTTP 206 Range Requests) ───────────────────────────
