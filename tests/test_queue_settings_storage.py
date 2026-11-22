@@ -26,8 +26,9 @@ def _project(pid="proj_q1", duration=600.0, source=None):
 
 
 def _fake_analyze(ok=True):
-    def run(job_id, project_id, clips_count, filter_mode, engine="whisper_local"):
+    def run(job_id, project_id, clips_count, filter_mode, engine="whisper_local", language=None):
         run.calls.append((project_id, clips_count, filter_mode))
+        run.languages.append(language)
         if ok:
             db.save_candidate_clips(project_id, [{"start": 1, "end": 20, "title": "t", "hook": "h", "reason": "r"}])
             db.update_project_status(project_id, "ready")
@@ -35,6 +36,7 @@ def _fake_analyze(ok=True):
         else:
             job_runner.broadcast_update(job_id, {"status": "failed", "progress": 1.0, "error": "Gemini впав", "message": "x"})
     run.calls = []
+    run.languages = []
     return run
 
 

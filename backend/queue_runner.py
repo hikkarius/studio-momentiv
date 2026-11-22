@@ -84,7 +84,8 @@ def process_next() -> Optional[Dict[str, Any]]:
         db.create_job(job_id, project_id, "analyze")
         db.update_queue_item(item_id, job_id=job_id)
         clips_count = item["clips_count"] or job_runner.auto_clips_count(proj.get("duration") or 0)
-        job_runner._run_analyze_worker(job_id, project_id, clips_count, item["filter_mode"])
+        job_runner._run_analyze_worker(job_id, project_id, clips_count, item["filter_mode"],
+                                       language=item.get("language") or None)
 
         job = db.get_job(job_id) or {}
         if job.get("status") == "completed":

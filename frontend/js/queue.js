@@ -28,6 +28,7 @@ const Queue = (() => {
     return {
       clips_count: parseInt($("heroClips").value, 10) || 0,
       filter_mode: $("heroFilter").value,
+      language: ($("heroLang") && $("heroLang").value) || "",
     };
   }
 

@@ -116,7 +116,7 @@ def test_run_analyze_worker(tmp_path):
     mock_segments = [{"start": 0.0, "end": 10.0, "text": "тестовий текст"}]
     mock_words = [{"word": "тестовий", "start": 0.0, "end": 5.0}, {"word": "текст", "start": 5.0, "end": 10.0}]
 
-    def fake_transcribe(video_path, status_cb=None):
+    def fake_transcribe(video_path, status_cb=None, language=None):
         if status_cb:
             status_cb("Транскрипцію знайдено у кеші — Whisper пропущено!")
         return (mock_segments, mock_words, "uk", True)

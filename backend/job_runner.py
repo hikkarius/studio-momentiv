@@ -27,6 +27,7 @@ from core import (
 )
 from ai_selector import rerank_clips
 from clip_refiner import refine_clips
+from languages import language_label
 
 log = logging.getLogger("shorts_core")
 
@@ -98,24 +99,27 @@ def _run_analyze_worker(
     clips_count: int,
     filter_mode: str,
     engine: str = "whisper_local",
+    language: Optional[str] = None,
 ):
     if not _analyze_lock.acquire(blocking=False):
         broadcast_update(job_id, {"status": "queued", "progress": 0.0, "message": "Чекає, поки закінчиться обробка іншого відео..."})
         _analyze_lock.acquire()
     try:
-        _run_analyze_worker_locked(job_id, project_id, clips_count, filter_mode, engine)
+        _run_analyze_worker_locked(job_id, project_id, clips_count, filter_mode, engine, language)
     finally:
         _analyze_lock.release()
 
 
-def run_analyze_now(project_id: str, clips_count: int = 0, filter_mode: str = "Viral Hooks") -> str:
+def run_analyze_now(
+    project_id: str, clips_count: int = 0, filter_mode: str = "Viral Hooks", language: Optional[str] = None
+) -> str:
     """Runs the analysis in the calling thread (used by the processing queue). Returns the job ID."""
     proj = db.get_project(project_id)
     if clips_count <= 0:
         clips_count = auto_clips_count(proj["duration"] if proj else 0)
     job_id = _new_job_id(project_id)
     db.create_job(job_id, project_id, "analyze")
-    _run_analyze_worker(job_id, project_id, clips_count, filter_mode)
+    _run_analyze_worker(job_id, project_id, clips_count, filter_mode, language=language)
     return job_id
 
 
@@ -130,6 +134,7 @@ def _run_analyze_worker_locked(
     clips_count: int,
     filter_mode: str,
     engine: str = "whisper_local",
+    language: Optional[str] = None,
 ):
     try:
         broadcast_update(job_id, {"status": "running", "progress": 0.05, "message": "Ініціалізація аналізу відео..."})
@@ -154,7 +159,7 @@ def _run_analyze_worker_locked(
             broadcast_update(job_id, {"status": "running", "progress": mapped_progress, "message": msg})
 
         broadcast_update(job_id, {"status": "running", "progress": 0.10, "message": f"Розпізнавання мови (Whisper {app_config.whisper.model})..."})
-        segments, words, detected_lang, from_cache = transcribe_video(video_path, status_cb=whisper_cb)
+        segments, words, detected_lang, from_cache = transcribe_video(video_path, status_cb=whisper_cb, language=language)
         if not segments:
             raise RuntimeError("У відео не виявлено мовлення або транскрипція порожня.")
 
@@ -214,6 +219,7 @@ def _run_analyze_worker_locked(
             tf.write("====================================================================\n")
             tf.write(f"  ВІРУСНІ МОМЕНТИ: {proj.get('title', 'Відео')}                     \n")
             tf.write(f"  Дата: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}      \n")
+            tf.write(f"  Мова відео: {language_label(detected_lang)}\n")
             tf.write(f"  Всього знайдено моментів: {len(valid_clips)}                     \n")
             tf.write("====================================================================\n\n")
 
@@ -264,9 +270,10 @@ def enqueue_analyze_job(
     clips_count: int = 5,
     filter_mode: str = "Viral Hooks",
     engine: str = "whisper_local",
+    language: Optional[str] = None,
 ) -> str:
     """Enqueues an analyze job for a project and returns the job ID."""
     job_id = _new_job_id(project_id)
     db.create_job(job_id, project_id, "analyze")
-    _executor.submit(_run_analyze_worker, job_id, project_id, clips_count, filter_mode, engine)
+    _executor.submit(_run_analyze_worker, job_id, project_id, clips_count, filter_mode, engine, language)
     return job_id

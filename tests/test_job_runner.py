@@ -104,7 +104,7 @@ def test_run_analyze_worker_whisper_local_success(tmp_path, monkeypatch):
         }
     ]
 
-    monkeypatch.setattr("backend.job_runner.transcribe_video", lambda p, status_cb=None: (mock_segments, mock_words, "uk", False))
+    monkeypatch.setattr("backend.job_runner.transcribe_video", lambda p, status_cb=None, language=None: (mock_segments, mock_words, "uk", False))
     monkeypatch.setattr("backend.job_runner.analyze_and_find_clips", lambda **kwargs: mock_clips)
 
     _run_analyze_worker(job_id, proj_id, clips_count=1, filter_mode="Viral Hooks", engine="whisper_local")
@@ -140,7 +140,7 @@ def test_run_analyze_worker_legacy_engine_standardizes_to_whisper(tmp_path, monk
     mock_segments = [{"start": 0.0, "end": 30.0, "text": "Звичайний текст"}]
     mock_clips = [{"start": 0.0, "end": 30.0, "title": "Фрагмент 1", "score": "88/100"}]
 
-    monkeypatch.setattr("backend.job_runner.transcribe_video", lambda p, status_cb=None: (mock_segments, [], "uk", False))
+    monkeypatch.setattr("backend.job_runner.transcribe_video", lambda p, status_cb=None, language=None: (mock_segments, [], "uk", False))
     monkeypatch.setattr("backend.job_runner.analyze_and_find_clips", lambda **kwargs: mock_clips)
 
     _run_analyze_worker(job_id, proj_id, clips_count=1, filter_mode="Viral Hooks", engine="gemini_cloud")
@@ -180,7 +180,7 @@ def test_run_analyze_worker_empty_segments_fails_job(tmp_path, monkeypatch):
     job_id = "job_silent_1"
     db.create_job(job_id, proj_id, "analyze")
 
-    monkeypatch.setattr("backend.job_runner.transcribe_video", lambda p, status_cb=None: ([], [], "uk", False))
+    monkeypatch.setattr("backend.job_runner.transcribe_video", lambda p, status_cb=None, language=None: ([], [], "uk", False))
 
     _run_analyze_worker(job_id, proj_id, clips_count=1, filter_mode="Viral Hooks")
 
@@ -200,7 +200,7 @@ def test_run_analyze_worker_no_valid_clips_fails_without_fake_highlight(tmp_path
     db.create_job(job_id, proj_id, "analyze")
 
     too_short_clips = [{"start": 1.0, "end": 3.0, "title": "Too short"}]
-    monkeypatch.setattr("backend.job_runner.transcribe_video", lambda p, status_cb=None: ([{"start": 0.0, "end": 45.0, "text": "hello"}], [], "uk", False))
+    monkeypatch.setattr("backend.job_runner.transcribe_video", lambda p, status_cb=None, language=None: ([{"start": 0.0, "end": 45.0, "text": "hello"}], [], "uk", False))
     monkeypatch.setattr("backend.job_runner.analyze_and_find_clips", lambda **kwargs: too_short_clips)
 
     _run_analyze_worker(job_id, proj_id, clips_count=1, filter_mode="Storytelling", engine="whisper_local")
@@ -223,7 +223,7 @@ def test_run_analyze_worker_gemini_unavailable_reaches_job_error(tmp_path, monke
     def gemini_down(**kwargs):
         raise GeminiUnavailableError(GEMINI_UNAVAILABLE_MESSAGE)
 
-    monkeypatch.setattr("backend.job_runner.transcribe_video", lambda p, status_cb=None: ([{"start": 0.0, "end": 60.0, "text": "x"}], [], "uk", True))
+    monkeypatch.setattr("backend.job_runner.transcribe_video", lambda p, status_cb=None, language=None: ([{"start": 0.0, "end": 60.0, "text": "x"}], [], "uk", True))
     monkeypatch.setattr("backend.job_runner.analyze_and_find_clips", gemini_down)
 
     _run_analyze_worker(job_id, proj_id, clips_count=3, filter_mode="Viral Hooks")
@@ -252,7 +252,7 @@ def test_run_analyze_worker_uses_config_clip_bounds(tmp_path, monkeypatch):
             {"start": 100.0, "end": 200.0, "title": "LONG", "score": 85},
         ]
 
-    monkeypatch.setattr("backend.job_runner.transcribe_video", lambda p, status_cb=None: ([{"start": 0.0, "end": 60.0, "text": "x"}], [], "uk", False))
+    monkeypatch.setattr("backend.job_runner.transcribe_video", lambda p, status_cb=None, language=None: ([{"start": 0.0, "end": 60.0, "text": "x"}], [], "uk", False))
     monkeypatch.setattr("backend.job_runner.analyze_and_find_clips", fake_analyze)
 
     _run_analyze_worker(job_id, proj_id, clips_count=2, filter_mode="Viral Hooks")
@@ -283,7 +283,7 @@ def test_whisper_cb_progress_mapping(tmp_path, monkeypatch):
 
     recorded_progress = []
 
-    def fake_transcribe(p, status_cb=None):
+    def fake_transcribe(p, status_cb=None, language=None):
         if status_cb:
             status_cb(0.5, "Транскрипція аудіо (CUDA): 50%")
             recorded_progress.append(db.get_job(job_id)["progress"])

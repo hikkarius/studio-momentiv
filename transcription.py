@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from config_loader import CONFIG
+from languages import AUTO, INITIAL_PROMPTS, language_label
 from utils import extract_audio
 
 log = logging.getLogger("shorts_core")
@@ -86,14 +87,43 @@ def load_transcript_cache(video_path: str, any_model: bool = False) -> tuple[lis
     return None
 
 
-def save_transcript_cache(video_path: str, segments: list, words: list, lang: str) -> None:
-    """Persists transcription result to disk cache."""
+def load_transcript_cache_for(video_path: str, language: str) -> tuple[list, list, str] | None:
+    """
+    The cached transcript, but only if it was made for this language choice: a video first
+    transcribed as Ukrainian must be redone when the user says it is English (and the reverse).
+    Old cache files have no "requested" field; the language Whisper used stands in for it.
+    """
+    if not CONFIG["cache"]["enabled"]:
+        return None
+    try:
+        p = _cache_path(video_path)
+        if not p.exists():
+            return None
+        data = json.loads(p.read_text(encoding="utf-8"))
+        requested = data.get("requested") or data["lang"]
+        if requested != language and not (language != AUTO and data["lang"] == language):
+            log.info(f"Cache {p.name} is for language {requested!r}, need {language!r}: transcribing again")
+            return None
+        log.info(f"Cache HIT → {p.name}")
+        return data["segments"], data["words"], data["lang"]
+    except Exception as e:
+        log.warning(f"Cache read error: {e}")
+    return None
+
+
+def save_transcript_cache(
+    video_path: str, segments: list, words: list, lang: str, requested: Optional[str] = None
+) -> None:
+    """Persists transcription result to disk cache (requested = the language choice it was made for)."""
     if not CONFIG["cache"]["enabled"]:
         return
     try:
         p = _cache_path(video_path)
         p.write_text(
-            json.dumps({"segments": segments, "words": words, "lang": lang}, ensure_ascii=False),
+            json.dumps(
+                {"segments": segments, "words": words, "lang": lang, "requested": requested or lang},
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
         log.info(f"Transcript cached → {p.name}")
@@ -114,8 +144,10 @@ def transcribe_video(
         from_cache=True means Whisper was skipped.
 
     status_cb(msg) is called with human-readable progress strings.
+    language: Whisper code ("uk", "en", ...) or "auto"; None = the language from the settings.
     """
-    cached = load_transcript_cache(video_path)
+    cfg_lang = (language or CONFIG.get("whisper", {}).get("language") or "uk").strip().lower()
+    cached = load_transcript_cache_for(video_path, cfg_lang)
     if cached:
         if status_cb:
             status_cb("✅ Транскрипцію знайдено у кеші — Whisper пропущено!")
@@ -137,15 +169,9 @@ def transcribe_video(
         model = get_whisper()
         engine = getattr(app_state, "_whisper_engine", "faster_whisper")
 
-        cfg_lang = language or CONFIG.get("whisper", {}).get("language", "uk")
         segments: list[dict] = []
         words: list[dict] = []
-        detected_lang = cfg_lang or "uk"
-
-        uk_initial_prompt = (
-            "Відео записано українською мовою. Офіційний правопис, "
-            "розділові знаки, крапки, коми, чиста українська лексика без суржику та русизмів."
-        )
+        detected_lang = cfg_lang
 
         if engine == "faster_whisper":
             beam_size = int(CONFIG.get("whisper", {}).get("beam_size", 5) or 5)
@@ -157,10 +183,10 @@ def transcribe_video(
                 "temperature": [0.0, 0.2, 0.4],
                 "beam_size": beam_size,
             }
-            if cfg_lang == "uk":
-                transcribe_kwargs["initial_prompt"] = uk_initial_prompt
-            if cfg_lang and cfg_lang != "auto":
+            if cfg_lang != AUTO:
                 transcribe_kwargs["language"] = cfg_lang
+                if cfg_lang in INITIAL_PROMPTS:
+                    transcribe_kwargs["initial_prompt"] = INITIAL_PROMPTS[cfg_lang]
 
             def _consume_segments(raw_stream, tot_dur, label="Whisper"):
                 segs = []
@@ -190,7 +216,18 @@ def transcribe_video(
             try:
                 segments_raw, info = model.transcribe(audio_path, **transcribe_kwargs)
                 detected_lang = info.language
-                log.info(f"Detected language (faster-whisper): {detected_lang}")
+                log.info(
+                    f"Detected language (faster-whisper): {detected_lang} "
+                    f"(p={getattr(info, 'language_probability', '?')})"
+                )
+                if cfg_lang == AUTO and detected_lang in INITIAL_PROMPTS:
+                    # The stream is lazy, so nothing is transcribed yet: start again with the
+                    # detected language pinned and its spelling hint (better punctuation, no drift)
+                    transcribe_kwargs["language"] = detected_lang
+                    transcribe_kwargs["initial_prompt"] = INITIAL_PROMPTS[detected_lang]
+                    segments_raw, info = model.transcribe(audio_path, **transcribe_kwargs)
+                if status_cb:
+                    status_cb(f"Мова відео: {language_label(detected_lang)}")
 
                 total_duration = getattr(info, "duration", 0.0)
                 try:
@@ -229,12 +266,12 @@ def transcribe_video(
             # openai-whisper format
             oai_kwargs: dict = {
                 "word_timestamps": True,
-                "language": None if cfg_lang == "auto" else cfg_lang,
+                "language": None if cfg_lang == AUTO else cfg_lang,
             }
-            if cfg_lang == "uk":
-                oai_kwargs["initial_prompt"] = uk_initial_prompt
+            if cfg_lang in INITIAL_PROMPTS:
+                oai_kwargs["initial_prompt"] = INITIAL_PROMPTS[cfg_lang]
             res = model.transcribe(audio_path, **oai_kwargs)
-            detected_lang = res.get("language", "uk")
+            detected_lang = res.get("language") or (cfg_lang if cfg_lang != AUTO else "uk")
             log.info(f"Detected language (openai-whisper): {detected_lang}")
             for seg in res.get("segments", []):
                 segments.append({
@@ -250,7 +287,7 @@ def transcribe_video(
                             "word": w["word"].strip(),
                         })
 
-        save_transcript_cache(video_path, segments, words, detected_lang)
+        save_transcript_cache(video_path, segments, words, detected_lang, requested=cfg_lang)
         return segments, words, detected_lang, False
 
     finally:
