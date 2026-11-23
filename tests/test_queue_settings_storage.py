@@ -330,3 +330,13 @@ def test_auto_cleanup_follows_setting(monkeypatch):
     _old(d, days=10)
     res = storage.auto_cleanup(server.UPLOADS_DIR, server.OUTPUT_DIR)
     assert res["freed_bytes"] >= 10 and not d.exists()
+
+
+def test_tests_never_touch_the_real_transcripts(tmp_path):
+    """The disk cleanup deletes transcripts the database does not know; in tests both must be temporary,
+    also after a settings save rebuilds CONFIG from config.yaml."""
+    import transcription
+    from backend import storage
+    client.post("/api/settings", json={"studio": {"cleanup_days": 7}})
+    for d in (transcription.transcript_cache_dir(), storage._transcript_dir(), storage._RENDER_TMP):
+        assert d.resolve().is_relative_to(tmp_path.resolve()), d

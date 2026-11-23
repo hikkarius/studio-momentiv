@@ -77,6 +77,12 @@ def _norm(p: str) -> str:
     return os.path.normcase(os.path.abspath(p))
 
 
+def _transcript_dir() -> Path:
+    from transcription import transcript_cache_dir
+
+    return transcript_cache_dir()
+
+
 def _transcript_hashes(sources: Iterable[str]) -> Set[str]:
     """Fingerprints used as transcript cache names, for every source video that still exists."""
     from transcription import _cache_path
@@ -122,7 +128,7 @@ def _junk(uploads: Path, output: Path, projects: List[Dict[str, Any]], with_tran
         junk.extend(f for f in _RENDER_TMP.iterdir() if now - _mtime(f) > _TEMP_GRACE_SEC)
 
     if with_transcripts:
-        cache_dir = Path(CONFIG.get("cache", {}).get("dir", ".transcript_cache"))
+        cache_dir = _transcript_dir()
         if cache_dir.is_dir():
             keep = _transcript_hashes(p.get("source_path", "") for p in projects)
             junk.extend(f for f in cache_dir.glob("*.json") if f.stem.split("_")[0] not in keep)
@@ -162,7 +168,7 @@ def scan(uploads: Path, output: Path) -> Dict[str, Any]:
             "total_bytes": src_size + clips + vertical + other,
         })
 
-    cache_dir = Path(CONFIG.get("cache", {}).get("dir", ".transcript_cache"))
+    cache_dir = _transcript_dir()
     totals["transcripts"] = _size(cache_dir) if cache_dir.is_dir() else 0
     junk = _junk(uploads, output, projects)
     totals["junk"] = sum(_size(j) for j in junk)

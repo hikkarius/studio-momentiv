@@ -29,6 +29,11 @@ def get_whisper():
 
 # ─── Transcript caching ───────────────────────────────────────────────────────
 
+def transcript_cache_dir() -> Path:
+    """Folder of the Whisper transcript cache. The disk cleanup reads it from here too; tests replace it."""
+    return Path(CONFIG["cache"]["dir"])
+
+
 def _cache_path(video_path: str) -> Path:
     """
     Computes a fast, collision-resistant fingerprint cache path based on
@@ -54,7 +59,7 @@ def _cache_path(video_path: str) -> Path:
             f.seek(-sample_size, os.SEEK_END)
             h.update(f.read(sample_size))
 
-    cache_dir = Path(CONFIG["cache"]["dir"])
+    cache_dir = transcript_cache_dir()
     cache_dir.mkdir(exist_ok=True)
     # The Whisper model is part of the key: switching models re-transcribes instead of reusing
     # a transcript made by a weaker model. "small" keeps the old file names (no cache loss).

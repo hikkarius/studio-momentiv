@@ -81,7 +81,7 @@ def test_pauses_endpoint_saves_cuts_and_srt_follows(tmp_path, monkeypatch):
     assert db.get_candidate_clips(pid)[0]["cuts"] == [[15.2, 17.9]]
 
     # the SRT runs on the cut timeline: the first word after the pause comes right after the last one before it
-    srt = client.get(f"/api/projects/{pid}/clips/1/export-srt").text
+    srt = client.get(f"/api/projects/{pid}/clips/1/export-srt").text.replace("\r\n", "\n")  # CRLF on Windows
     # «д1» ends at 18.9 s in the video = 8.9 s into the clip, minus the 2.7 s pause = 6.2 s
     assert "00:00:04,200 --> 00:00:06,200\nс8 с9 д0 д1" in srt
     assert srt.rstrip().endswith("00:00:14,300 --> 00:00:15,200\nд18 д19")

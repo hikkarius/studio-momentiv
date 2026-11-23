@@ -6,6 +6,7 @@ web_uploads/, or web_output/.
 """
 import os
 import tempfile
+from pathlib import Path
 
 # Redirect application logging away from the real shorts_automator.log
 # BEFORE any app module (core/logger) is imported and configures handlers.
@@ -42,6 +43,22 @@ def isolate_test_database(tmp_path, monkeypatch):
     monkeypatch.setattr(config_loader, "USER_SETTINGS_PATH", isolated_root / "user_settings.json")
     monkeypatch.setattr(config_loader, "ENV_PATH", isolated_root / ".env")
     saved_cfg = config_loader.app_config.model_copy(deep=True)
+
+    # Whisper transcripts and render temp files also go to tmp_path. Without this the disk
+    # cleanup («Автоприбирання», «Прибрати сміття») treats every real transcript in
+    # .transcript_cache as an orphan of the test database and deletes it. The folder is
+    # replaced at the function, not in CONFIG: saving settings rebuilds CONFIG from config.yaml.
+    # A test may still point CONFIG at its own absolute folder; the relative default never counts.
+    import transcription
+    from backend import storage
+    safe_cache = isolated_root / "transcript_cache"
+
+    def _test_cache_dir():
+        d = Path(config_loader.CONFIG["cache"]["dir"])
+        return d if d.is_absolute() and d.resolve().is_relative_to(tmp_path.resolve()) else safe_cache
+
+    monkeypatch.setattr(transcription, "transcript_cache_dir", _test_cache_dir)
+    monkeypatch.setattr(storage, "_RENDER_TMP", isolated_root / "render_tmp")
 
     db.init_db()
     yield test_db

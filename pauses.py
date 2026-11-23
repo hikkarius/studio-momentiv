@@ -52,6 +52,11 @@ def audio_levels(source: str, start: float, end: float, rate: int = LEVEL_RATE, 
         return []
     pcm = np.frombuffer(proc.stdout, dtype=np.int16).astype(np.float32) / 32768.0
     hop = sr // rate
+    # ffmpeg's resampler can return a few samples less than asked; pad that tail so the wave
+    # keeps exactly `rate` values per second and stays aligned with the time ruler.
+    want = int(round(dur * rate)) * hop
+    if 0 < want - len(pcm) < 2 * hop:
+        pcm = np.pad(pcm, (0, want - len(pcm)), mode="edge")
     n = len(pcm) // hop
     if n == 0:
         return []
