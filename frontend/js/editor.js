@@ -243,6 +243,12 @@ const Editor = (() => {
     const c = clip();
     return { lo: Math.max(0, c.start_sec - ROOM), hi: Math.min(st.project.duration || c.end_sec + ROOM, c.end_sec + ROOM) };
   }
+  /** What the track shows when a clip opens (and on ⤢): the clip with a little room, so the scrollbar shows there is more. */
+  function defaultView() {
+    const c = clip(), R = computeZoom();
+    const pad = Math.min(ROOM, Math.max(4, len(c) * 0.25));
+    return { lo: Math.max(R.lo, c.start_sec - pad), hi: Math.min(R.hi, c.end_sec + pad) };
+  }
 
   /** Splits the words into phrases at pauses and sentence ends (a phrase stays under ~6 s, a short sentence joins the next), as [first, last] word indexes. */
   function phrasesOf(words) {
@@ -260,7 +266,7 @@ const Editor = (() => {
   function renderTrack() {
     const c = clip();
     if (!c) return;
-    if (!st.drag && !st.zoomManual) st.zoom = computeZoom();
+    if (!st.drag && !st.zoomManual) st.zoom = defaultView();
     const { lo, hi } = st.zoom;
     const T = $("edTrack");
     const W = T.clientWidth || 600;
@@ -323,7 +329,8 @@ const Editor = (() => {
     span = Math.max(MIN_SPAN, Math.min(d.hi - d.lo, span));
     lo = Math.max(d.lo, Math.min(d.hi - span, lo));
     st.zoom = { lo, hi: lo + span };
-    st.zoomManual = Math.abs(lo - d.lo) > 0.01 || Math.abs(lo + span - d.hi) > 0.01;
+    const v = defaultView();
+    st.zoomManual = Math.abs(lo - v.lo) > 0.01 || Math.abs(lo + span - v.hi) > 0.01;
     renderTrack();
   }
   function resetZoom() { st.zoomManual = false; renderTrack(); }

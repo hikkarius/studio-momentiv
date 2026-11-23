@@ -306,9 +306,10 @@ def test_track_navigation(page, studio, project):
     open_editor(page, studio)
     first_label = lambda: page.evaluate("document.querySelector('#edTrack .phr').style.left")
     span = lambda: page.evaluate("(() => { const w = document.querySelector('#edMap .win'); return w.getBoundingClientRect().width / w.parentElement.getBoundingClientRect().width; })()")
-    assert span() > 0.95 and page.locator("#edZoomAll").is_disabled()  # whole clip in view
+    s0 = span()
+    assert 0.3 < s0 < 0.95 and page.locator("#edZoomAll").is_disabled()  # the clip with a little room: the scrollbar shows there is more
     page.click("#edZoomIn"); page.click("#edZoomIn"); page.click("#edZoomIn")
-    assert span() < 0.5 and page.locator("#edZoomAll").is_enabled()
+    assert span() < s0 * 0.5 and page.locator("#edZoomAll").is_enabled()
     # the plain wheel scrolls sideways, it does not zoom
     before, w0 = first_label(), span()
     box = page.locator("#edTrack").bounding_box()
@@ -327,7 +328,7 @@ def test_track_navigation(page, studio, project):
     page.mouse.down(); page.mouse.move(win["x"] + win["width"] / 2 - 120, win["y"] + 5, steps=4); page.mouse.up()
     assert first_label() != before
     page.click("#edZoomAll")
-    assert span() > 0.95
+    assert abs(span() - s0) < 0.02
     assert not page.errors
 
 
