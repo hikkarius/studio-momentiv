@@ -1180,8 +1180,18 @@ const Editor = (() => {
     $("edProjTitle").textContent = project.title || "Відео";
     $("edProjMeta").textContent = `${fmtS(project.duration || 0)} · ${clips.length} кліпів`;
     const v = video();
-    v.src = `/api/media?path=${encodeURIComponent(project.source_path)}`;
-    v.load();
+    // «Прибрати відео»: the long video is gone, the clips, marks and texts stay (downloads cannot work)
+    const gone = !!project.source_removed;
+    $("editor").classList.toggle("src-gone", gone);
+    const GONE = "Відео прибрано з диска, тому кліп уже не скачати.";
+    ["edMp4", "edMp4Raw", "edGoVx", "edPauses"].forEach((id) => {
+      const b = $(id);
+      if (!b) return;
+      b.disabled = gone;
+      if (gone) { b.dataset.title0 = b.dataset.title0 ?? b.title; b.title = GONE; } else if (b.dataset.title0 != null) { b.title = b.dataset.title0; }
+    });
+    if (gone) { v.removeAttribute("src"); v.load(); }
+    else { v.src = `/api/media?path=${encodeURIComponent(project.source_path)}`; v.load(); }
     $("editor").hidden = false;
     document.body.style.overflow = "hidden";
     renderTabs();

@@ -126,6 +126,11 @@ def init_db():
             for (pid,) in conn.execute("SELECT DISTINCT project_id FROM candidate_clips").fetchall():
                 _mark_reserve(conn, pid, only_new=True)
 
+        project_columns = [row["name"] for row in conn.execute("PRAGMA table_info(projects);").fetchall()]
+        if "source_removed" not in project_columns:
+            # 1 = «Прибрати відео, з якими закінчив»: the long video was deleted, clips and marks stay
+            conn.execute("ALTER TABLE projects ADD COLUMN source_removed INTEGER NOT NULL DEFAULT 0;")
+
         queue_columns = [row["name"] for row in conn.execute("PRAGMA table_info(queue_items);").fetchall()]
         if "language" not in queue_columns:
             conn.execute("ALTER TABLE queue_items ADD COLUMN language TEXT NOT NULL DEFAULT '';")
@@ -196,7 +201,7 @@ def create_project(project_id: str, title: str, source_path: str, duration: floa
             "VALUES (?, ?, ?, ?, 'uploaded', ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET "
             "title = excluded.title, source_path = excluded.source_path, "
-            "duration = excluded.duration, status = excluded.status, updated_at = excluded.updated_at",
+            "duration = excluded.duration, status = excluded.status, updated_at = excluded.updated_at, source_removed = 0",
             (project_id, title, source_path, duration, now, now),
         )
     return get_project(project_id)
@@ -414,6 +419,22 @@ def get_job(job_id: str) -> Optional[Dict[str, Any]]:
         return dict(row)
 
 
+def busy_project_ids() -> List[str]:
+    """Projects being analysed or waiting in the queue right now."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT project_id FROM jobs WHERE status IN ('queued', 'running') "
+            "UNION SELECT project_id FROM queue_items WHERE project_id IS NOT NULL "
+            "AND status IN ('waiting', 'downloading', 'analyzing')"
+        ).fetchall()
+    return [r[0] for r in rows if r[0]]
+
+
+def set_source_removed(project_id: str) -> None:
+    with get_db() as conn:
+        conn.execute("UPDATE projects SET source_removed = 1, updated_at = ? WHERE id = ?", (time.time(), project_id))
+
+
 def get_project_by_source_path(source_path: str) -> Optional[Dict[str, Any]]:
     """Returns an existing project matching source_path or identical file content on disk."""
     if not source_path:
@@ -479,8 +500,9 @@ def list_recent_projects(limit: int = 25, include_test: Optional[bool] = None) -
             pid = d.get("id", "")
             src = d.get("source_path", "")
 
-            if should_skip_missing:
+            if should_skip_missing and not d.get("source_removed"):
                 # In production, skip projects whose physical source video was deleted
+                # (but keep the ones removed on purpose with «Прибрати відео»: their clips and marks stay)
                 if not src or not os.path.exists(src):
                     continue
 
@@ -644,7 +666,11 @@ def list_all_projects() -> List[Dict[str, Any]]:
     with get_db() as conn:
         rows = conn.execute(
             "SELECT p.*, SUM(CASE WHEN c.review_status = 'keep' THEN 1 ELSE 0 END) AS kept_count, "
-            "COUNT(c.id) AS clips_count "
+            "COUNT(c.id) AS clips_count, "
+            "SUM(CASE WHEN c.review_status = '' AND c.reserve = 0 THEN 1 ELSE 0 END) AS new_count, "
+            "SUM(CASE WHEN c.review_status = 'done' THEN 1 ELSE 0 END) AS done_count, "
+            "SUM(CASE WHEN c.review_status = 'drop' THEN 1 ELSE 0 END) AS drop_count, "
+            "SUM(CASE WHEN c.review_status = '' AND c.reserve = 1 THEN 1 ELSE 0 END) AS reserve_count "
             "FROM projects p LEFT JOIN candidate_clips c ON p.id = c.project_id GROUP BY p.id"
         ).fetchall()
         return [dict(r) for r in rows]

@@ -340,3 +340,4 @@ def test_tests_never_touch_the_real_transcripts(tmp_path):
     client.post("/api/settings", json={"studio": {"cleanup_days": 7}})
     for d in (transcription.transcript_cache_dir(), storage._transcript_dir(), storage._RENDER_TMP):
         assert d.resolve().is_relative_to(tmp_path.resolve()), d
+

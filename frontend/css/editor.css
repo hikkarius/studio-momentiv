@@ -207,6 +207,11 @@
 .ed-toast.err { background: var(--ed-drop); color: #fff; }
 
 @media (prefers-reduced-motion: reduce) { .ed-toast, .ed-bigplay { transition: none; } }
+/* «відео прибрано»: the long video was removed from disk, so there is nothing to play or download */
+#editor.src-gone .ed-screen::after { content: "Відео прибрано з диска. Кліпи, позначки й тексти лишились, а скачати кліп уже не вийде.";
+  position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--ed-muted); font-size: 14px; }
+#editor.src-gone .ed-bigplay { display: none; }
+#editor.src-gone button:disabled { opacity: .45; cursor: not-allowed; }
 
 /* ─── Vertical 9:16 export (tab «Скачати») ──────────────────────────────── */
 @font-face { font-family: "VX Montserrat"; src: url("/fonts/Montserrat-Black.ttf") format("truetype"); font-weight: 900; font-display: swap; }

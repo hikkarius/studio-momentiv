@@ -41,6 +41,10 @@ def _cache_path(video_path: str) -> Path:
     Avoids reading entire multi-gigabyte video files while guaranteeing cache validity
     across uploads into different temporary directories.
     """
+    if not os.path.exists(video_path):
+        digest = removed_source_digest(video_path)
+        if digest:  # the video was removed from disk («Прибрати відео»), its transcript was kept
+            return _named_cache_path(digest)
     h = hashlib.sha256()
     stat = os.stat(video_path)
     file_size = stat.st_size
@@ -59,13 +63,53 @@ def _cache_path(video_path: str) -> Path:
             f.seek(-sample_size, os.SEEK_END)
             h.update(f.read(sample_size))
 
+    return _named_cache_path(h.hexdigest())
+
+
+def _named_cache_path(digest: str) -> Path:
     cache_dir = transcript_cache_dir()
     cache_dir.mkdir(exist_ok=True)
     # The Whisper model is part of the key: switching models re-transcribes instead of reusing
     # a transcript made by a weaker model. "small" keeps the old file names (no cache loss).
     model = str(CONFIG.get("whisper", {}).get("model", "small"))
     suffix = "" if model == "small" else "_" + re.sub(r"[^A-Za-z0-9.-]+", "-", model)
-    return cache_dir / f"{h.hexdigest()}{suffix}.json"
+    return cache_dir / f"{digest}{suffix}.json"
+
+
+# Videos removed from disk with «Прибрати відео, з якими закінчив»: path → transcript fingerprint.
+# Not a .json file, so the disk cleanup never mistakes it for a transcript.
+_REMOVED_MAP = "removed_sources.map"
+
+
+def _norm_path(p: str) -> str:
+    return os.path.normcase(os.path.abspath(p))
+
+
+def removed_sources() -> dict:
+    f = transcript_cache_dir() / _REMOVED_MAP
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def removed_source_digest(video_path: str) -> Optional[str]:
+    return removed_sources().get(_norm_path(video_path))
+
+
+def remember_removed_source(video_path: str) -> Optional[str]:
+    """Call before deleting a source video: keeps its transcript findable. Returns the fingerprint."""
+    try:
+        digest = _cache_path(video_path).stem.split("_")[0]
+    except OSError:
+        return None
+    data = removed_sources()
+    data[_norm_path(video_path)] = digest
+    d = transcript_cache_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    (d / _REMOVED_MAP).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    return digest
 
 
 def load_transcript_cache(video_path: str, any_model: bool = False) -> tuple[list, list, str] | None:

@@ -648,7 +648,7 @@ def _ensure_clip_slice(project_id: str, proj: Dict[str, Any], clip: Dict[str, An
     project_out_dir = _safe_project_output_dir(project_id)
     source_path = proj["source_path"]
     if not os.path.exists(source_path):
-        raise HTTPException(status_code=404, detail="Вихідне відео не знайдено на диску.")
+        _no_source(proj)
 
     slices_dir = project_out_dir / "slices"
     slices_dir.mkdir(parents=True, exist_ok=True)
@@ -677,6 +677,16 @@ def _ensure_clip_slice(project_id: str, proj: Dict[str, Any], clip: Dict[str, An
     return output_slice_path, slice_filename
 
 
+SOURCE_REMOVED_MSG = "Відео прибрано з диска, тому кліп уже не скачати."
+
+
+def _no_source(proj: Dict[str, Any]) -> None:
+    """The long video is not on disk: say why, in words («Прибрати відео» on purpose, or it went missing)."""
+    if proj.get("source_removed"):
+        raise HTTPException(status_code=410, detail=SOURCE_REMOVED_MSG)
+    raise HTTPException(status_code=404, detail="Вихідне відео не знайдено на диску.")
+
+
 def _get_project_and_clip(project_id: str, clip_index: int) -> tuple[Dict[str, Any], Dict[str, Any]]:
     _validate_project_id(project_id)
     proj = db.get_project(project_id)
@@ -700,7 +710,7 @@ def _ensure_clip_file(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any
         return _ensure_clip_slice(project_id, proj, clip)
     source_path = proj["source_path"]
     if not os.path.exists(source_path):
-        raise HTTPException(status_code=404, detail="Вихідне відео не знайдено на диску.")
+        _no_source(proj)
     slices_dir = _safe_project_output_dir(project_id) / "slices"
     slices_dir.mkdir(parents=True, exist_ok=True)
     stem = _clip_file_stem(clip)
@@ -819,7 +829,7 @@ def _levels(project_id: str, proj: Dict[str, Any], lo: float, hi: float) -> List
         except Exception:
             pass
     if not os.path.exists(proj["source_path"]):
-        raise HTTPException(status_code=404, detail="Вихідне відео не знайдено на диску.")
+        _no_source(proj)
     levels = pauses.audio_levels(proj["source_path"], lo, hi)
     if levels:
         olds = sorted(adir.glob("levels_*.json"), key=lambda f: f.stat().st_mtime)
@@ -1046,7 +1056,7 @@ def _clip_faces(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any]) -> 
     """Face samples for the clip's current bounds (cached on disk, ~3-5 s on first call)."""
     source_path = proj["source_path"]
     if not os.path.exists(source_path):
-        raise HTTPException(status_code=404, detail="Вихідне відео не знайдено на диску.")
+        _no_source(proj)
     vdir = _vertical_dir(project_id)
     path = vdir / f"faces2_{clip['clip_index']}_{clip['start_sec']:.2f}_{clip['end_sec']:.2f}.json"
     if path.exists():
@@ -1625,6 +1635,22 @@ def cleanup_storage(payload: StorageCleanupRequest):
         _validate_project_id(pid)
     result = storage.cleanup(UPLOADS_DIR, OUTPUT_DIR, junk=payload.junk, clips=payload.clips,
                              older_than_days=payload.older_than_days, project_ids=payload.project_ids)
+    return {**result, "storage": storage.scan(UPLOADS_DIR, OUTPUT_DIR)}
+
+
+class RemoveSourcesRequest(BaseModel):
+    project_ids: List[str] = Field(min_length=1, max_length=500)
+
+
+@app.post("/api/storage/remove-sources")
+def remove_finished_sources(payload: RemoveSourcesRequest):
+    """«Прибрати відео, з якими закінчив»: deletes the long videos, keeps clips, marks, texts and transcripts."""
+    for pid in payload.project_ids:
+        _validate_project_id(pid)
+    try:
+        result = storage.remove_sources(UPLOADS_DIR, OUTPUT_DIR, payload.project_ids, busy=db.busy_project_ids())
+    except storage.NotRemovable as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {**result, "storage": storage.scan(UPLOADS_DIR, OUTPUT_DIR)}
 
 

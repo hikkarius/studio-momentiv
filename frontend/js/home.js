@@ -99,6 +99,7 @@ const Home = (() => {
           <img src="/api/projects/${id}/thumbnail" class="history-thumb-img" alt="" loading="lazy">
           <span class="history-fallback-icon" style="display:none">🎬</span>
           <span class="video-card-dur">${escapeHtml(p.duration_formatted || "00:00")}</span>
+          ${p.source_removed ? '<span class="vc-gone" title="Саме довге відео прибрано з диска; кліпи, позначки й тексти лишились">відео прибрано</span>' : ""}
         </div>
         <div class="history-details">
           <span class="history-item-title" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>
@@ -110,7 +111,7 @@ const Home = (() => {
       <button type="button" class="vc-dots" aria-haspopup="true" aria-expanded="false" title="Дії з відео" aria-label="Дії з відео">⋯</button>
       <div class="vc-menu" role="menu" hidden>
         ${total ? `<button type="button" role="menuitem" data-act="open">Відкрити</button>` : ""}
-        <button type="button" role="menuitem" data-act="again">↻ ${total ? "Шукати кліпи заново" : "Знайти кліпи"}</button>
+        ${p.source_removed ? "" : `<button type="button" role="menuitem" data-act="again">↻ ${total ? "Шукати кліпи заново" : "Знайти кліпи"}</button>`}
         <button type="button" role="menuitem" data-act="delete" class="danger">🗑 Видалити</button>
       </div>`;
     const img = el.querySelector(".history-thumb-img");
