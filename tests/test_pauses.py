@@ -142,3 +142,22 @@ def test_smooth_join_renders_with_the_same_length(tmp_path):
     dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(out)],
                                capture_output=True, text=True, timeout=20).stdout)
     assert 2.9 < dur < 3.15
+
+
+def test_tempo_keep_and_preview(tmp_path, monkeypatch):
+    pid = _project(tmp_path)
+    monkeypatch.setattr("backend.server.load_transcript_cache", lambda p, **kw: ([], [], "uk"))
+    # 20 s clip: speech, a 2 s pause, speech, a 0.5 s pause, speech
+    monkeypatch.setattr(pauses, "audio_levels", lambda *a, **k: _levels((5, -20), (2, -60), (5, -20), (0.5, -60), (7.5, -20)))
+
+    tempos = client.get(f"/api/projects/{pid}/clips/1/pauses/preview").json()["tempos"]
+    assert set(tempos) == {"calm", "normal", "dense"}
+    assert tempos["calm"]["count"] == 1 and tempos["dense"]["count"] == 2
+    assert tempos["calm"]["removed_sec"] < tempos["normal"]["removed_sec"] < tempos["dense"]["removed_sec"]
+    assert db.get_candidate_clips(pid)[0].get("cuts") in (None, [])  # the preview saves nothing
+
+    # keep = silence left in place of the pause
+    tight = client.post(f"/api/projects/{pid}/clips/1/pauses", json={"min_gap": 1.0, "keep": 0.1}).json()
+    airy = client.post(f"/api/projects/{pid}/clips/1/pauses", json={"min_gap": 1.0, "keep": 0.4}).json()
+    assert tight["removed_sec"] == pytest.approx(airy["removed_sec"] + 0.3, abs=0.02)
+    assert client.post(f"/api/projects/{pid}/clips/1/pauses", json={"min_gap": 1.0, "keep": 0.9}).status_code == 422

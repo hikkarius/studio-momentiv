@@ -237,10 +237,11 @@ const Editor = (() => {
   }
 
   // ─── Trim track ────────────────────────────────────────────────────────────
+  /** The track never goes further than this from the clip: no endless grey (dragging a yellow edge moves it along). */
+  const ROOM = 10;
   function computeZoom() {
     const c = clip();
-    const pad = Math.max(4, len(c) * 0.25);
-    return { lo: Math.max(0, c.start_sec - pad), hi: Math.min(st.project.duration || c.end_sec + pad, c.end_sec + pad) };
+    return { lo: Math.max(0, c.start_sec - ROOM), hi: Math.min(st.project.duration || c.end_sec + ROOM, c.end_sec + ROOM) };
   }
 
   /** Splits the words into phrases at pauses and sentence ends (a phrase stays under ~6 s, a short sentence joins the next), as [first, last] word indexes. */
@@ -315,13 +316,12 @@ const Editor = (() => {
   /** What the map above the track shows: the whole clip with some room around it (and the view, if it is wider). */
   function mapRange() {
     const d = computeZoom();
-    return { lo: Math.min(d.lo, st.zoom.lo), hi: Math.max(d.hi, st.zoom.hi) };
+    return { lo: Math.min(d.lo, st.zoom.lo), hi: Math.max(d.hi, st.zoom.hi) };  // wider only while an edge is dragged out
   }
   function setZoom(lo, span) {
-    const dur = st.project.duration || st.zoom.hi;
-    span = Math.max(MIN_SPAN, Math.min(dur, span));
-    lo = Math.max(0, Math.min(dur - span, lo));
     const d = computeZoom();
+    span = Math.max(MIN_SPAN, Math.min(d.hi - d.lo, span));
+    lo = Math.max(d.lo, Math.min(d.hi - span, lo));
     st.zoom = { lo, hi: lo + span };
     st.zoomManual = Math.abs(lo - d.lo) > 0.01 || Math.abs(lo + span - d.hi) > 0.01;
     renderTrack();
@@ -408,8 +408,8 @@ const Editor = (() => {
     const span = st.zoom.hi - st.zoom.lo;
     const before = st.zoom.lo;
     st.zoomManual = true;
-    const dur = st.project.duration || st.zoom.hi;
-    const lo = Math.max(0, Math.min(dur - span, before + st.drag.dir * span * 0.012));
+    const R = computeZoom();  // follows the dragged edge, so the clip can still grow
+    const lo = Math.max(R.lo, Math.min(R.hi - span, before + st.drag.dir * span * 0.012));
     st.zoom = { lo, hi: lo + span };
     if (lo !== before) moveBound(st.drag.lastX);
     renderTrack();
@@ -932,7 +932,17 @@ const Editor = (() => {
   /** The clip's cut pauses that still lie inside its bounds. */
   const cutsOf = (c) => (c?.cuts || []).filter(([a, b]) => a >= c.start_sec && b <= c.end_sec && b > a);
   const removedOf = (c) => cutsOf(c).reduce((s, [a, b]) => s + (b - a), 0);
-  function pauseGap() { try { return Number(localStorage.getItem("studio-pause-gap")) || 0.6; } catch (_) { return 0.6; } }
+  /** How hard «Прибрати паузи» cuts: which pauses count and how much silence each one keeps. */
+  const PAUSE_MODES = {
+    calm: { label: "Спокійний", gap: 1.0, keep: 0.3, hint: "лише паузи довші за 1 с, лишає 0,3 с тиші: звучить природно" },
+    normal: { label: "Звичайний", gap: 0.6, keep: 0.2, hint: "паузи довші за 0,6 с, лишає 0,2 с тиші" },
+    dense: { label: "Щільний", gap: 0.4, keep: 0.1, hint: "паузи довші за 0,4 с, лишає 0,1 с тиші: швидкий темп, як у TikTok" },
+  };
+  function pauseMode() {
+    let m = null;
+    try { m = localStorage.getItem("studio-pause-mode"); } catch (_) {}
+    return PAUSE_MODES[m] ? m : "normal";
+  }
 
   function renderPauses() {
     const c = clip();
@@ -944,17 +954,40 @@ const Editor = (() => {
     btn.classList.toggle("on", cuts.length > 0);
     btn.textContent = cuts.length ? `✓ Паузи прибрано · −${fmt1(rm)} с` : "✂ Прибрати паузи";
     const bar = $("edPauseBar");
-    const show = cuts.length > 0 || st.restored.length > 0;
-    bar.hidden = !show;
-    if (show) {
-      const gap = pauseGap();
-      bar.innerHTML = `<span class="res">Прибрано <b>${cuts.length} ${cuts.length === 1 ? "паузу" : cuts.length > 1 && cuts.length < 5 ? "паузи" : "пауз"} · −${fmt1(rm)} с</b></span>
-        <span>довші за</span><span class="seg" role="group" aria-label="Поріг паузи">${[0.4, 0.6, 1].map((g) => `<button type="button" data-g="${g}" aria-pressed="${g === gap}">${fmt1(g)} с</button>`).join("")}</span>
-        <span class="hint">· клік по смужці повертає паузу</span><button type="button" class="link" data-a="all">↶ Повернути все</button>`;
-    }
+    const cut = cuts.length > 0 || st.restored.length > 0;
+    const mode = pauseMode();
+    bar.hidden = false;
+    const pv = st.pausePreview && st.pausePreview.key === previewKey(c) ? st.pausePreview.tempos : null;
+    if (!pv) loadPausePreview(c);
+    bar.innerHTML = `<span>Темп:</span><span class="seg" role="group" aria-label="Темп: наскільки різати паузи">${Object.entries(PAUSE_MODES).map(([k, m]) => {
+        const r = pv && pv[k];
+        const res = r ? (r.count ? ` · −${fmt1(r.removed_sec)} с` : " · 0 с") : "";
+        return `<button type="button" data-m="${k}" aria-pressed="${k === mode}" title="${m.label}: ${m.hint}">${m.label}${res}</button>`;
+      }).join("")}</span>`
+      + (cut
+        ? `<span class="res">прибрано <b>${cuts.length} ${cuts.length === 1 ? "паузу" : cuts.length > 1 && cuts.length < 5 ? "паузи" : "пауз"} · −${fmt1(rm)} с</b></span>
+           <span class="hint">· клік по ✂ повертає паузу</span><button type="button" class="link" data-a="all">↶ Повернути все</button>`
+        : `<span class="hint">${PAUSE_MODES[mode].hint}</span>`);
     $("edMp4Lab").textContent = cuts.length ? "⬇ Кліп 16:9 · без пауз" : "⬇ Кліп 16:9 · MP4";
     $("edMp4Info").innerHTML = cuts.length ? `${fmt1(len(c) - rm)} с` : `${Math.round(len(c))} с<span class="q"> · оригінальна якість</span>`;
     $("edMp4Raw").hidden = !cuts.length;
+  }
+
+  /** What each tempo would cut in this clip (one request, nothing saved): shown on the tempo buttons. */
+  const previewKey = (c) => `${pid()}:${c.clip_index}:${c.start_sec}:${c.end_sec}`;
+  async function loadPausePreview(c) {
+    const key = previewKey(c);
+    if (st.pausePreviewLoading === key) return;
+    st.pausePreviewLoading = key;
+    clearTimeout(st.pausePreviewTimer);
+    st.pausePreviewTimer = setTimeout(async () => {
+      try {
+        const d = await api(`/api/projects/${pid()}/clips/${c.clip_index}/pauses/preview`);
+        st.pausePreview = { key, tempos: d.tempos };
+        if (clip() === c && previewKey(c) === key) renderPauses();
+      } catch (_) { /* the buttons just show no numbers */ }
+      finally { if (st.pausePreviewLoading === key) st.pausePreviewLoading = null; }
+    }, 400);
   }
 
   async function savePauses(c, cuts, msg) {
@@ -975,7 +1008,8 @@ const Editor = (() => {
     if (clip() === c) { renderTrack(); renderPauses(); }
   }
 
-  async function findPauses(gap = pauseGap()) {
+  async function findPauses(mode = pauseMode()) {
+    const { gap, keep } = PAUSE_MODES[mode];
     const c = clip();
     if (!c) return;
     const btn = $("edPauses");
@@ -983,7 +1017,7 @@ const Editor = (() => {
     btn.textContent = "Шукаю паузи…";
     try {
       const d = await api(`/api/projects/${pid()}/clips/${c.clip_index}/pauses`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ min_gap: gap }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ min_gap: gap, keep }),
       });
       c.cuts = d.cuts;
       st.restored = [];
@@ -1216,8 +1250,8 @@ const Editor = (() => {
     document.addEventListener("click", (e) => { if (!e.target.closest("#edStatusMenu")) closeStatusMenu(); });
     $("edPauses").addEventListener("click", () => findPauses());
     $("edPauseBar").addEventListener("click", (e) => {
-      const g = e.target.closest("button[data-g]");
-      if (g) { try { localStorage.setItem("studio-pause-gap", g.dataset.g); } catch (_) {} findPauses(Number(g.dataset.g)); return; }
+      const g = e.target.closest("button[data-m]");
+      if (g) { try { localStorage.setItem("studio-pause-mode", g.dataset.m); } catch (_) {} findPauses(g.dataset.m); return; }
       if (e.target.closest("button[data-a='all']")) { const c = clip(); st.restored = []; savePauses(c, [], "Усі паузи повернуто"); }
     });
     $("edMp4Raw").addEventListener("click", () => { toast("Готуємо відео…"); download(`/api/projects/${pid()}/clips/${clip().clip_index}/download?raw=1`); });

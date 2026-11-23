@@ -156,7 +156,7 @@ def test_pauses_button_and_track(page, studio, project):
     assert page.locator("#edTrack canvas.wave").count() == 1
     page.click("#edPauses")
     page.wait_for_function("document.getElementById('edToast').textContent.includes('Пауз')")
-    assert clip(2)["cuts"] == [] and page.locator("#edPauseBar").is_hidden()
+    assert clip(2)["cuts"] == [] and page.locator("#edPauseBar button[data-m]").count() == 3  # tempo switch
     # a saved cut shows as a band; clicking it restores the pause
     db.update_clip_fields(PROJECT_ID, 2, cuts=[[35.0, 36.0]])
     open_editor(page, studio)

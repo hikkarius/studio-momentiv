@@ -139,15 +139,15 @@
 /* Time ruler: not shown in design B, the phrase cards carry the time */
 .ed-ruler { display: none; }
 /* Scrollbar under the wave: the dark-gold part is the clip, the outlined frame is what the track shows */
-.ed-map { position: relative; height: 16px; margin-top: 2px; touch-action: none; user-select: none; cursor: pointer; }
-.ed-map::before { content: ""; position: absolute; left: 0; right: 0; top: 4px; height: 8px; border-radius: 99px; background: var(--ed-sunk); }
+.ed-map { position: relative; height: 14px; margin-top: 0; touch-action: none; user-select: none; cursor: pointer; }
+.ed-map::before { content: ""; position: absolute; left: 0; right: 0; top: 5px; height: 4px; border-radius: 99px; background: var(--ed-sunk); }
 .ed-map canvas { display: none; }
-.ed-map .clip { position: absolute; top: 4px; height: 8px; border-radius: 99px; background: color-mix(in srgb, var(--ed-accent) 32%, var(--ed-sunk)); pointer-events: none; }
-.ed-map .win { position: absolute; top: 1px; bottom: 1px; min-width: 14px; box-sizing: border-box; border: 1.5px solid var(--ed-fg); border-radius: 99px; cursor: grab;
+.ed-map .clip { position: absolute; top: 5px; height: 4px; border-radius: 99px; background: color-mix(in srgb, var(--ed-accent) 32%, var(--ed-sunk)); pointer-events: none; }
+.ed-map .win { position: absolute; top: 3px; bottom: 3px; min-width: 14px; box-sizing: border-box; border: 1.5px solid var(--ed-fg); border-radius: 99px; cursor: grab;
   background: color-mix(in srgb, var(--ed-fg) 22%, transparent); }
 .ed-map .win::before, .ed-map .win::after { content: ""; position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
 .ed-map .win::before { left: -2px; } .ed-map .win::after { right: -2px; }
-.ed-map .ph { position: absolute; top: 2px; bottom: 2px; width: 2px; margin-left: -1px; background: var(--ed-fg); pointer-events: none; opacity: .7; }
+.ed-map .ph { position: absolute; top: 3px; bottom: 3px; width: 2px; margin-left: -1px; background: var(--ed-fg); pointer-events: none; opacity: .7; }
 /* Hint under the track */
 .ed-navrow { display: flex; align-items: center; gap: 12px; }
 .ed-navrow .ed-small { flex: 1; min-width: 0; }

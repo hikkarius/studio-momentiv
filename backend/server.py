@@ -844,11 +844,11 @@ def get_clip_levels(project_id: str, clip_index: int, pad: float = 10.0):
 
 class PausesRequest(BaseModel):
     min_gap: float = Field(default=pauses.DEFAULT_MIN_GAP, ge=0.3, le=3.0)
+    keep: float = Field(default=pauses.KEEP, ge=0.05, le=0.5)  # silence left in place of each cut pause
 
 
-@app.post("/api/projects/{project_id}/clips/{clip_index}/pauses")
-def cut_clip_pauses(project_id: str, clip_index: int, payload: PausesRequest):
-    """«Прибрати паузи»: finds pauses longer than min_gap inside the clip and saves them as cuts."""
+def _clip_sound(project_id: str, clip_index: int):
+    """The clip, its loudness levels and the transcript words, for finding pauses."""
     proj, clip = _get_project_and_clip(project_id, clip_index)
     start, end = float(clip["start_sec"]), float(clip["end_sec"])
     levels = _levels(project_id, proj, round(start, 2), round(end, 2))
@@ -856,10 +856,29 @@ def cut_clip_pauses(project_id: str, clip_index: int, payload: PausesRequest):
     words = cached[1] if cached else []
     if not levels and not words:
         raise HTTPException(status_code=409, detail="Не вдалося прочитати звук і немає транскрипції, тож паузи не видно.")
-    cuts = pauses.find_pauses(start, end, levels=levels, words=words, min_gap=payload.min_gap)
+    return start, end, levels, words
+
+
+@app.post("/api/projects/{project_id}/clips/{clip_index}/pauses")
+def cut_clip_pauses(project_id: str, clip_index: int, payload: PausesRequest):
+    """«Прибрати паузи»: finds pauses longer than min_gap inside the clip and saves them as cuts."""
+    start, end, levels, words = _clip_sound(project_id, clip_index)
+    keep = min(payload.keep, payload.min_gap - 0.1)
+    cuts = pauses.find_pauses(start, end, levels=levels, words=words, min_gap=payload.min_gap, keep=keep)
     updated = db.update_clip_fields(project_id, clip_index, cuts=cuts)
     return {"cuts": [list(c) for c in cuts], "count": len(cuts), "removed_sec": pauses.removed(cuts),
             "clip": updated, "by": "audio" if levels else "words"}
+
+
+@app.get("/api/projects/{project_id}/clips/{clip_index}/pauses/preview")
+def preview_clip_pauses(project_id: str, clip_index: int):
+    """What each tempo (Спокійний / Звичайний / Щільний) would cut, without saving anything."""
+    start, end, levels, words = _clip_sound(project_id, clip_index)
+    out = {}
+    for name, (gap, keep) in pauses.TEMPOS.items():
+        cuts = pauses.find_pauses(start, end, levels=levels, words=words, min_gap=gap, keep=keep)
+        out[name] = {"min_gap": gap, "keep": keep, "count": len(cuts), "removed_sec": pauses.removed(cuts)}
+    return {"tempos": out}
 
 
 @app.get("/api/projects/{project_id}/clips/{clip_index}/words")
