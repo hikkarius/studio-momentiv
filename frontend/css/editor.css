@@ -106,17 +106,24 @@
 /* Phrases (design B): big readable blocks laid out on time, every word inside is a click target */
 .ed-track .phr { position: absolute; top: 6px; height: 56px; box-sizing: border-box; padding: 4px 5px; border-radius: 7px; overflow: hidden;
   background: var(--ed-panel); border: 1px solid var(--ed-line2); color: var(--ed-faint); font: 500 12.5px/1.2 var(--ed-sans); z-index: 1;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; word-break: break-word; }
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: normal; word-break: normal; }
 .ed-track .phr + .phr { margin-left: 2px; }
 .ed-track .phr.in { color: var(--ed-fg); background: var(--ed-accent-soft); border-color: color-mix(in srgb, var(--ed-accent) 40%, transparent); }
 .ed-track .phr.now { background: var(--ed-accent); color: var(--ed-accent-ink); border-color: var(--ed-accent); font-weight: 700; }
 .ed-track .phr.tiny { padding: 0; }
-/* a phrase too narrow for its text opens up under the mouse: the whole phrase, every word clickable */
-.ed-track:not(.scrubbing):not(.dragging) .phr:not(.tiny):hover { width: max-content !important; min-width: var(--w); max-width: min(440px, 60%); height: auto; max-height: 88px;
-  -webkit-line-clamp: 4; z-index: 7; box-shadow: 0 6px 18px rgba(0, 0, 0, .45); }
+/* the phrase box never changes on hover: only the word under the mouse lights up */
 .ed-track .phr .w { cursor: pointer; border-radius: 4px; padding: 0 1px; margin: 0 -1px; }
-.ed-track .phr .w:hover { background: var(--ed-fg); color: var(--ed-bg); }
-.ed-track .phr.now .w:hover { background: var(--ed-accent-ink); color: var(--ed-accent); }
+.ed-track .phr .w:hover { background: color-mix(in srgb, var(--ed-fg) 16%, transparent); }
+.ed-track .phr.now .w:hover { background: color-mix(in srgb, var(--ed-accent-ink) 18%, transparent); }
+.ed-track .phr.more { cursor: pointer; }
+/* Floating card above the track with the full text of a phrase that does not fit; every word is clickable */
+.ed-phrcard { position: fixed; z-index: 60; max-width: 440px; box-sizing: border-box; padding: 8px 11px; border-radius: 10px;
+  background: var(--ed-panel); border: 1px solid var(--ed-line); box-shadow: var(--ed-pop-shadow, 0 8px 24px rgba(0,0,0,.45));
+  color: var(--ed-fg); font: 500 14px/1.35 var(--ed-sans); }
+.ed-phrcard small { display: block; font: 500 11px var(--ed-mono); color: var(--ed-faint); margin-bottom: 3px; }
+.ed-phrcard .w { cursor: pointer; border-radius: 4px; padding: 0 2px; margin: 0 -1px; }
+.ed-phrcard .w.out { color: var(--ed-faint); }
+.ed-phrcard .w:hover { background: var(--ed-accent); color: var(--ed-accent-ink); }
 /* Thin sound wave under the phrases */
 .ed-track canvas.wave { position: absolute; left: 0; top: 66px; width: 100%; height: 30px; pointer-events: none; }
 /* Cut pauses: hatched red bands, click restores one; a restored one stays as a dashed outline */
@@ -394,9 +401,11 @@
 .ed-stage .ed-screen { flex: 1 1 auto; min-height: 140px; width: 100%; aspect-ratio: auto; display: grid; place-items: center; }
 .ed-stage .ed-screen video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .ed-trim { margin-top: 0; gap: 5px; }
-.ed-trim-info { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--ed-muted); }
+.ed-trim-info { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; font-size: 13px; color: var(--ed-muted); }
+.ed-trim-info > span:last-child { justify-self: end; }
+.ed-trim-mid { display: inline-flex; align-items: center; gap: 10px; }
 .ed-trim-info b { color: var(--ed-fg); font: 600 13.5px var(--ed-mono); margin-left: 4px; }
-.ed-len { color: var(--ed-accent-text); background: var(--ed-accent-soft); font-weight: 800; padding: 1px 10px; border-radius: 99px; }
+.ed-len { color: var(--ed-accent-text); background: var(--ed-accent-soft); font: 800 13px var(--ed-mono); padding: 5px 12px; border-radius: 99px; white-space: nowrap; }
 .ed-track { height: 100px; }
 .ed-trim .ed-small { font-size: 12px; color: var(--ed-faint); }
 .ed-play { width: 46px; height: 46px; border-radius: 50%; border: 0; background: var(--ed-accent-grad); color: var(--ed-accent-ink); font-size: 16px; cursor: pointer; flex: none; display: grid; place-items: center; }
@@ -631,3 +640,13 @@
 .ed-toast-undo { border: 0; background: none; color: inherit; font: 800 14px var(--ed-sans); text-decoration: underline; cursor: pointer; padding: 0; }
 @media (max-width: 1439px) { .ed-shelf { min-width: 0; padding: 6px 11px; } }
 .ed-decide .ed-gonext { padding: 8px 14px; border-radius: 99px; font-size: 13.5px; }
+
+/* «Прибрати паузи»: the most visible control under the video */
+#editor .ed-silence { height: 38px; padding: 0 20px; font-size: 14.5px; font-weight: 800; background: var(--ed-accent-grad, var(--ed-accent)); color: var(--ed-accent-ink);
+  border: 0; box-shadow: 0 2px 10px color-mix(in srgb, var(--ed-accent) 35%, transparent); white-space: nowrap; }
+#editor .ed-silence:hover { filter: brightness(1.07); background: var(--ed-accent-grad, var(--ed-accent)); color: var(--ed-accent-ink); }
+#editor .ed-silence.on { background: var(--ed-accent-soft); color: var(--ed-accent-text); border: 1.5px solid var(--ed-accent); box-shadow: none; }
+#editor .ed-silence.on:hover { filter: brightness(1.12); background: var(--ed-accent-soft); color: var(--ed-accent-text); }
+/* Preview jumps over a cut pause with a short dip, like the cross-fade in the downloaded file */
+.ed-screen video.cutdip { animation: ed-cutdip .12s ease; }
+@keyframes ed-cutdip { 0% { opacity: 1; } 45% { opacity: .45; } 100% { opacity: 1; } }

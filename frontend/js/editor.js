@@ -272,14 +272,14 @@ const Editor = (() => {
       const px = (width / 100) * W;
       const inside = a < c.end_sec && b > c.start_sec;
       let inner = "";
-      if (px >= 22) {
+      if (px >= 40) {
         for (let j = j0; j <= j1; j++) {
           const w = st.words[j];
           const wIn = w.start >= c.start_sec - 0.05 && w.start < c.end_sec;
           inner += `<span class="w${wIn ? " in" : ""}" data-j="${j}">${esc(w.word)}</span> `;
         }
       }
-      h += `<div class="phr${inside ? " in" : ""}${px < 22 ? " tiny" : ""}" data-a="${a}" data-b="${b}" style="left:${left}%;width:${width}%;--w:${width}%"
+      h += `<div class="phr${inside ? " in" : ""}${px < 40 ? " tiny" : ""}" data-a="${a}" data-b="${b}" style="left:${left}%;width:${width}%;--w:${width}%"
         title="${fmt(a)} – ${fmt(b)}">${inner}</div>`;
     });
     cutsOf(c).forEach(([a, b], k) => {
@@ -295,7 +295,12 @@ const Editor = (() => {
     h += `<div class="hd" data-h="start" style="left:${p(c.start_sec)}%" title="Тягни: початок кліпу"></div>`;
     h += `<div class="hd" data-h="end" style="left:${p(c.end_sec)}%" title="Тягни: кінець кліпу"></div>`;
     h += `<div class="zph" id="edZph"></div>`;
+    hidePhraseCard(true);
     T.innerHTML = h;
+    // a phrase whose text does not fit gets the full text in a card above the track on hover
+    T.querySelectorAll(".phr:not(.tiny)").forEach((el) => {
+      if (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) el.classList.add("more");
+    });
     renderMap();
     drawWave();
     renderRuler();
@@ -595,7 +600,7 @@ const Editor = (() => {
     const paused = video().paused;
     $("edScreen").classList.toggle("paused", paused);
     $("edPlay").textContent = paused ? "▶" : "❚❚";
-    if (!paused) requestAnimationFrame(skipLoop);
+    if (!paused) requestAnimationFrame(skipLoop); else restoreVolume();
     $("edPlay").setAttribute("aria-label", paused ? "Грати" : "Пауза");
     if (paused) { const n = $("edWords").querySelector(".ed-w.now"); if (n) n.classList.remove("now"); }
   }
@@ -701,6 +706,7 @@ const Editor = (() => {
       return;
     }
     closePop();
+    hidePhraseCard(true);
     $("edTrack").setPointerCapture(e.pointerId);
     const h = e.target.closest(".hd");
     if (h) {
@@ -752,6 +758,57 @@ const Editor = (() => {
     st.drag = null;
     if (which === "start") setBounds(snap("start", c.start_sec), c.end_sec);
     else setBounds(c.start_sec, snap("end", c.end_sec));
+  }
+
+  // ─── Card with the full phrase above the track (for phrases too narrow for their text) ───
+  function phraseRange(el) {
+    const a = Number(el.dataset.a), b = Number(el.dataset.b);
+    let j0 = -1, j1 = -1;
+    st.words.forEach((w, j) => { if (w.start >= a - 0.001 && w.end <= b + 0.001) { if (j0 < 0) j0 = j; j1 = j; } });
+    return [j0, j1];
+  }
+  function showPhraseCard(el) {
+    if (st.scrub || st.drag || st.pop) return;
+    clearTimeout(st.cardHide);
+    if (st.card && st.card.phr === el) return;
+    hidePhraseCard(true);
+    const [j0, j1] = phraseRange(el);
+    if (j0 < 0) return;
+    const c = clip();
+    let inner = "";
+    for (let j = j0; j <= j1; j++) {
+      const w = st.words[j];
+      const wIn = w.start >= c.start_sec - 0.05 && w.start < c.end_sec;
+      inner += `<span class="w${wIn ? "" : " out"}" data-j="${j}">${esc(w.word)}</span> `;
+    }
+    const card = document.createElement("div");
+    card.className = "ed-phrcard";
+    card.innerHTML = `<small>${fmt(st.words[j0].start)} – ${fmt(st.words[j1].end)} · клік по слову</small>${inner}`;
+    $("editor").appendChild(card);
+    const tr = $("edTrack").getBoundingClientRect(), pr = el.getBoundingClientRect();
+    const cw = Math.min(card.offsetWidth, tr.width);
+    card.style.maxWidth = `${Math.min(440, tr.width)}px`;
+    card.style.left = `${Math.max(tr.left, Math.min(pr.left, tr.right - cw))}px`;
+    card.style.top = `${Math.max(4, tr.top - card.offsetHeight - 6)}px`;
+    card.addEventListener("mouseenter", () => clearTimeout(st.cardHide));
+    card.addEventListener("mouseleave", () => hidePhraseCard());
+    card.addEventListener("click", (ev) => {
+      const w = ev.target.closest(".w");
+      if (!w) return;
+      hidePhraseCard(true);
+      openWordMenu(Number(w.dataset.j), ev.clientX, ev.clientY);
+    });
+    st.card = { el: card, phr: el };
+  }
+  function hidePhraseCard(now = false) {
+    clearTimeout(st.cardHide);
+    const go = () => { if (st.card) { st.card.el.remove(); st.card = null; } };
+    if (now) go(); else st.cardHide = setTimeout(go, 160);
+  }
+  function onTrackOver(e) {
+    const el = e.target.closest(".phr");
+    if (el && (el.classList.contains("more") || el.classList.contains("tiny"))) showPhraseCard(el);
+    else if (st.card) hidePhraseCard();
   }
 
   function openWordMenu(j, x, y) {
@@ -886,7 +943,6 @@ const Editor = (() => {
     const bar = $("edPauseBar");
     const show = cuts.length > 0 || st.restored.length > 0;
     bar.hidden = !show;
-    $("edTrackHint").hidden = show;
     if (show) {
       const gap = pauseGap();
       bar.innerHTML = `<span class="res">Прибрано <b>${cuts.length} ${cuts.length === 1 ? "паузу" : cuts.length > 1 && cuts.length < 5 ? "паузи" : "пауз"} · −${fmt1(rm)} с</b></span>
@@ -939,13 +995,42 @@ const Editor = (() => {
   }
 
   /** While playing, jump over the cut pauses, so you hear the clip as it will be. */
+  const FADE = 0.08;
   function skipCuts() {
     const v = video();
     const c = clip();
-    if (!c || v.paused || st.drag || st.scrub) return;
+    if (!c || v.paused || st.drag || st.scrub) { restoreVolume(); return; }
     const t = v.currentTime;
-    const cut = cutsOf(c).find(([a, b]) => t >= a && t < b - 0.03);
-    if (cut) { try { v.currentTime = cut[1]; } catch (_) {} }
+    const cuts = cutsOf(c);
+    const cut = cuts.find(([a, b]) => t >= a && t < b - 0.03);
+    if (cut) {
+      try { v.currentTime = cut[1]; } catch (_) {}
+      v.classList.remove("cutdip"); void v.offsetWidth; v.classList.add("cutdip");
+      st.fadeIn = performance.now();
+      setFade(0);
+      return;
+    }
+    // volume goes down just before a cut and comes back up right after it (≈80 ms each way)
+    const ahead = cuts.find(([a]) => a > t && a - t < FADE);
+    let g = ahead ? (ahead[0] - t) / FADE : 1;
+    if (st.fadeIn != null) {
+      const k = (performance.now() - st.fadeIn) / (FADE * 1000);
+      if (k >= 1) st.fadeIn = null; else g = Math.min(g, k);
+    }
+    setFade(g);
+  }
+  /** Scales the volume the person chose, without losing it. */
+  function setFade(g) {
+    const v = video();
+    if (g >= 1) { restoreVolume(); return; }
+    if (st.userVol == null) st.userVol = v.volume;
+    v.volume = Math.max(0, Math.min(1, st.userVol * g));
+  }
+  function restoreVolume() {
+    if (st.userVol == null) return;
+    video().volume = st.userVol;
+    st.userVol = null;
+    st.fadeIn = null;
   }
   function skipLoop() { skipCuts(); if (!video().paused) requestAnimationFrame(skipLoop); }
 
@@ -1046,6 +1131,7 @@ const Editor = (() => {
     v.removeAttribute("src");
     v.load();
     closePop();
+    hidePhraseCard(true);
     closeStatusMenu();
     $("editor").hidden = true;
     document.body.style.overflow = "";
@@ -1157,6 +1243,8 @@ const Editor = (() => {
     T.addEventListener("pointermove", onTrackMove);
     T.addEventListener("pointerup", onTrackUp);
     T.addEventListener("pointercancel", onTrackUp);
+    T.addEventListener("mouseover", onTrackOver);
+    T.addEventListener("mouseleave", () => hidePhraseCard());
     $("edOv").addEventListener("click", (e) => {
       const hit = e.target.closest("[data-i]");
       if (hit) { select(Number(hit.dataset.i)); return; }
