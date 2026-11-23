@@ -103,13 +103,22 @@
 .ed-track { position: relative; height: 50px; border-radius: 10px; background: var(--ed-sunk); touch-action: none; user-select: none; cursor: grab; overflow: hidden; }
 .ed-track.scrubbing { cursor: grabbing; }
 .ed-track.dragging, .ed-track.dragging * { cursor: ew-resize; }
-.ed-track .w { position: absolute; top: 44px; height: 18px; padding: 0 4px; border-radius: 4px; font-size: 10.5px; line-height: 16px; white-space: nowrap;
-  background: var(--ed-panel); color: var(--ed-muted); border: 1px solid var(--ed-line2); cursor: pointer; z-index: 1; }
-.ed-track .w:hover { border-color: var(--ed-accent); color: var(--ed-fg); }
-.ed-track .w.in { color: var(--ed-fg); border-color: var(--ed-line); }
-.ed-track .wt { position: absolute; top: 46px; width: 1px; height: 14px; background: var(--ed-line); }
-/* Sound wave in the top part of the track */
-.ed-track canvas.wave { position: absolute; left: 0; top: 4px; width: 100%; height: 36px; pointer-events: none; }
+/* Phrases (design B): big readable blocks laid out on time, every word inside is a click target */
+.ed-track .phr { position: absolute; top: 6px; height: 56px; box-sizing: border-box; padding: 4px 5px; border-radius: 7px; overflow: hidden;
+  background: var(--ed-panel); border: 1px solid var(--ed-line2); color: var(--ed-faint); font: 500 12.5px/1.2 var(--ed-sans); z-index: 1;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; word-break: break-word; }
+.ed-track .phr + .phr { margin-left: 2px; }
+.ed-track .phr.in { color: var(--ed-fg); background: var(--ed-accent-soft); border-color: color-mix(in srgb, var(--ed-accent) 40%, transparent); }
+.ed-track .phr.now { background: var(--ed-accent); color: var(--ed-accent-ink); border-color: var(--ed-accent); font-weight: 700; }
+.ed-track .phr.tiny { padding: 0; }
+/* a phrase too narrow for its text opens up under the mouse: the whole phrase, every word clickable */
+.ed-track:not(.scrubbing):not(.dragging) .phr:not(.tiny):hover { width: max-content !important; min-width: var(--w); max-width: min(440px, 60%); height: auto; max-height: 88px;
+  -webkit-line-clamp: 4; z-index: 7; box-shadow: 0 6px 18px rgba(0, 0, 0, .45); }
+.ed-track .phr .w { cursor: pointer; border-radius: 4px; padding: 0 1px; margin: 0 -1px; }
+.ed-track .phr .w:hover { background: var(--ed-fg); color: var(--ed-bg); }
+.ed-track .phr.now .w:hover { background: var(--ed-accent-ink); color: var(--ed-accent); }
+/* Thin sound wave under the phrases */
+.ed-track canvas.wave { position: absolute; left: 0; top: 66px; width: 100%; height: 30px; pointer-events: none; }
 /* Cut pauses: hatched red bands, click restores one; a restored one stays as a dashed outline */
 .ed-track .cut { position: absolute; top: 0; bottom: 0; min-width: 3px; z-index: 3; cursor: pointer; border-radius: 3px;
   background: repeating-linear-gradient(135deg, rgba(220, 70, 60, .55) 0 4px, rgba(220, 70, 60, .18) 4px 8px); border: 1px solid rgba(220, 70, 60, .8); }
@@ -379,7 +388,7 @@
 .ed-pen { color: var(--ed-faint); font-size: 14px; }
 .ed-hscore { margin-left: auto; font-size: 12.5px; color: var(--ed-muted); white-space: nowrap; }
 .ed-hscore b { font-size: 14px; color: var(--ed-accent-text); background: var(--ed-accent-soft); padding: 2px 9px; border-radius: 99px; margin-left: 6px; }
-.ed-why { color: var(--ed-muted); font-size: 14px; margin-top: -4px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ed-why { color: var(--ed-muted); font-size: 14px; margin-top: -4px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .ed-why b { color: var(--ed-accent-text); font-weight: 700; }
 .ed-why:empty { display: none; }
 .ed-stage .ed-screen { flex: 1 1 auto; min-height: 140px; width: 100%; aspect-ratio: auto; display: grid; place-items: center; }
@@ -388,7 +397,7 @@
 .ed-trim-info { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--ed-muted); }
 .ed-trim-info b { color: var(--ed-fg); font: 600 13.5px var(--ed-mono); margin-left: 4px; }
 .ed-len { color: var(--ed-accent-text); background: var(--ed-accent-soft); font-weight: 800; padding: 1px 10px; border-radius: 99px; }
-.ed-track { height: 66px; }
+.ed-track { height: 100px; }
 .ed-trim .ed-small { font-size: 12px; color: var(--ed-faint); }
 .ed-play { width: 46px; height: 46px; border-radius: 50%; border: 0; background: var(--ed-accent-grad); color: var(--ed-accent-ink); font-size: 16px; cursor: pointer; flex: none; display: grid; place-items: center; }
 .ed-play:hover { filter: brightness(1.06); }

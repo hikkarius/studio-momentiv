@@ -243,6 +243,18 @@ const Editor = (() => {
     return { lo: Math.max(0, c.start_sec - pad), hi: Math.min(st.project.duration || c.end_sec + pad, c.end_sec + pad) };
   }
 
+  /** Splits the words into phrases at pauses (and keeps a phrase under ~5 s), as [first, last] word indexes. */
+  function phrasesOf(words) {
+    const out = [];
+    let j0 = 0;
+    for (let j = 1; j <= words.length; j++) {
+      const w = words[j], prev = words[j - 1];
+      const brk = !w || w.start - prev.end > 0.35 || w.start - words[j0].start > 5 || /[.!?…]$/.test(prev.word.trim());
+      if (brk) { out.push([j0, j - 1]); j0 = j; }
+    }
+    return words.length ? out : [];
+  }
+
   function renderTrack() {
     const c = clip();
     if (!c) return;
@@ -252,15 +264,23 @@ const Editor = (() => {
     const W = T.clientWidth || 600;
     const p = (t) => ((t - lo) / (hi - lo)) * 100;
     let h = `<canvas class="wave" aria-hidden="true"></canvas>`;
-    // words in one row, left to right; a word with no room left becomes a tick (zoom in to read it)
-    let end = -1e9;
-    st.words.forEach((w, j) => {
-      if (w.start < lo || w.start > hi) return;
-      const x = (p(w.start) / 100) * W;
-      if (x < end + 4) { h += `<span class="wt" style="left:${p(w.start)}%"></span>`; return; }
-      end = x + w.word.length * 7.2 + 12;
-      const inside = w.start >= c.start_sec - 0.05 && w.start < c.end_sec;
-      h += `<span class="w${inside ? " in" : ""}" data-j="${j}" style="left:${p(w.start)}%">${esc(w.word)}</span>`;
+    // the words as phrases (split at pauses), each laid out on time; every word in a phrase is clickable
+    phrasesOf(st.words).forEach(([j0, j1]) => {
+      const a = st.words[j0].start, b = st.words[j1].end;
+      if (b < lo || a > hi) return;
+      const left = p(a), width = Math.max(0.4, p(b) - left);
+      const px = (width / 100) * W;
+      const inside = a < c.end_sec && b > c.start_sec;
+      let inner = "";
+      if (px >= 22) {
+        for (let j = j0; j <= j1; j++) {
+          const w = st.words[j];
+          const wIn = w.start >= c.start_sec - 0.05 && w.start < c.end_sec;
+          inner += `<span class="w${wIn ? " in" : ""}" data-j="${j}">${esc(w.word)}</span> `;
+        }
+      }
+      h += `<div class="phr${inside ? " in" : ""}${px < 22 ? " tiny" : ""}" data-a="${a}" data-b="${b}" style="left:${left}%;width:${width}%;--w:${width}%"
+        title="${fmt(a)} – ${fmt(b)}">${inner}</div>`;
     });
     cutsOf(c).forEach(([a, b], k) => {
       if (b < lo || a > hi) return;
@@ -459,6 +479,8 @@ const Editor = (() => {
     if (mp) { const { lo, hi } = mapRange(); mp.style.left = `${((t - lo) / (hi - lo)) * 100}%`; }
     const ph = $("edPh");
     if (ph) ph.style.left = `${(t / (st.project.duration || 1)) * 100}%`;
+    const T = $("edTrack");
+    if (T) T.querySelectorAll(".phr").forEach((el) => el.classList.toggle("now", t >= Number(el.dataset.a) - 0.05 && t < Number(el.dataset.b) + 0.15));
     const z = $("edZph");
     if (z) {
       const { lo, hi } = st.zoom;

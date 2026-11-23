@@ -343,6 +343,7 @@ def test_word_menu_sets_end(page, studio, project):
             target, t = chips.nth(k), n * 0.5
             break
     assert target is not None
+    target.locator("xpath=..").hover()  # a phrase opens up under the mouse, so every word in it can be clicked
     target.click()
     page.locator("#edPop").wait_for(state="visible")
     page.click("#edPop [data-p='end']")
