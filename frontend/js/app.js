@@ -731,7 +731,7 @@ function openTrimModal(clipIndex) {
     const curTime = trimVideo.currentTime;
     const m = Math.floor(curTime / 60);
     const s = curTime % 60;
-    const curText = `${m.toString().padStart(2, "0")}:${s.toFixed(1).padStart(4, "0")}`;
+    const curText = `${m.toString().padStart(2, "0")}:${s.toFixed(1).padStart(4, "0").replace(".", ",")}`;
     const curEl = document.getElementById("trimCurrentTime");
     if (curEl) curEl.textContent = curText;
 
@@ -770,7 +770,7 @@ function updateTrimDurationSummary() {
   const dur = Math.max(0, end - start);
   const durEl = document.getElementById("trimCalcDuration");
   if (durEl) {
-    durEl.textContent = `${dur.toFixed(1)} сек`;
+    durEl.textContent = `${dur.toFixed(1).replace(".", ",")} сек`;
     durEl.style.color = dur >= 5.0 ? "var(--accent-orange)" : "#EF4444";
   }
 }

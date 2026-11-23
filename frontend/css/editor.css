@@ -633,3 +633,4 @@
 #edOv .c.reserve { opacity: .45; }
 /* the tier badge takes the bottom-left corner, so the «В роботі» tick moves to the top right */
 .ed-th .ed-ok { left: auto; right: 5px; top: 5px; bottom: auto; }
+#editor .ed-silence.none:disabled { cursor: default; opacity: .5; }

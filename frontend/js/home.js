@@ -41,9 +41,15 @@ const Home = (() => {
       case "busy": return "Обробляється…";
       case "failed": return "Клік, щоб спробувати ще раз";
       case "empty": return "Клік, щоб знайти кліпи";
-      case "new": return `<b>${total} кліпів</b> · ще не дивився`;
       case "done": return `<b>${kept} в роботі</b> з ${total} · усі переглянуто`;
-      default: return `<b>${kept} в роботі</b> з ${total} · переглянуто ${reviewed}`;
+      default: {
+        // «Нові» first; weaker clips wait in «Запас» (older projects without the counts fall back to the total)
+        if (p.new_count == null) return `<b>${total} кліпів</b>${kept ? ` · ${kept} в роботі` : ""}`;
+        const parts = [`<b>${p.new_count} ${p.new_count === 1 ? "новий" : "нових"}</b>`];
+        if (kept) parts.push(`${kept} в роботі`);
+        if (p.reserve_count) parts.push(`${p.reserve_count} у запасі`);
+        return parts.join(" · ");
+      }
     }
   }
 

@@ -18,7 +18,7 @@ const Editor = (() => {
   const MIN_LEN = 3;
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
-  const fmt = (s) => { s = Math.max(0, s); const m = Math.floor(s / 60); const x = s - m * 60; return `${m}:${x < 10 ? "0" : ""}${x.toFixed(1)}`; };
+  const fmt = (s) => { s = Math.max(0, s); const m = Math.floor(s / 60); const x = s - m * 60; return `${m}:${x < 10 ? "0" : ""}${x.toFixed(1).replace(".", ",")}`; }; // Ukrainian decimal comma
   const fmtS = (s) => { s = Math.round(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
   const esc = (s) => (typeof escapeHtml === "function" ? escapeHtml(String(s ?? "")) : String(s ?? ""));
   const pid = () => encodeURIComponent(st.project.id);
@@ -1006,7 +1006,12 @@ const Editor = (() => {
     bar.hidden = false;
     const pv = st.pausePreview && st.pausePreview.key === previewKey(c) ? st.pausePreview.tempos : null;
     if (!pv) loadPausePreview(c);
-    bar.innerHTML = `<span>Темп:</span><span class="seg" role="group" aria-label="Темп: наскільки різати паузи">${Object.entries(PAUSE_MODES).map(([k, m]) => {
+    const none = !cut && pv && Object.values(pv).every((r) => !r.count);
+    btn.disabled = !!none;
+    btn.classList.toggle("none", !!none);
+    btn.title = none ? "У цьому кліпі довгих пауз немає" : "Вирізати довгі паузи всередині кліпу (jump cut). Чистий оригінал лишається для скачування";
+    if (none) { bar.innerHTML = '<span class="hint">Довгих пауз немає: кліп і так іде щільно.</span>'; }
+    else bar.innerHTML = `<span>Темп:</span><span class="seg" role="group" aria-label="Темп: наскільки різати паузи">${Object.entries(PAUSE_MODES).map(([k, m]) => {
         const r = pv && pv[k];
         const res = r ? (r.count ? ` · −${fmt1(r.removed_sec)} с` : " · 0 с") : "";
         return `<button type="button" data-m="${k}" aria-pressed="${k === mode}" title="${m.label}: ${m.hint}">${m.label}${res}</button>`;
