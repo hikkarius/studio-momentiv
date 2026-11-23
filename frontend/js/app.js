@@ -503,7 +503,7 @@ function renderMomentsList(clips) {
       <div class="moment-header">
         <div class="moment-pills">
           <span class="moment-index-pill">#${escapeHtml(String(clipIndex))}</span>
-          <span class="score-badge">🔥 ${escapeHtml(String(clip.virality_score || 85))}/100</span>
+          <span class="score-badge">🔥 ${escapeHtml(String(clip.rank_score ?? clip.virality_score ?? 85))}/100</span>
           <span class="info-badge">${escapeHtml(clip.duration_formatted || "")}</span>
         </div>
         <button class="timecode-btn" type="button" title="Клікніть, щоб переглянути цей фрагмент">

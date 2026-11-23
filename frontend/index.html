@@ -557,6 +557,7 @@
             <button type="button" class="ed-shelf" data-f="keep" aria-pressed="false" title="Беру, буду монтувати"><span><i class="ed-sdot" data-s="keep"></i>В роботі</span><b id="edCnt_keep">0</b></button>
             <button type="button" class="ed-shelf" data-f="done" aria-pressed="false" title="Опубліковані: їхні файли прибрано, межі й текст лишились"><span><i class="ed-sdot" data-s="done"></i>Виконані</span><b id="edCnt_done">0</b></button>
             <button type="button" class="ed-shelf" data-f="drop" aria-pressed="false" title="Відкинуті кліпи"><span><i class="ed-sdot" data-s="drop"></i>Не беру</span><b id="edCnt_drop">0</b></button>
+            <button type="button" class="ed-shelf" data-f="reserve" aria-pressed="false" title="Слабші кліпи: ШІ знайшов, але вони гірші за інші"><span><i class="ed-sdot" data-s="reserve"></i>Запас</span><b id="edCnt_reserve">0</b></button>
           </div>
           <div class="ed-stat keep ed-stat-vx"><span>У добірці</span><b id="edCntPick">0</b></div>
         </div>
@@ -817,6 +818,7 @@
       <button type="button" role="menuitemradio" data-s="keep"><i class="ed-sdot" data-s="keep"></i><span><b>В роботі</b><small>беру, буду монтувати</small></span><kbd>Y</kbd></button>
       <button type="button" role="menuitemradio" data-s="done"><i class="ed-sdot" data-s="done"></i><span><b>Виконано</b><small>опублікував, файли прибрати</small></span><kbd>U</kbd></button>
       <button type="button" role="menuitemradio" data-s="drop"><i class="ed-sdot" data-s="drop"></i><span><b>Не беру</b><small>сховати, файли прибрати</small></span><kbd>N</kbd></button>
+      <button type="button" role="menuitem" id="edPromote" hidden><i class="ed-sdot" data-s=""></i><span><b>⬆ Перенести в Нові</b><small>зі слабших у головну полицю</small></span></button>
     </div>
   </section>
 
