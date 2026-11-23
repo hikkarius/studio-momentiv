@@ -150,6 +150,11 @@ def test_settings_key_status_and_sections(page, studio, project, monkeypatch):
     was = config_loader.app_config.gemini.rerank
     page.click("[data-key='gemini.rerank']")
     page.wait_for_function(f"Boolean({str(not was).lower()}) === document.querySelector(\"[data-key='gemini.rerank']\").checked")
+    # the switch flips in the page before the save reaches the server: wait for the server, not the checkbox
+    for _ in range(50):
+        if config_loader.app_config.gemini.rerank is (not was):
+            break
+        page.wait_for_timeout(100)
     assert config_loader.app_config.gemini.rerank is (not was)
     page.click("[data-key='gemini.rerank']")
 
