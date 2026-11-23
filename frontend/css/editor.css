@@ -98,29 +98,66 @@
 .ed-spacer { flex: 1; }
 .ed-decide { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; flex: 1 1 230px; max-width: 420px; }
 
-/* Clip track right under the video: drag to scrub, drag the yellow edges to change the bounds */
+/* Clip track under the video (design B «Текст першим»): phrase cards on time, a thin wave with [ ] brackets, a scrollbar */
 .ed-trim { display: flex; flex-direction: column; gap: 6px; margin-top: -4px; }
-.ed-track { position: relative; height: 50px; border-radius: 10px; background: var(--ed-sunk); touch-action: none; user-select: none; cursor: grab; overflow: hidden; }
+.ed-track { --wt: 90px; position: relative; height: 122px; touch-action: none; user-select: none; cursor: grab; overflow: hidden; }
+.ed-track::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 68px; border-radius: 10px; background: var(--ed-sunk); }
+.ed-track::after { content: ""; position: absolute; left: 0; right: 0; top: var(--wt); height: 30px; border-radius: 8px; background: var(--ed-sunk); }
 .ed-track.scrubbing { cursor: grabbing; }
 .ed-track.dragging, .ed-track.dragging * { cursor: ew-resize; }
-.ed-track .w { position: absolute; top: 44px; height: 18px; padding: 0 4px; border-radius: 4px; font-size: 10.5px; line-height: 16px; white-space: nowrap;
-  background: var(--ed-panel); color: var(--ed-muted); border: 1px solid var(--ed-line2); cursor: pointer; z-index: 1; }
-.ed-track .w:hover { border-color: var(--ed-accent); color: var(--ed-fg); }
-.ed-track .w.in { color: var(--ed-fg); border-color: var(--ed-line); }
-.ed-track .wt { position: absolute; top: 46px; width: 1px; height: 14px; background: var(--ed-line); }
-/* Sound wave in the top part of the track */
-.ed-track canvas.wave { position: absolute; left: 0; top: 4px; width: 100%; height: 36px; pointer-events: none; }
-/* Cut pauses: hatched red bands, click restores one; a restored one stays as a dashed outline */
-.ed-track .cut { position: absolute; top: 0; bottom: 0; min-width: 3px; z-index: 3; cursor: pointer; border-radius: 3px;
-  background: repeating-linear-gradient(135deg, rgba(220, 70, 60, .55) 0 4px, rgba(220, 70, 60, .18) 4px 8px); border: 1px solid rgba(220, 70, 60, .8); }
-.ed-track .cut:hover { background: repeating-linear-gradient(135deg, rgba(220, 70, 60, .75) 0 4px, rgba(220, 70, 60, .3) 4px 8px); }
-.ed-track .cut.ghost { background: none; border: 1px dashed rgba(220, 70, 60, .7); }
-.ed-track .cut.ghost:hover { background: rgba(220, 70, 60, .1); }
-/* Time ruler above the track */
-.ed-ruler { position: relative; height: 20px; user-select: none; pointer-events: none; overflow: hidden; }
-.ed-ruler i { position: absolute; bottom: 0; width: 1px; height: 4px; background: var(--ed-line); }
-.ed-ruler i.big { height: 7px; background: var(--ed-faint); }
-.ed-ruler b { position: absolute; bottom: 8px; line-height: 12px; transform: translateX(-50%); font: 500 10.5px var(--ed-mono); color: var(--ed-faint); white-space: nowrap; }
+/* Phrase cards: two lines of text and the start time under it; the box never changes on hover */
+.ed-track .phr { position: absolute; top: 6px; height: 56px; box-sizing: border-box; padding: 5px 8px; border-radius: 9px; overflow: hidden; z-index: 1;
+  background: var(--ed-panel); border: 1px solid var(--ed-line); color: var(--ed-fg); opacity: .55; font: 500 13px/1.22 var(--ed-sans); cursor: default; }
+.ed-track .phr .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: normal; word-break: keep-all; }
+.ed-track .phr.notime .tx { -webkit-line-clamp: 3; }
+.ed-track .phr small { position: absolute; left: 8px; bottom: 3px; font: 500 10.5px var(--ed-mono); opacity: .65; }
+.ed-track .phr.in { opacity: 1; background: var(--ed-accent-soft); border-color: color-mix(in srgb, var(--ed-accent) 45%, transparent); }
+.ed-track .phr.now { opacity: 1; background: var(--ed-accent); color: var(--ed-accent-ink); border-color: var(--ed-accent); font-weight: 700; }
+.ed-track .phr.tiny { padding: 0; }
+.ed-track .phr .w { cursor: pointer; border-radius: 4px; }
+.ed-track .phr .w:hover { background: color-mix(in srgb, var(--ed-fg) 18%, transparent); }
+.ed-track .phr.now .w:hover { background: color-mix(in srgb, var(--ed-accent-ink) 20%, transparent); }
+.ed-track .phr.more, .ed-track .phr.tiny { cursor: pointer; }
+/* Floating card above the track with the full text of a phrase that does not fit; every word is clickable */
+.ed-phrcard { position: fixed; z-index: 60; max-width: 440px; box-sizing: border-box; padding: 8px 11px; border-radius: 10px;
+  background: var(--ed-panel); border: 1px solid var(--ed-line); box-shadow: var(--ed-pop-shadow, 0 8px 24px rgba(0,0,0,.45));
+  color: var(--ed-fg); font: 500 14px/1.35 var(--ed-sans); }
+.ed-phrcard small { display: block; font: 500 11px var(--ed-mono); color: var(--ed-faint); margin-bottom: 3px; }
+.ed-phrcard .w { cursor: pointer; border-radius: 4px; padding: 0 2px; margin: 0 -1px; }
+.ed-phrcard .w.out { color: var(--ed-faint); }
+.ed-phrcard .w:hover { background: var(--ed-accent); color: var(--ed-accent-ink); }
+/* Thin wave: the clip is gold, the rest grey */
+.ed-track canvas.wave { position: absolute; left: 0; top: var(--wt); width: 100%; height: 30px; pointer-events: none; z-index: 1; }
+/* A cut pause: a small hatched square with ✂ between the phrases (click restores it) and a faint band on the wave */
+.ed-track .cut { position: absolute; top: 20px; height: 28px; min-width: 18px; box-sizing: border-box; z-index: 3; cursor: pointer; border-radius: 7px;
+  display: grid; place-items: center; font-size: 11px; color: #f3b1b1; border: 1px solid rgba(224, 90, 90, .8);
+  background: repeating-linear-gradient(135deg, rgba(224, 90, 90, .5) 0 3px, rgba(224, 90, 90, .12) 3px 7px); }
+.ed-track .cut:hover { background: repeating-linear-gradient(135deg, rgba(224, 90, 90, .75) 0 3px, rgba(224, 90, 90, .3) 3px 7px); }
+.ed-track .cut.ghost { background: var(--ed-sunk); border: 1px dashed rgba(224, 90, 90, .7); color: var(--ed-faint); }
+.ed-track .cutw { position: absolute; top: var(--wt); height: 30px; z-index: 2; pointer-events: none;
+  background: repeating-linear-gradient(135deg, rgba(224, 90, 90, .35) 0 3px, transparent 3px 7px); }
+/* Time ruler: not shown in design B, the phrase cards carry the time */
+.ed-ruler { display: none; }
+/* Scrollbar under the wave: the dark-gold part is the clip, the outlined frame is what the track shows */
+.ed-map { position: relative; height: 14px; margin-top: 0; touch-action: none; user-select: none; cursor: pointer; }
+.ed-map::before { content: ""; position: absolute; left: 0; right: 0; top: 5px; height: 4px; border-radius: 99px; background: var(--ed-sunk); }
+.ed-map canvas { display: none; }
+.ed-map .clip { position: absolute; top: 5px; height: 4px; border-radius: 99px; background: color-mix(in srgb, var(--ed-accent) 32%, var(--ed-sunk)); pointer-events: none; }
+.ed-map .win { position: absolute; top: 3px; bottom: 3px; min-width: 14px; box-sizing: border-box; border: 1.5px solid var(--ed-fg); border-radius: 99px; cursor: grab;
+  background: color-mix(in srgb, var(--ed-fg) 22%, transparent); }
+.ed-map .win::before, .ed-map .win::after { content: ""; position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+.ed-map .win::before { left: -2px; } .ed-map .win::after { right: -2px; }
+.ed-map .ph { position: absolute; top: 3px; bottom: 3px; width: 2px; margin-left: -1px; background: var(--ed-fg); pointer-events: none; opacity: .7; }
+/* Hint under the track */
+.ed-navrow { display: flex; align-items: center; gap: 12px; }
+.ed-navrow .ed-small { flex: 1; min-width: 0; }
+.ed-navrow kbd { font: 700 10.5px var(--ed-mono); border: 1px solid var(--ed-line); border-bottom-width: 2px; border-radius: 5px; padding: 0 4px; color: var(--ed-muted); background: var(--ed-panel2); }
+/* Zoom: one segmented group [− | + | ⤢] at the right of the top row */
+.ed-zoom { display: inline-flex; border: 1px solid var(--ed-line); border-radius: 9px; overflow: hidden; justify-self: end; }
+.ed-zoom button { min-width: 34px; height: 30px; border: 0; border-right: 1px solid var(--ed-line); background: var(--ed-panel2); color: var(--ed-muted); font: 700 15px var(--ed-sans); cursor: pointer; display: grid; place-items: center; padding: 0 8px; }
+.ed-zoom button:last-of-type { border-right: 0; }
+.ed-zoom button:hover:not(:disabled) { color: var(--ed-fg); background: var(--ed-accent-soft); }
+.ed-zoom button:disabled { opacity: .45; cursor: default; }
 /* Bar under the track after pauses were cut */
 .ed-pausebar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--ed-muted); }
 .ed-pausebar .res b { color: #d9584d; font-weight: 700; }
@@ -131,15 +168,16 @@
 .ed-pausebar .hint { color: var(--ed-faint); }
 .ed-pausebar .link { margin-left: auto; border: 0; background: none; color: var(--ed-accent-text); font: 600 12.5px var(--ed-sans); cursor: pointer; padding: 2px 4px; }
 .ed-pausebar .link:hover { text-decoration: underline; }
-.ed-track .shade { position: absolute; top: 0; bottom: 0; background: var(--ed-bg); opacity: .55; pointer-events: none; z-index: 2; }
-.ed-track .rg { position: absolute; top: 0; bottom: 0; border-top: 2px solid var(--ed-accent); border-bottom: 2px solid var(--ed-accent); pointer-events: none; z-index: 2; }
-/* The bounds are drawn as brackets: [ at the start, ] at the end */
-.ed-track .hd { --g: linear-gradient(var(--ed-accent), var(--ed-accent)); }
-.ed-track .hd { position: absolute; top: 0; bottom: 0; width: 18px; cursor: ew-resize; z-index: 4; }
-.ed-track .hd[data-h="start"] { margin-left: -6px; background: var(--g) left / 7px 100% no-repeat, var(--g) left top / 18px 5px no-repeat, var(--g) left bottom / 18px 5px no-repeat; border-radius: 4px 0 0 4px; }
-.ed-track .hd[data-h="end"] { margin-left: -12px; background: var(--g) right / 7px 100% no-repeat, var(--g) right top / 18px 5px no-repeat, var(--g) right bottom / 18px 5px no-repeat; border-radius: 0 4px 4px 0; }
+.ed-track .shade { position: absolute; top: var(--wt); height: 30px; background: var(--ed-bg); opacity: .45; pointer-events: none; z-index: 2; }
+/* The bounds: [ and ] brackets on the wave, with the time in a gold label */
+.ed-track .hd { position: absolute; top: calc(var(--wt) - 2px); height: 34px; width: 14px; box-sizing: border-box; cursor: ew-resize; z-index: 4; border: 3px solid var(--ed-accent); }
+.ed-track .hd[data-h="start"] { margin-left: -2px; border-right: 0; border-radius: 8px 0 0 8px; }
+.ed-track .hd[data-h="end"] { margin-left: -12px; border-left: 0; border-radius: 0 8px 8px 0; }
+.ed-track .hd em { position: absolute; top: -21px; font: 700 11px var(--ed-mono); font-style: normal; color: var(--ed-accent-ink); background: var(--ed-accent);
+  padding: 1px 6px; border-radius: 5px; white-space: nowrap; cursor: ew-resize; }
+.ed-track .hd[data-h="start"] em { left: -3px; } .ed-track .hd[data-h="end"] em { right: -3px; }
 .ed-track .hd:hover { filter: brightness(1.1); }
-.ed-track .zph { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--ed-fg); z-index: 5; pointer-events: none; }
+.ed-track .zph { position: absolute; top: calc(var(--wt) - 4px); bottom: 0; width: 2px; margin-left: -1px; background: var(--ed-fg); z-index: 5; pointer-events: none; }
 .ed-track .zph::before { content: ""; position: absolute; top: 0; left: -5px; border: 6px solid transparent; border-top-color: var(--ed-fg); border-bottom: 0; }
 .ed-track.scrubbing .zph { width: 3px; }
 .ed-pop { position: fixed; z-index: 70; background: var(--ed-panel); border: 1px solid var(--ed-line); border-radius: 10px; box-shadow: var(--ed-pop-shadow);
@@ -358,16 +396,16 @@
 .ed-pen { color: var(--ed-faint); font-size: 14px; }
 .ed-hscore { margin-left: auto; font-size: 12.5px; color: var(--ed-muted); white-space: nowrap; }
 .ed-hscore b { font-size: 14px; color: var(--ed-accent-text); background: var(--ed-accent-soft); padding: 2px 9px; border-radius: 99px; margin-left: 6px; }
-.ed-why { color: var(--ed-muted); font-size: 14px; margin-top: -4px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ed-why { color: var(--ed-muted); font-size: 14px; margin-top: -4px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .ed-why b { color: var(--ed-accent-text); font-weight: 700; }
 .ed-why:empty { display: none; }
 .ed-stage .ed-screen { flex: 1 1 auto; min-height: 140px; width: 100%; aspect-ratio: auto; display: grid; place-items: center; }
 .ed-stage .ed-screen video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .ed-trim { margin-top: 0; gap: 5px; }
-.ed-trim-info { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--ed-muted); }
+.ed-trim-info { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; font-size: 13px; color: var(--ed-muted); }
+.ed-trim-info .ed-len { justify-self: start; }
 .ed-trim-info b { color: var(--ed-fg); font: 600 13.5px var(--ed-mono); margin-left: 4px; }
-.ed-len { color: var(--ed-accent-text); background: var(--ed-accent-soft); font-weight: 800; padding: 1px 10px; border-radius: 99px; }
-.ed-track { height: 66px; }
+.ed-len { color: var(--ed-accent-text); background: var(--ed-accent-soft); font: 800 13px var(--ed-mono); padding: 5px 12px; border-radius: 99px; white-space: nowrap; }
 .ed-trim .ed-small { font-size: 12px; color: var(--ed-faint); }
 .ed-play { width: 46px; height: 46px; border-radius: 50%; border: 0; background: var(--ed-accent-grad); color: var(--ed-accent-ink); font-size: 16px; cursor: pointer; flex: none; display: grid; place-items: center; }
 .ed-play:hover { filter: brightness(1.06); }
@@ -586,13 +624,28 @@
 .ed-ov .c.done { background: var(--ed-done); } .ed-ov .c.done .lab { color: #fff; }
 .ed-ov .c.keep { background: var(--ed-accent); } .ed-ov .c.keep .lab { color: var(--ed-accent-ink); }
 /* «Підрізати тишу» next to the clip length */
-.ed-silence { padding: 3px 11px; border-radius: 8px; border: 1px solid var(--ed-line); background: var(--ed-panel2); color: var(--ed-fg); font: 600 12.5px var(--ed-sans); cursor: pointer; white-space: nowrap; }
-.ed-silence:hover { border-color: var(--ed-accent); }
-.ed-silence:disabled { opacity: .5; cursor: progress; }
-.ed-silence.on { border-color: rgba(220, 70, 60, .8); color: #d9584d; }
+/* «Прибрати паузи»: a clear call to action (soft accent pill), solid accent once the pauses are cut */
+#editor .ed-silence { display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; border-radius: 999px; border: 1.5px solid var(--ed-accent);
+  background: var(--ed-accent-soft); color: var(--ed-accent-text); font: 700 13.5px var(--ed-sans); cursor: pointer; white-space: nowrap;
+  transition: background .15s, color .15s, transform .1s; }
+#editor .ed-silence:hover { background: var(--ed-accent); color: var(--ed-accent-ink); }
+#editor .ed-silence:active { transform: scale(.97); }
+#editor .ed-silence:disabled { opacity: .6; cursor: progress; }
+#editor .ed-silence.on { background: var(--ed-accent); color: var(--ed-accent-ink); }
+#editor .ed-silence.on:hover { filter: brightness(1.08); }
 .ed-rawdl { width: 100%; justify-content: center; font-size: 13px; }
 /* toast with «↶ Повернути» */
 .ed-toast.act { pointer-events: auto; display: flex; align-items: center; gap: 12px; }
 .ed-toast-undo { border: 0; background: none; color: inherit; font: 800 14px var(--ed-sans); text-decoration: underline; cursor: pointer; padding: 0; }
 @media (max-width: 1439px) { .ed-shelf { min-width: 0; padding: 6px 11px; } }
 .ed-decide .ed-gonext { padding: 8px 14px; border-radius: 99px; font-size: 13.5px; }
+
+/* «Прибрати паузи»: gold outlined pill in the middle of the row; filled once pauses are cut */
+#editor .ed-silence { height: 36px; padding: 0 22px; font-size: 14.5px; font-weight: 800; white-space: nowrap; border-radius: 99px;
+  background: var(--ed-accent-soft); color: var(--ed-accent-text); border: 1.5px solid var(--ed-accent); box-shadow: none; }
+#editor .ed-silence:hover { background: color-mix(in srgb, var(--ed-accent) 30%, var(--ed-accent-soft)); color: var(--ed-accent-text); filter: none; }
+#editor .ed-silence.on { background: var(--ed-accent); color: var(--ed-accent-ink); border-color: var(--ed-accent); }
+#editor .ed-silence.on:hover { filter: brightness(1.08); background: var(--ed-accent); color: var(--ed-accent-ink); }
+/* Preview jumps over a cut pause with a short dip, like the cross-fade in the downloaded file */
+.ed-screen video.cutdip { animation: ed-cutdip .12s ease; }
+@keyframes ed-cutdip { 0% { opacity: 1; } 45% { opacity: .45; } 100% { opacity: 1; } }

@@ -13,7 +13,7 @@ const Editor = (() => {
   const st = {
     project: null, clips: [], cur: -1, filter: "new", anchor: 0, tab: "text", sort: "score", mode: "table",
     words: [], wordsFor: null, stopAt: null, backToStart: false, saveTimer: null,
-    zoom: { lo: 0, hi: 1 }, zoomManual: false, levels: null, restored: [], drag: null, scrub: null, pop: null,
+    zoom: { lo: 0, hi: 1 }, zoomManual: false, levels: null, restored: [], drag: null, scrub: null, mapDrag: null, pop: null,
   };
   const MIN_LEN = 3;
 
@@ -237,48 +237,190 @@ const Editor = (() => {
   }
 
   // ─── Trim track ────────────────────────────────────────────────────────────
+  /** The track never goes further than this from the clip: no endless grey (dragging a yellow edge moves it along). */
+  const ROOM = 10;
   function computeZoom() {
     const c = clip();
-    const pad = Math.max(4, len(c) * 0.25);
-    return { lo: Math.max(0, c.start_sec - pad), hi: Math.min(st.project.duration || c.end_sec + pad, c.end_sec + pad) };
+    return { lo: Math.max(0, c.start_sec - ROOM), hi: Math.min(st.project.duration || c.end_sec + ROOM, c.end_sec + ROOM) };
+  }
+  /** What the track shows when a clip opens (and on ⤢): the clip with a little room, so the scrollbar shows there is more. */
+  function defaultView() {
+    const c = clip(), R = computeZoom();
+    const pad = Math.min(ROOM, Math.max(4, len(c) * 0.25));
+    return { lo: Math.max(R.lo, c.start_sec - pad), hi: Math.min(R.hi, c.end_sec + pad) };
+  }
+
+  /** Splits the words into phrases at pauses and sentence ends (a phrase stays under ~6 s, a short sentence joins the next), as [first, last] word indexes. */
+  function phrasesOf(words) {
+    const out = [];
+    let j0 = 0;
+    for (let j = 1; j <= words.length; j++) {
+      const w = words[j], prev = words[j - 1];
+      const brk = !w || w.start - prev.end > 0.5 || w.start - words[j0].start > 6
+        || (/[.!?…]$/.test(prev.word.trim()) && prev.end - words[j0].start > 1.5);
+      if (brk) { out.push([j0, j - 1]); j0 = j; }
+    }
+    return words.length ? out : [];
   }
 
   function renderTrack() {
     const c = clip();
     if (!c) return;
-    if (!st.drag && !st.zoomManual) st.zoom = computeZoom();
+    if (!st.drag && !st.zoomManual) st.zoom = defaultView();
     const { lo, hi } = st.zoom;
     const T = $("edTrack");
     const W = T.clientWidth || 600;
     const p = (t) => ((t - lo) / (hi - lo)) * 100;
     let h = `<canvas class="wave" aria-hidden="true"></canvas>`;
-    // words in one row, left to right; a word with no room left becomes a tick (zoom in to read it)
-    let end = -1e9;
-    st.words.forEach((w, j) => {
-      if (w.start < lo || w.start > hi) return;
-      const x = (p(w.start) / 100) * W;
-      if (x < end + 4) { h += `<span class="wt" style="left:${p(w.start)}%"></span>`; return; }
-      end = x + w.word.length * 7.2 + 12;
-      const inside = w.start >= c.start_sec - 0.05 && w.start < c.end_sec;
-      h += `<span class="w${inside ? " in" : ""}" data-j="${j}" style="left:${p(w.start)}%">${esc(w.word)}</span>`;
+    // phrase cards (split at pauses), each laid out on time: the text, then its start time; every word is clickable
+    phrasesOf(st.words).forEach(([j0, j1]) => {
+      const a = st.words[j0].start, b = st.words[j1].end;
+      if (b < lo || a > hi) return;
+      const left = p(a), width = Math.max(0.4, p(b) - left);
+      const px = (width / 100) * W;
+      const inside = a < c.end_sec && b > c.start_sec;
+      let inner = "";
+      if (px >= 40) {
+        for (let j = j0; j <= j1; j++) inner += `<span class="w" data-j="${j}">${esc(st.words[j].word)}</span> `;
+        inner = `<div class="tx">${inner}</div>` + (px >= 56 ? `<small>${fmt(a)}</small>` : "");
+      }
+      h += `<div class="phr${inside ? " in" : ""}${px < 40 ? " tiny" : px < 56 ? " notime" : ""}" data-a="${a}" data-b="${b}"
+        style="left:${left}%;width:calc(${width}% - 3px)" title="${fmt(a)} – ${fmt(b)}">${inner}</div>`;
     });
+    // a cut pause: a small square with ✂ between the phrases, and a hatched band on the wave
+    const gapMark = (a, b, cls, data, title) => {
+      const mid = (p(a) + p(b)) / 2, wpx = Math.max(18, ((p(b) - p(a)) / 100) * W - 4);
+      return `<div class="cut${cls}" ${data} style="left:calc(${mid}% - ${wpx / 2}px);width:${wpx}px" title="${title}">✂</div>`
+        + `<div class="cutw" style="left:${p(a)}%;width:${p(b) - p(a)}%"></div>`;
+    };
     cutsOf(c).forEach(([a, b], k) => {
       if (b < lo || a > hi) return;
-      h += `<div class="cut" data-k="${k}" style="left:${p(a)}%;width:${p(b) - p(a)}%" title="Пауза ${fmt1(b - a + 0.2)} с вирізана. Клік: повернути"></div>`;
+      h += gapMark(a, b, "", `data-k="${k}"`, `Пауза ${fmt1(b - a + 0.2)} с вирізана. Клік: повернути`);
     });
     st.restored.forEach(([a, b], k) => {
       if (b < lo || a > hi || a < c.start_sec || b > c.end_sec) return;
-      h += `<div class="cut ghost" data-r="${k}" style="left:${p(a)}%;width:${p(b) - p(a)}%" title="Пауза повернута. Клік: вирізати знову"></div>`;
+      h += gapMark(a, b, " ghost", `data-r="${k}"`, "Пауза повернута. Клік: вирізати знову").replace('<div class="cutw"', '<div class="cutw" hidden');
     });
     h += `<div class="shade" style="left:0;width:${p(c.start_sec)}%"></div><div class="shade" style="left:${p(c.end_sec)}%;right:0"></div>`;
-    h += `<div class="rg" style="left:${p(c.start_sec)}%;width:${p(c.end_sec) - p(c.start_sec)}%"></div>`;
-    h += `<div class="hd" data-h="start" style="left:${p(c.start_sec)}%" title="Тягни: початок кліпу"></div>`;
-    h += `<div class="hd" data-h="end" style="left:${p(c.end_sec)}%" title="Тягни: кінець кліпу"></div>`;
+    h += `<div class="hd" data-h="start" style="left:${p(c.start_sec)}%" title="Тягни: початок кліпу"><em>${fmt(c.start_sec)}</em></div>`;
+    h += `<div class="hd" data-h="end" style="left:${p(c.end_sec)}%" title="Тягни: кінець кліпу"><em>${fmt(c.end_sec)}</em></div>`;
     h += `<div class="zph" id="edZph"></div>`;
+    hidePhraseCard(true);
     T.innerHTML = h;
+    // a phrase whose text does not fit gets the full text in a card above the track on hover
+    T.querySelectorAll(".phr .tx").forEach((el) => {
+      if (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) el.parentElement.classList.add("more");
+    });
+    renderMap();
     drawWave();
     renderRuler();
     placePlayhead(video().currentTime || 0);
+  }
+
+  // ─── Moving around the track: wheel scrolls, Ctrl+wheel and − + zoom, the map above shows where you are ───
+  const MIN_SPAN = 3;
+  /** What the map above the track shows: the whole clip with some room around it (and the view, if it is wider). */
+  function mapRange() {
+    const d = computeZoom();
+    return { lo: Math.min(d.lo, st.zoom.lo), hi: Math.max(d.hi, st.zoom.hi) };  // wider only while an edge is dragged out
+  }
+  function setZoom(lo, span) {
+    const d = computeZoom();
+    span = Math.max(MIN_SPAN, Math.min(d.hi - d.lo, span));
+    lo = Math.max(d.lo, Math.min(d.hi - span, lo));
+    st.zoom = { lo, hi: lo + span };
+    const v = defaultView();
+    st.zoomManual = Math.abs(lo - v.lo) > 0.01 || Math.abs(lo + span - v.hi) > 0.01;
+    renderTrack();
+  }
+  function resetZoom() { st.zoomManual = false; renderTrack(); }
+  /** Zoom keeps the white playhead in place (or the middle, when the playhead is out of view). */
+  function zoomBy(f) {
+    const { lo, hi } = st.zoom;
+    const t = video().currentTime || 0;
+    const a = t >= lo && t <= hi ? t : (lo + hi) / 2;
+    const dur = st.project.duration || hi;
+    const span = Math.max(MIN_SPAN, Math.min(dur, (hi - lo) * f));
+    setZoom(a - (a - lo) * (span / (hi - lo)), span);
+  }
+  function panBy(dt) { setZoom(st.zoom.lo + dt, st.zoom.hi - st.zoom.lo); }
+
+  /** Zoom slider: left = the whole clip, right = 3 seconds (log scale, so each step feels the same). */
+  const zoomFull = () => computeZoom().hi - computeZoom().lo;
+  function spanToSlider(span) {
+    const full = zoomFull();
+    if (full <= MIN_SPAN) return 0;
+    return Math.round(100 * Math.max(0, Math.min(1, Math.log(full / span) / Math.log(full / MIN_SPAN))));
+  }
+  function sliderToSpan(v) { const full = zoomFull(); return full * Math.pow(MIN_SPAN / full, v / 100); }
+
+  function renderMap() {
+    const M = $("edMap");
+    const c = clip();
+    if (!M || !c) return;
+    const { lo, hi } = mapRange();
+    const p = (t) => ((t - lo) / (hi - lo)) * 100;
+    if (!M.querySelector("canvas")) M.innerHTML = `<canvas aria-hidden="true"></canvas><div class="clip"></div><div class="win" title="Тягни: рухати доріжку. Тягни краї: масштаб"></div><div class="ph"></div>`;
+    const cl = M.querySelector(".clip"), win = M.querySelector(".win");
+    cl.style.left = `${p(c.start_sec)}%`; cl.style.width = `${p(c.end_sec) - p(c.start_sec)}%`;
+    win.style.left = `${p(st.zoom.lo)}%`; win.style.width = `${p(st.zoom.hi) - p(st.zoom.lo)}%`;
+    M.classList.toggle("zoomed", st.zoomManual);
+    const sl = $("edZoomRange");
+    if (sl) sl.value = spanToSlider(st.zoom.hi - st.zoom.lo);
+    const all = $("edZoomAll");
+    if (all) all.disabled = !st.zoomManual;
+  }
+
+  function onMapDown(e) {
+    if (e.button > 0 || !clip()) return;
+    e.preventDefault();
+    const M = $("edMap");
+    const r = M.getBoundingClientRect();
+    const { lo, hi } = mapRange();
+    const tAt = (x) => lo + ((x - r.left) / r.width) * (hi - lo);
+    const win = M.querySelector(".win").getBoundingClientRect();
+    const edge = 8;
+    let mode = "move";
+    if (Math.abs(e.clientX - win.left) <= edge) mode = "left";
+    else if (Math.abs(e.clientX - win.right) <= edge) mode = "right";
+    else if (e.clientX < win.left || e.clientX > win.right) { // jump: centre the view where you clicked
+      const span = st.zoom.hi - st.zoom.lo;
+      setZoom(tAt(e.clientX) - span / 2, span);
+    }
+    M.setPointerCapture(e.pointerId);
+    st.mapDrag = { mode, x: e.clientX, z: { ...st.zoom }, tAt, range: { lo, hi } };
+  }
+  function onMapMove(e) {
+    const d = st.mapDrag;
+    if (!d) return;
+    const r = $("edMap").getBoundingClientRect();
+    const dt = ((e.clientX - d.x) / r.width) * (d.range.hi - d.range.lo);
+    if (d.mode === "move") setZoom(d.z.lo + dt, d.z.hi - d.z.lo);
+    else if (d.mode === "left") { const nlo = Math.min(d.z.hi - MIN_SPAN, d.z.lo + dt); setZoom(nlo, d.z.hi - nlo); }
+    else { const nhi = Math.max(d.z.lo + MIN_SPAN, d.z.hi + dt); setZoom(d.z.lo, nhi - d.z.lo); }
+  }
+  function onMapUp() { st.mapDrag = null; }
+
+  /** While playing a zoomed-in track, it turns the page when the playhead reaches the right edge. */
+  function followPlayhead(t) {
+    if (!st.zoomManual || st.drag || st.scrub || st.mapDrag || video().paused) return;
+    const { lo, hi } = st.zoom;
+    const span = hi - lo;
+    if (t > hi - span * 0.04 || t < lo) setZoom(t - span * 0.1, span);
+  }
+
+  /** Dragging a yellow edge to the side of a zoomed-in track scrolls it further. */
+  function edgeScroll() {
+    if (!st.drag || !st.drag.dir) { if (st.drag) st.drag.raf = null; return; }
+    const span = st.zoom.hi - st.zoom.lo;
+    const before = st.zoom.lo;
+    st.zoomManual = true;
+    const R = computeZoom();  // follows the dragged edge, so the clip can still grow
+    const lo = Math.max(R.lo, Math.min(R.hi - span, before + st.drag.dir * span * 0.012));
+    st.zoom = { lo, hi: lo + span };
+    if (lo !== before) moveBound(st.drag.lastX);
+    renderTrack();
+    st.drag.raf = requestAnimationFrame(edgeScroll);
   }
 
   /** Time ruler above the track: a tick every second (or more when zoomed out), labels every 5 s or more. */
@@ -291,14 +433,17 @@ const Editor = (() => {
     for (let t = Math.ceil(lo / minor) * minor; t <= hi; t += minor) {
       const big = t % major === 0;
       h += `<i class="${big ? "big" : ""}" style="left:${p(t)}%"></i>`;
-      if (big) h += `<b style="left:${p(t)}%">${fmtS(t)}</b>`;
+      if (big) h += `<b style="left:${p(t)}%"${p(t) < 3 ? ' class="l"' : p(t) > 97 ? ' class="r"' : ""}>${fmtS(t)}</b>`;
     }
     $("edRuler").innerHTML = h;
   }
 
   /** Sound wave behind the words: where people talk, laugh and where it is quiet. */
   function drawWave() {
-    const cv = $("edTrack").querySelector("canvas.wave");
+    drawLevels($("edTrack").querySelector("canvas.wave"), st.zoom.lo, st.zoom.hi);
+    drawLevels($("edMap").querySelector("canvas"), mapRange().lo, mapRange().hi);
+  }
+  function drawLevels(cv, lo, hi) {
     const L = st.levels;
     if (!cv || !L || !L.db.length) return;
     const c = clip();
@@ -312,7 +457,6 @@ const Editor = (() => {
     const colIn = css.getPropertyValue("--ed-accent").trim() || "#d4a944";
     const colOut = css.getPropertyValue("--ed-faint").trim() || "#6b665e";
     const floor = L.floor, top = L.top;
-    const { lo, hi } = st.zoom;
     const step = 3;
     for (let x = 0; x < W; x += step) {
       const t0 = lo + (x / W) * (hi - lo), t1 = lo + ((x + step) / W) * (hi - lo);
@@ -324,7 +468,7 @@ const Editor = (() => {
       const bh = Math.max(1.5, a * (H - 2));
       const tm = (t0 + t1) / 2;
       const inClip = tm >= c.start_sec && tm <= c.end_sec;
-      g.globalAlpha = inClip ? 0.85 : 0.45;
+      g.globalAlpha = inClip ? 0.7 : 0.45;
       g.fillStyle = inClip ? colIn : colOut;
       g.fillRect(x, (H - bh) / 2, step - 1, bh);
     }
@@ -346,8 +490,12 @@ const Editor = (() => {
   }
 
   function placePlayhead(t) {
+    const mp = $("edMap")?.querySelector(".ph");
+    if (mp) { const { lo, hi } = mapRange(); mp.style.left = `${((t - lo) / (hi - lo)) * 100}%`; }
     const ph = $("edPh");
     if (ph) ph.style.left = `${(t / (st.project.duration || 1)) * 100}%`;
+    const T = $("edTrack");
+    if (T) T.querySelectorAll(".phr").forEach((el) => el.classList.toggle("now", t >= Number(el.dataset.a) - 0.05 && t < Number(el.dataset.b) + 0.15));
     const z = $("edZph");
     if (z) {
       const { lo, hi } = st.zoom;
@@ -439,6 +587,7 @@ const Editor = (() => {
       t = clamp(t);
     }
     skipCuts();
+    followPlayhead(t);
     placePlayhead(t);
     renderTc(t);
     if (st.stopAt != null && t >= st.stopAt && !v.paused) {
@@ -461,7 +610,7 @@ const Editor = (() => {
     const paused = video().paused;
     $("edScreen").classList.toggle("paused", paused);
     $("edPlay").textContent = paused ? "▶" : "❚❚";
-    if (!paused) requestAnimationFrame(skipLoop);
+    if (!paused) requestAnimationFrame(skipLoop); else restoreVolume();
     $("edPlay").setAttribute("aria-label", paused ? "Грати" : "Пауза");
     if (paused) { const n = $("edWords").querySelector(".ed-w.now"); if (n) n.classList.remove("now"); }
   }
@@ -567,6 +716,7 @@ const Editor = (() => {
       return;
     }
     closePop();
+    hidePhraseCard(true);
     $("edTrack").setPointerCapture(e.pointerId);
     const h = e.target.closest(".hd");
     if (h) {
@@ -587,8 +737,17 @@ const Editor = (() => {
       return;
     }
     if (!st.drag) return;
+    moveBound(e.clientX);
+    const r = $("edTrack").getBoundingClientRect();
+    const dir = e.clientX > r.right - 24 ? 1 : e.clientX < r.left + 24 ? -1 : 0;
+    st.drag.dir = dir;
+    if (dir && !st.drag.raf) st.drag.raf = requestAnimationFrame(edgeScroll);
+  }
+  function moveBound(x) {
     const c = clip();
-    const t = trackTime(e);
+    if (!st.drag || !c) return;
+    st.drag.lastX = x;
+    const t = trackTime({ clientX: x });
     if (st.drag.which === "start") setBounds(Math.min(t, c.end_sec - MIN_LEN), c.end_sec, { save: false });
     else setBounds(c.start_sec, Math.max(t, c.start_sec + MIN_LEN), { save: false });
     seek(st.drag.which === "start" ? c.start_sec : Math.max(c.start_sec, c.end_sec - 1));
@@ -605,9 +764,61 @@ const Editor = (() => {
     if (!st.drag) return;
     const c = clip();
     const which = st.drag.which;
+    if (st.drag.raf) cancelAnimationFrame(st.drag.raf);
     st.drag = null;
     if (which === "start") setBounds(snap("start", c.start_sec), c.end_sec);
     else setBounds(c.start_sec, snap("end", c.end_sec));
+  }
+
+  // ─── Card with the full phrase above the track (for phrases too narrow for their text) ───
+  function phraseRange(el) {
+    const a = Number(el.dataset.a), b = Number(el.dataset.b);
+    let j0 = -1, j1 = -1;
+    st.words.forEach((w, j) => { if (w.start >= a - 0.001 && w.end <= b + 0.001) { if (j0 < 0) j0 = j; j1 = j; } });
+    return [j0, j1];
+  }
+  function showPhraseCard(el) {
+    if (st.scrub || st.drag || st.pop) return;
+    clearTimeout(st.cardHide);
+    if (st.card && st.card.phr === el) return;
+    hidePhraseCard(true);
+    const [j0, j1] = phraseRange(el);
+    if (j0 < 0) return;
+    const c = clip();
+    let inner = "";
+    for (let j = j0; j <= j1; j++) {
+      const w = st.words[j];
+      const wIn = w.start >= c.start_sec - 0.05 && w.start < c.end_sec;
+      inner += `<span class="w${wIn ? "" : " out"}" data-j="${j}">${esc(w.word)}</span> `;
+    }
+    const card = document.createElement("div");
+    card.className = "ed-phrcard";
+    card.innerHTML = `<small>${fmt(st.words[j0].start)} – ${fmt(st.words[j1].end)} · клік по слову</small>${inner}`;
+    $("editor").appendChild(card);
+    const tr = $("edTrack").getBoundingClientRect(), pr = el.getBoundingClientRect();
+    const cw = Math.min(card.offsetWidth, tr.width);
+    card.style.maxWidth = `${Math.min(440, tr.width)}px`;
+    card.style.left = `${Math.max(tr.left, Math.min(pr.left, tr.right - cw))}px`;
+    card.style.top = `${Math.max(4, tr.top - card.offsetHeight - 6)}px`;
+    card.addEventListener("mouseenter", () => clearTimeout(st.cardHide));
+    card.addEventListener("mouseleave", () => hidePhraseCard());
+    card.addEventListener("click", (ev) => {
+      const w = ev.target.closest(".w");
+      if (!w) return;
+      hidePhraseCard(true);
+      openWordMenu(Number(w.dataset.j), ev.clientX, ev.clientY);
+    });
+    st.card = { el: card, phr: el };
+  }
+  function hidePhraseCard(now = false) {
+    clearTimeout(st.cardHide);
+    const go = () => { if (st.card) { st.card.el.remove(); st.card = null; } };
+    if (now) go(); else st.cardHide = setTimeout(go, 160);
+  }
+  function onTrackOver(e) {
+    const el = e.target.closest(".phr");
+    if (el && (el.classList.contains("more") || el.classList.contains("tiny"))) showPhraseCard(el);
+    else if (st.card) hidePhraseCard();
   }
 
   function openWordMenu(j, x, y) {
@@ -728,7 +939,17 @@ const Editor = (() => {
   /** The clip's cut pauses that still lie inside its bounds. */
   const cutsOf = (c) => (c?.cuts || []).filter(([a, b]) => a >= c.start_sec && b <= c.end_sec && b > a);
   const removedOf = (c) => cutsOf(c).reduce((s, [a, b]) => s + (b - a), 0);
-  function pauseGap() { try { return Number(localStorage.getItem("studio-pause-gap")) || 0.6; } catch (_) { return 0.6; } }
+  /** How hard «Прибрати паузи» cuts: which pauses count and how much silence each one keeps. */
+  const PAUSE_MODES = {
+    calm: { label: "Спокійний", gap: 1.0, keep: 0.3, hint: "лише паузи довші за 1 с, лишає 0,3 с тиші: звучить природно" },
+    normal: { label: "Звичайний", gap: 0.6, keep: 0.2, hint: "паузи довші за 0,6 с, лишає 0,2 с тиші" },
+    dense: { label: "Щільний", gap: 0.4, keep: 0.1, hint: "паузи довші за 0,4 с, лишає 0,1 с тиші: швидкий темп, як у TikTok" },
+  };
+  function pauseMode() {
+    let m = null;
+    try { m = localStorage.getItem("studio-pause-mode"); } catch (_) {}
+    return PAUSE_MODES[m] ? m : "normal";
+  }
 
   function renderPauses() {
     const c = clip();
@@ -738,20 +959,42 @@ const Editor = (() => {
     $("edLen").textContent = cuts.length ? `${Math.round(len(c))} с → ${fmt1(len(c) - rm)} с` : `${Math.round(len(c))} с`;
     const btn = $("edPauses");
     btn.classList.toggle("on", cuts.length > 0);
-    btn.textContent = cuts.length ? "✂ Паузи прибрано" : "✂ Прибрати паузи";
+    btn.textContent = cuts.length ? `✓ Паузи прибрано · −${fmt1(rm)} с` : "✂ Прибрати паузи";
     const bar = $("edPauseBar");
-    const show = cuts.length > 0 || st.restored.length > 0;
-    bar.hidden = !show;
-    $("edTrackHint").hidden = show;
-    if (show) {
-      const gap = pauseGap();
-      bar.innerHTML = `<span class="res">Прибрано <b>${cuts.length} ${cuts.length === 1 ? "паузу" : cuts.length > 1 && cuts.length < 5 ? "паузи" : "пауз"} · −${fmt1(rm)} с</b></span>
-        <span>довші за</span><span class="seg" role="group" aria-label="Поріг паузи">${[0.4, 0.6, 1].map((g) => `<button type="button" data-g="${g}" aria-pressed="${g === gap}">${fmt1(g)} с</button>`).join("")}</span>
-        <span class="hint">· клік по смужці повертає паузу</span><button type="button" class="link" data-a="all">↶ Повернути все</button>`;
-    }
+    const cut = cuts.length > 0 || st.restored.length > 0;
+    const mode = pauseMode();
+    bar.hidden = false;
+    const pv = st.pausePreview && st.pausePreview.key === previewKey(c) ? st.pausePreview.tempos : null;
+    if (!pv) loadPausePreview(c);
+    bar.innerHTML = `<span>Темп:</span><span class="seg" role="group" aria-label="Темп: наскільки різати паузи">${Object.entries(PAUSE_MODES).map(([k, m]) => {
+        const r = pv && pv[k];
+        const res = r ? (r.count ? ` · −${fmt1(r.removed_sec)} с` : " · 0 с") : "";
+        return `<button type="button" data-m="${k}" aria-pressed="${k === mode}" title="${m.label}: ${m.hint}">${m.label}${res}</button>`;
+      }).join("")}</span>`
+      + (cut
+        ? `<span class="res">прибрано <b>${cuts.length} ${cuts.length === 1 ? "паузу" : cuts.length > 1 && cuts.length < 5 ? "паузи" : "пауз"} · −${fmt1(rm)} с</b></span>
+           <span class="hint">· клік по ✂ повертає паузу</span><button type="button" class="link" data-a="all">↶ Повернути все</button>`
+        : `<span class="hint">${PAUSE_MODES[mode].hint}</span>`);
     $("edMp4Lab").textContent = cuts.length ? "⬇ Кліп 16:9 · без пауз" : "⬇ Кліп 16:9 · MP4";
     $("edMp4Info").innerHTML = cuts.length ? `${fmt1(len(c) - rm)} с` : `${Math.round(len(c))} с<span class="q"> · оригінальна якість</span>`;
     $("edMp4Raw").hidden = !cuts.length;
+  }
+
+  /** What each tempo would cut in this clip (one request, nothing saved): shown on the tempo buttons. */
+  const previewKey = (c) => `${pid()}:${c.clip_index}:${c.start_sec}:${c.end_sec}`;
+  async function loadPausePreview(c) {
+    const key = previewKey(c);
+    if (st.pausePreviewLoading === key) return;
+    st.pausePreviewLoading = key;
+    clearTimeout(st.pausePreviewTimer);
+    st.pausePreviewTimer = setTimeout(async () => {
+      try {
+        const d = await api(`/api/projects/${pid()}/clips/${c.clip_index}/pauses/preview`);
+        st.pausePreview = { key, tempos: d.tempos };
+        if (clip() === c && previewKey(c) === key) renderPauses();
+      } catch (_) { /* the buttons just show no numbers */ }
+      finally { if (st.pausePreviewLoading === key) st.pausePreviewLoading = null; }
+    }, 400);
   }
 
   async function savePauses(c, cuts, msg) {
@@ -772,7 +1015,8 @@ const Editor = (() => {
     if (clip() === c) { renderTrack(); renderPauses(); }
   }
 
-  async function findPauses(gap = pauseGap()) {
+  async function findPauses(mode = pauseMode()) {
+    const { gap, keep } = PAUSE_MODES[mode];
     const c = clip();
     if (!c) return;
     const btn = $("edPauses");
@@ -780,7 +1024,7 @@ const Editor = (() => {
     btn.textContent = "Шукаю паузи…";
     try {
       const d = await api(`/api/projects/${pid()}/clips/${c.clip_index}/pauses`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ min_gap: gap }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ min_gap: gap, keep }),
       });
       c.cuts = d.cuts;
       st.restored = [];
@@ -795,13 +1039,42 @@ const Editor = (() => {
   }
 
   /** While playing, jump over the cut pauses, so you hear the clip as it will be. */
+  const FADE = 0.08;
   function skipCuts() {
     const v = video();
     const c = clip();
-    if (!c || v.paused || st.drag || st.scrub) return;
+    if (!c || v.paused || st.drag || st.scrub) { restoreVolume(); return; }
     const t = v.currentTime;
-    const cut = cutsOf(c).find(([a, b]) => t >= a && t < b - 0.03);
-    if (cut) { try { v.currentTime = cut[1]; } catch (_) {} }
+    const cuts = cutsOf(c);
+    const cut = cuts.find(([a, b]) => t >= a && t < b - 0.03);
+    if (cut) {
+      try { v.currentTime = cut[1]; } catch (_) {}
+      v.classList.remove("cutdip"); void v.offsetWidth; v.classList.add("cutdip");
+      st.fadeIn = performance.now();
+      setFade(0);
+      return;
+    }
+    // volume goes down just before a cut and comes back up right after it (≈80 ms each way)
+    const ahead = cuts.find(([a]) => a > t && a - t < FADE);
+    let g = ahead ? (ahead[0] - t) / FADE : 1;
+    if (st.fadeIn != null) {
+      const k = (performance.now() - st.fadeIn) / (FADE * 1000);
+      if (k >= 1) st.fadeIn = null; else g = Math.min(g, k);
+    }
+    setFade(g);
+  }
+  /** Scales the volume the person chose, without losing it. */
+  function setFade(g) {
+    const v = video();
+    if (g >= 1) { restoreVolume(); return; }
+    if (st.userVol == null) st.userVol = v.volume;
+    v.volume = Math.max(0, Math.min(1, st.userVol * g));
+  }
+  function restoreVolume() {
+    if (st.userVol == null) return;
+    video().volume = st.userVol;
+    st.userVol = null;
+    st.fadeIn = null;
   }
   function skipLoop() { skipCuts(); if (!video().paused) requestAnimationFrame(skipLoop); }
 
@@ -902,6 +1175,7 @@ const Editor = (() => {
     v.removeAttribute("src");
     v.load();
     closePop();
+    hidePhraseCard(true);
     closeStatusMenu();
     $("editor").hidden = true;
     document.body.style.overflow = "";
@@ -983,31 +1257,38 @@ const Editor = (() => {
     document.addEventListener("click", (e) => { if (!e.target.closest("#edStatusMenu")) closeStatusMenu(); });
     $("edPauses").addEventListener("click", () => findPauses());
     $("edPauseBar").addEventListener("click", (e) => {
-      const g = e.target.closest("button[data-g]");
-      if (g) { try { localStorage.setItem("studio-pause-gap", g.dataset.g); } catch (_) {} findPauses(Number(g.dataset.g)); return; }
+      const g = e.target.closest("button[data-m]");
+      if (g) { try { localStorage.setItem("studio-pause-mode", g.dataset.m); } catch (_) {} findPauses(g.dataset.m); return; }
       if (e.target.closest("button[data-a='all']")) { const c = clip(); st.restored = []; savePauses(c, [], "Усі паузи повернуто"); }
     });
     $("edMp4Raw").addEventListener("click", () => { toast("Готуємо відео…"); download(`/api/projects/${pid()}/clips/${clip().clip_index}/download?raw=1`); });
-    // mouse wheel over the track: zoom in and out around the pointer
-    $("edTrack").addEventListener("wheel", (e) => {
-      if (!clip() || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+    // mouse wheel over the track scrolls it sideways; Ctrl+wheel (or a trackpad pinch) zooms around the playhead
+    const onWheel = (e) => {
+      if (!clip()) return;
       e.preventDefault();
-      const t = trackTime(e);
-      const { lo, hi } = st.zoom;
-      const f = e.deltaY > 0 ? 1.25 : 0.8;
-      const dur = st.project.duration || hi;
-      const span = Math.max(3, Math.min(dur, (hi - lo) * f));
-      let nlo = t - (t - lo) * (span / (hi - lo));
-      nlo = Math.max(0, Math.min(dur - span, nlo));
-      st.zoom = { lo: nlo, hi: nlo + span };
-      st.zoomManual = true;
-      renderTrack();
-    }, { passive: false });
+      if (e.ctrlKey || e.metaKey) { zoomBy(e.deltaY > 0 ? 1.25 : 0.8); return; }
+      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      const px = e.deltaMode === 1 ? d * 30 : d; // lines → pixels (Firefox)
+      panBy((px / 100) * (st.zoom.hi - st.zoom.lo) * 0.15);
+    };
+    $("edTrack").addEventListener("wheel", onWheel, { passive: false });
+    $("edMap").addEventListener("wheel", onWheel, { passive: false });
+    $("edMap").addEventListener("pointerdown", onMapDown);
+    $("edMap").addEventListener("pointermove", onMapMove);
+    $("edMap").addEventListener("pointerup", onMapUp);
+    $("edMap").addEventListener("pointercancel", onMapUp);
+    $("edMap").addEventListener("dblclick", resetZoom);
+    $("edZoomOut").addEventListener("click", () => zoomBy(1.5));
+    $("edZoomIn").addEventListener("click", () => zoomBy(1 / 1.5));
+    $("edZoomAll").addEventListener("click", resetZoom);
+    $("edZoomRange").addEventListener("input", (e) => zoomBy(sliderToSpan(Number(e.target.value)) / (st.zoom.hi - st.zoom.lo)));
     const T = $("edTrack");
     T.addEventListener("pointerdown", onTrackDown);
     T.addEventListener("pointermove", onTrackMove);
     T.addEventListener("pointerup", onTrackUp);
     T.addEventListener("pointercancel", onTrackUp);
+    T.addEventListener("mouseover", onTrackOver);
+    T.addEventListener("mouseleave", () => hidePhraseCard());
     $("edOv").addEventListener("click", (e) => {
       const hit = e.target.closest("[data-i]");
       if (hit) { select(Number(hit.dataset.i)); return; }

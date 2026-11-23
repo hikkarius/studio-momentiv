@@ -84,7 +84,7 @@ def test_open_project_shows_editor_sorted_by_score(page, studio, project):
     assert page.locator("#edTrack").is_visible()  # the clip track sits right under the video
     screen = page.locator("#edScreen").bounding_box()
     track = page.locator("#edTrack").bounding_box()
-    assert 0 <= track["y"] - (screen["y"] + screen["height"]) < 75  # only the «Початок · с · Кінець» line and the time ruler between
+    assert 0 <= track["y"] - (screen["y"] + screen["height"]) < 110  # only the «Початок · с · Кінець» line, the clip map and the time ruler between
     # trimmed screen: no score line next to the title, no ±0,5 / ↑↓ buttons, no bottom bar with the ZIP
     assert page.locator("#edClipMeta, [data-nudge], #edPrev, #edNext, .ed-bar, #edZip, #hwBadge").count() == 0
     # step rail with both steps, download always on top of the side panel, «Чому» under the title
@@ -152,11 +152,11 @@ def test_status_menu_shelves_and_keys(page, studio, project):
 
 def test_pauses_button_and_track(page, studio, project):
     open_editor(page, studio)  # best clip №2: 30-50 s, words every 0.5 s, so there are no long pauses
-    assert page.locator("#edRuler b").count() > 0  # time ruler
+    assert page.locator("#edTrack .phr").count() > 0  # phrase cards
     assert page.locator("#edTrack canvas.wave").count() == 1
     page.click("#edPauses")
     page.wait_for_function("document.getElementById('edToast').textContent.includes('Пауз')")
-    assert clip(2)["cuts"] == [] and page.locator("#edPauseBar").is_hidden()
+    assert clip(2)["cuts"] == [] and page.locator("#edPauseBar button[data-m]").count() == 3  # tempo switch
     # a saved cut shows as a band; clicking it restores the pause
     db.update_clip_fields(PROJECT_ID, 2, cuts=[[35.0, 36.0]])
     open_editor(page, studio)
@@ -302,6 +302,36 @@ def test_drag_handle(page, studio, project):
     assert clip(2)["end_sec"] - clip(2)["start_sec"] >= 3
 
 
+def test_track_navigation(page, studio, project):
+    open_editor(page, studio)
+    first_label = lambda: page.evaluate("document.querySelector('#edTrack .phr').style.left")
+    span = lambda: page.evaluate("(() => { const w = document.querySelector('#edMap .win'); return w.getBoundingClientRect().width / w.parentElement.getBoundingClientRect().width; })()")
+    s0 = span()
+    assert 0.3 < s0 < 0.95 and page.locator("#edZoomAll").is_disabled()  # the clip with a little room: the scrollbar shows there is more
+    page.click("#edZoomIn"); page.click("#edZoomIn"); page.click("#edZoomIn")
+    assert span() < s0 * 0.5 and page.locator("#edZoomAll").is_enabled()
+    # the plain wheel scrolls sideways, it does not zoom
+    before, w0 = first_label(), span()
+    box = page.locator("#edTrack").bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + 20)
+    for _ in range(3):
+        page.mouse.wheel(0, 200)
+    page.wait_for_timeout(200)
+    assert first_label() != before and abs(span() - w0) < 0.02
+    # Ctrl + wheel zooms
+    page.keyboard.down("Control"); page.mouse.wheel(0, 200); page.keyboard.up("Control")
+    assert span() > w0 + 0.05
+    # dragging the frame on the map moves the track
+    before = first_label()
+    win = page.locator("#edMap .win").bounding_box()
+    page.mouse.move(win["x"] + win["width"] / 2, win["y"] + win["height"] / 2)
+    page.mouse.down(); page.mouse.move(win["x"] + win["width"] / 2 - 120, win["y"] + 5, steps=4); page.mouse.up()
+    assert first_label() != before
+    page.click("#edZoomAll")
+    assert abs(span() - s0) < 0.02
+    assert not page.errors
+
+
 def test_word_menu_sets_end(page, studio, project):
     open_editor(page, studio)
     page.wait_for_function("document.querySelectorAll('#edTrack .w').length > 0")
@@ -314,6 +344,7 @@ def test_word_menu_sets_end(page, studio, project):
             target, t = chips.nth(k), n * 0.5
             break
     assert target is not None
+    target.locator("xpath=..").hover()  # a phrase opens up under the mouse, so every word in it can be clicked
     target.click()
     page.locator("#edPop").wait_for(state="visible")
     page.click("#edPop [data-p='end']")

@@ -857,14 +857,17 @@ def render_vertical(
         fc = video_filter(layout, src_w, src_h, ass_name, fonts_rel)
         dur = max(0.5, end - start)
         amap = ["-map", "0:a?"]
+        filters = [fc]
         if cuts_rel:
             import pauses
             audio = pauses.has_audio(source)
             segs = pauses.relative(pauses.kept_segments(0.0, dur, cuts_rel), 0.0)
-            fc = pauses.concat_filter(segs, audio) + ";" + fc.replace("[0:v]", "[cv]")
+            # smooth joins first, the plain jump if this ffmpeg refuses them
+            filters = list(dict.fromkeys(pauses.concat_filter(segs, audio, smooth=s) + ";" + fc.replace("[0:v]", "[cv]")
+                                         for s in (pauses.SMOOTH, 0)))
             amap = ["-map", "[ca]"] if audio else []
         last_err = ""
-        for enc in _encoders(has_nvenc):
+        for fc, enc in ((f, e) for f in filters for e in _encoders(has_nvenc)):
             cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{start:.3f}", "-i", os.path.abspath(source), "-t", f"{dur:.3f}",
                    "-filter_complex", fc, "-map", "[v]", *amap, *enc,
                    "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", str(tmp_out.resolve())]

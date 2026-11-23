@@ -11,6 +11,8 @@ e2e_test_output/
 .transcript_cache/
 *.log
 *.db
+*.db-shm
+*.db-wal
 *.mp4
 *.mov
 *.mkv
