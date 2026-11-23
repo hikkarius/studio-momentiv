@@ -407,12 +407,15 @@
 .ed-filters span { font: var(--fs-xs) var(--ed-mono); opacity: .7; margin-left: 4px; }
 .ed-vx-note { display: none; }
 .ed-ov { flex: 1; position: relative; height: 36px; min-width: 80px; border-radius: var(--r-md); background: var(--ed-sunk); cursor: pointer; margin: 0 6px; }
-.ed-ov .c { position: absolute; top: 4px; bottom: 4px; border-radius: var(--r-sm); min-width: 18px; background: var(--ed-cand); display: grid; place-items: center; overflow: hidden; }
+.ed-ov .c { position: absolute; top: 4px; bottom: 4px; border-radius: var(--r-sm); min-width: 4px; background: var(--ed-cand); display: grid; place-items: center; overflow: hidden; }
 .ed-ov .c:hover { filter: brightness(1.12); }
 .ed-ov .c.keep { background: var(--ed-keep); } .ed-ov .c.keep .lab { color: var(--white); } .ed-ov .c.drop { background: var(--ed-drop); opacity: .45; } .ed-ov .c.drop .lab { color: var(--white); }
-.ed-ov .c.sel { background: var(--ed-accent); opacity: 1; top: 0; bottom: 0; min-width: 26px; box-shadow: 0 0 0 2px var(--ed-fg); z-index: 2; }
+.ed-ov .c.sel { background: var(--ed-accent); opacity: 1; top: 0; bottom: 0; min-width: 6px; box-shadow: 0 0 0 2px var(--ed-fg); z-index: 2; }
 .ed-ov .lab { font: 800 var(--fs-sm) var(--ed-sans); color: var(--ed-muted); line-height: 1; }
 .ed-ov .c.sel .lab { color: var(--ed-accent-ink); }
+/* a clip too narrow for its number: a slim bar, the number is in the tooltip */
+.ed-ov .c.slim { top: 9px; bottom: 9px; border-radius: var(--r-pill); }
+.ed-ov .c.sel.slim { top: 2px; bottom: 2px; }
 .ed-ov .pl { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ed-fg); z-index: 3; pointer-events: none; }
 .ed-sort { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--r-md); border: 1px solid var(--ed-line); background: var(--ed-sunk); flex: none; }
 .ed-sort button { border: 0; background: none; border-radius: var(--r-sm); padding: 7px 13px; font-size: var(--fs-md); font-weight: 700; color: var(--ed-muted); cursor: pointer; }
@@ -612,9 +615,9 @@
 @media (max-width: 1439px) { .ed-shelf { min-width: 0; padding: 6px 11px; } }
 .ed-decide .ed-gonext { padding: 8px 14px; border-radius: var(--r-pill); font-size: var(--fs-md); }
 
-/* «Прибрати паузи»: gold outlined pill in the middle of the row; filled once pauses are cut */
+/* «Прибрати паузи»: quiet outline in the accent colour (text ≥ 7:1, outline ≥ 4.5:1 in both themes); filled once pauses are cut */
 #editor .ed-silence { height: 36px; padding: 0 22px; font-size: var(--fs-md); font-weight: 700; white-space: nowrap; border-radius: var(--r-pill);
-  background: transparent; color: var(--ed-fg); border: 1.5px solid var(--ed-line); box-shadow: none; }
+  background: transparent; color: var(--ed-accent-text); border: 1.5px solid var(--ed-accent); box-shadow: none; }
 #editor .ed-silence:hover { background: var(--ed-accent-soft); border-color: var(--ed-accent); color: var(--ed-accent-text); filter: none; }
 #editor .ed-silence.on { background: var(--ed-accent); color: var(--ed-accent-ink); border-color: var(--ed-accent); }
 #editor .ed-silence.on:hover { filter: brightness(1.08); background: var(--ed-accent); color: var(--ed-accent-ink); }

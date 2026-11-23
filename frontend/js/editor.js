@@ -143,12 +143,18 @@ const Editor = (() => {
   function renderOverview() {
     const el = $("edOv");
     const dur = st.project.duration || 1;
+    const W = el.clientWidth || 600;
     let h = "";
+    let free = -Infinity; // where the last number ends: a number is shown only where it fits and does not overlap
     [...st.clips.keys()].sort((a, b) => st.clips[a].start_sec - st.clips[b].start_sec).forEach((i) => {
       const c = st.clips[i];
-      const w = Math.max(0.6, (len(c) / dur) * 100);
-      h += `<div class="c${c.review_status ? " " + c.review_status : c.reserve ? " reserve" : ""}${i === st.cur ? " sel" : ""}" data-i="${i}"
-        style="left:${(c.start_sec / dur) * 100}%;width:${w}%" title="№${c.num} ${esc(c.title)} (${fmtS(c.start_sec)})"><span class="lab">${c.num}</span></div>`;
+      const w = Math.max(0.4, (len(c) / dur) * 100);
+      const x = (c.start_sec / dur) * W, px = (w / 100) * W;
+      const need = String(c.num).length * 7.5 + 6;
+      const fits = px >= need && x >= free;
+      if (fits) free = x + px + 1;
+      h += `<div class="c${c.review_status ? " " + c.review_status : c.reserve ? " reserve" : ""}${i === st.cur ? " sel" : ""}${fits ? "" : " slim"}" data-i="${i}"
+        style="left:${(c.start_sec / dur) * 100}%;width:${w}%" title="№${c.num} · ${esc(c.title)} (${fmtS(c.start_sec)})">${fits ? `<span class="lab">${c.num}</span>` : ""}</div>`;
     });
     h += `<div class="pl" id="edPh"></div>`;
     el.innerHTML = h;
@@ -237,7 +243,13 @@ const Editor = (() => {
     document.getElementById("editor").classList.toggle("is-vx", vx);
     $("edVx").hidden = !vx;
     if (st.project) renderList();
-    if (vx) { if (typeof Vertical !== "undefined") Vertical.onShow(); }
+    if (vx) {
+      // step 2 works on the clips «В роботі»: open the first of them unless one is open already
+      const list = st.project ? stripClips() : [];
+      const c = clip();
+      if (list.length && (!c || c.review_status !== "keep") && st.clips[list[0]].review_status === "keep") select(list[0]);
+      if (typeof Vertical !== "undefined") Vertical.onShow();
+    }
     else if (st.project && clip()) { renderOverview(); renderTrack(); }
   }
 
@@ -1194,7 +1206,7 @@ const Editor = (() => {
     let sort = "score";
     try { sort = localStorage.getItem("studio-sort") || "score"; } catch (_) {}
     setSort(sort);
-    select(visible()[0] ?? ordered()[0] ?? 0);
+    select((st.mode === "vx" ? stripClips()[0] : visible()[0]) ?? ordered()[0] ?? 0);
   }
 
   function close() {
