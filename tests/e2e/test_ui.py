@@ -6,6 +6,7 @@ scrubbing and changing clip bounds on the track under the video, editing the pos
 import io
 import zipfile
 
+import config_loader
 from backend import db
 
 from .conftest import PROJECT_ID
@@ -162,6 +163,12 @@ def test_pauses_button_and_track(page, studio, project):
     open_editor(page, studio)
     page.locator("#edTrack .cut").first.wait_for(state="visible")
     assert page.locator("#edPauseBar").is_visible() and page.locator("#edMp4Raw").is_visible()
+    # «Перехід» is one setting for all downloads
+    page.click("#edPauseBar button[data-t='zoom']")
+    assert wait_for(page, lambda: config_loader.app_config.studio.pause_transition == "zoom")
+    assert page.locator("#edPauseBar button[data-t='zoom'][aria-pressed='true']").is_visible()
+    page.click("#edPauseBar button[data-t='soft']")
+    assert wait_for(page, lambda: config_loader.app_config.studio.pause_transition == "soft")
     page.locator("#edTrack .cut").first.click()
     assert wait_for(page, lambda: clip(2)["cuts"] == [])
     assert page.locator("#edTrack .cut.ghost").count() == 1

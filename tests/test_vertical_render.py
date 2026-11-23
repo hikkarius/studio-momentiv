@@ -271,7 +271,7 @@ def test_vertical_plan_and_render_endpoints(tmp_path, monkeypatch):
         calls["detect"] += 1
         return faces
 
-    def fake_render(source, start, end, output_path, layout, ass_text, has_nvenc=False, timeout=900, cuts_rel=None):
+    def fake_render(source, start, end, output_path, layout, ass_text, has_nvenc=False, timeout=900, cuts_rel=None, transition="hard"):
         calls["render"] += 1
         assert layout.kind == "track" and (ass_text is None or "МОЖНА" in ass_text)
         Path(output_path).write_bytes(b"mp4" * 1000)
@@ -359,7 +359,7 @@ def test_vertical_render_follows_cut_pauses(tmp_path, monkeypatch):
     faces = {"w": 1920, "h": 1080, "samples": [[i * 0.25, [[0.7, 0.3, 0.1, 0.2, 0.9]]] for i in range(20)]}
     seen = {}
 
-    def fake_render(source, start, end, output_path, layout, ass_text, has_nvenc=False, timeout=900, cuts_rel=None):
+    def fake_render(source, start, end, output_path, layout, ass_text, has_nvenc=False, timeout=900, cuts_rel=None, transition="hard"):
         seen.update(cuts=cuts_rel, ass=ass_text, keys=layout.keyframes)
         Path(output_path).write_bytes(b"mp4" * 1000)
         return output_path
@@ -379,13 +379,15 @@ def test_vertical_render_follows_cut_pauses(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg is not installed")
-def test_render_vertical_with_cuts_real(tmp_path):
+@pytest.mark.parametrize("transition", ["hard", "soft", "zoom"])
+def test_render_vertical_with_cuts_real(tmp_path, transition):
     src = tmp_path / "v.mp4"
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=10",
                     "-f", "lavfi", "-i", "sine=frequency=300", "-t", "6", "-c:v", "libx264", "-preset", "ultrafast",
                     "-pix_fmt", "yuv420p", "-c:a", "aac", str(src)], check=True, timeout=60)
     out = tmp_path / "v916.mp4"
-    vr.render_vertical(str(src), 1.0, 5.0, str(out), vr.Layout("track", [(0.0, 0.5), (3.0, 0.6)]), None, cuts_rel=[(1.0, 2.0)])
+    vr.render_vertical(str(src), 1.0, 5.0, str(out), vr.Layout("track", [(0.0, 0.5), (3.0, 0.6)]), None, cuts_rel=[(1.0, 2.0)],
+                     transition=transition)
     dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(out)],
                                capture_output=True, text=True, timeout=20).stdout)
     assert 2.8 < dur < 3.3

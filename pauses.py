@@ -9,7 +9,8 @@ How a pause is found:
   4. without audio levels, gaps between words are used instead.
 Each pause keeps `keep` seconds of silence so the speech does not glue together.
 
-Cuts are stored on the clip as absolute seconds [[a, b], ...]. All functions here are pure except
+Cuts are stored on the clip as absolute seconds [[a, b], ...]. How a cut looks («Перехід»: різкий, м'який,
+наїзд) is one studio setting, studio.pause_transition. All functions here are pure except
 audio_levels() and render_with_cuts(), which call ffmpeg.
 """
 from __future__ import annotations
@@ -250,26 +251,87 @@ def has_audio(source: str, timeout: int = 20) -> bool:
         return True
 
 
-def concat_filter(segments_rel: Sequence[Cut], audio: bool, vin: str = "0:v", ain: str = "0:a") -> str:
-    """filter_complex part that keeps only segments_rel of the input and joins them into [cv] (+ [ca])."""
-    parts, ins = [], []
-    for k, (a, b) in enumerate(segments_rel):
-        parts.append(f"[{vin}]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS[v{k}]")
+TRANSITIONS = ("hard", "soft", "zoom")
+DEFAULT_TRANSITION = "soft"
+XFADE = 0.12      # «М'який»: picture and sound blend into each other over this long at every cut
+ZOOM = 1.08       # «Наїзд»: every other piece is shown a bit closer, so the jump looks like a camera change
+AFADE = 0.015     # «Різкий»/«Наїзд»: tiny sound fades so a cut never clicks
+
+
+def video_size(source: str, timeout: int = 20) -> Optional[Tuple[int, int]]:
+    try:
+        proc = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                               "-of", "csv=p=0:s=x", os.path.abspath(source)], capture_output=True, text=True, timeout=timeout)
+        w, h = proc.stdout.strip().splitlines()[0].split("x")[:2]
+        return int(w), int(h)
+    except (OSError, subprocess.TimeoutExpired, ValueError, IndexError):
+        return None
+
+
+def concat_filter(segments_rel: Sequence[Cut], audio: bool, vin: str = "0:v", ain: str = "0:a",
+                  transition: str = "hard", size: Optional[Tuple[int, int]] = None) -> str:
+    """
+    filter_complex part that keeps only segments_rel of the input and joins them into [cv] (+ [ca]).
+    transition: "hard" = plain jump cut; "soft" = a short cross-fade of picture and sound at every cut;
+    "zoom" = every other piece slightly closer (needs `size`, the input frame size). The output length and the
+    timing of every kept moment are the same in all three, so subtitles and camera moves stay in place.
+    """
+    segs = list(segments_rel)
+    n = len(segs)
+    if transition == "zoom" and not size:
+        transition = "hard"
+    if transition == "soft" and n > 1:
+        d = min(XFADE, min(b - a for a, b in segs) / 2)
+        d = max(0.0, min(d, min(segs[k + 1][0] - segs[k][1] for k in range(n - 1))))
+        if d < 0.04:
+            transition = "hard"
+    parts: List[str] = []
+    if transition == "soft" and n > 1:
+        # each piece borrows d/2 of the cut pause on both sides; the cross-fades eat exactly that back
+        ext = [(a - (d / 2 if k > 0 else 0.0), b + (d / 2 if k < n - 1 else 0.0)) for k, (a, b) in enumerate(segs)]
+        for k, (a, b) in enumerate(ext):
+            parts.append(f"[{vin}]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS[v{k}]")
+            if audio:
+                parts.append(f"[{ain}]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS[a{k}]")
+        vprev, aprev, t = "v0", "a0", 0.0
+        for k in range(1, n):
+            t += ext[k - 1][1] - ext[k - 1][0] - d
+            vo = "cv" if k == n - 1 else f"x{k}"
+            parts.append(f"[{vprev}][v{k}]xfade=transition=fade:duration={d:.3f}:offset={t:.3f}[{vo}]")
+            vprev = vo
+            if audio:
+                ao = "ca" if k == n - 1 else f"y{k}"
+                parts.append(f"[{aprev}][a{k}]acrossfade=d={d:.3f}:c1=tri:c2=tri[{ao}]")
+                aprev = ao
+        return ";".join(parts)
+    ins = []
+    for k, (a, b) in enumerate(segs):
+        v = f"[{vin}]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS"
+        if transition == "zoom" and k % 2 == 1:
+            w, h = size
+            v += f",crop=trunc(iw/{ZOOM}/2)*2:trunc(ih/{ZOOM}/2)*2,scale={w}:{h},setsar=1"
+        elif transition == "zoom":
+            v += ",setsar=1"
+        parts.append(v + f"[v{k}]")
         ins.append(f"[v{k}]")
         if audio:
-            parts.append(f"[{ain}]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS[a{k}]")
+            af = f"[{ain}]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS"
+            if n > 1:
+                L = b - a
+                af += f",afade=t=in:d={AFADE}" if k > 0 else ""
+                af += f",afade=t=out:st={max(0.0, L - AFADE):.3f}:d={AFADE}" if k < n - 1 else ""
+            parts.append(af + f"[a{k}]")
             ins.append(f"[a{k}]")
-    n = len(segments_rel)
     parts.append("".join(ins) + f"concat=n={n}:v=1:a={1 if audio else 0}[cv]" + ("[ca]" if audio else ""))
     return ";".join(parts)
 
 
 def render_with_cuts(source: str, start: float, end: float, cuts: Sequence[Cut], output_path: str,
-                     has_nvenc: bool = False, timeout: int = 600) -> str:
+                     has_nvenc: bool = False, timeout: int = 600, transition: str = "hard") -> str:
     """The plain 16:9 clip with the pauses taken out (re-encoded, high quality)."""
     segs = relative(kept_segments(start, end, cuts), start)
     audio = has_audio(source)
-    fc = concat_filter(segs, audio)
+    fc = concat_filter(segs, audio, transition=transition, size=video_size(source) if transition == "zoom" else None)
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(f"tmp_{uuid.uuid4().hex[:6]}_{out.name}")

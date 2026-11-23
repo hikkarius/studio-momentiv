@@ -693,6 +693,14 @@ def _clip_cuts(clip: Dict[str, Any]) -> List[tuple]:
     return pauses.normalize_cuts(clip.get("cuts"), float(clip["start_sec"]), float(clip["end_sec"]))
 
 
+def _pause_transition() -> str:
+    """How cut pauses look in the downloads (setting «Перехід»): hard, soft or zoom."""
+    from config_loader import app_config
+
+    t = getattr(app_config.studio, "pause_transition", pauses.DEFAULT_TRANSITION)
+    return t if t in pauses.TRANSITIONS else pauses.DEFAULT_TRANSITION
+
+
 def _ensure_clip_file(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any], raw: bool = False) -> tuple[str, str]:
     """The 16:9 clip to hand out: without its cut pauses when it has any (re-encoded), else the lossless slice."""
     cuts = [] if raw else _clip_cuts(clip)
@@ -704,7 +712,8 @@ def _ensure_clip_file(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any
     slices_dir = _safe_project_output_dir(project_id) / "slices"
     slices_dir.mkdir(parents=True, exist_ok=True)
     stem = _clip_file_stem(clip)
-    path = slices_dir / f"{stem}_cut{pauses.cuts_key(cuts)}.mp4"
+    transition = _pause_transition()
+    path = slices_dir / f"{stem}_cut{pauses.cuts_key(cuts)}_{transition}.mp4"
     lock = _get_slice_path_lock(str(path))
     with lock:
         if not path.exists():
@@ -714,7 +723,7 @@ def _ensure_clip_file(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any
                 except OSError:
                     pass
             pauses.render_with_cuts(source_path, float(clip["start_sec"]), float(clip["end_sec"]), cuts, str(path),
-                                    has_nvenc=app_state.get_gpu_capabilities().has_nvenc)
+                                    has_nvenc=app_state.get_gpu_capabilities().has_nvenc, transition=transition)
     return str(path), f"{stem}_bez_pauz.mp4"
 
 
@@ -1066,7 +1075,7 @@ def _ensure_vertical(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any]
     subs = subs and opts["style"] != "none"
     cuts = _clip_cuts(clip)
     cuts_rel = pauses.relative(cuts, float(clip["start_sec"]))
-    key = vertical_render.cache_key(clip["start_sec"], clip["end_sec"], opts, subs, clip.get("title", "")) + pauses.cuts_key(cuts)
+    key = vertical_render.cache_key(clip["start_sec"], clip["end_sec"], opts, subs, clip.get("title", "")) + pauses.cuts_key(cuts) + (_pause_transition()[0] if cuts else "")
     idx = clip["clip_index"]
     vdir = _vertical_dir(project_id)
     stem = _clip_file_stem(clip)
@@ -1104,7 +1113,8 @@ def _ensure_vertical(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any]
     with vertical_render.RENDER_LOCK:
         if not path.exists():
             vertical_render.render_vertical(proj["source_path"], clip["start_sec"], clip["end_sec"], str(path), layout, ass,
-                                            has_nvenc=caps.has_nvenc, cuts_rel=cuts_rel or None)
+                                            has_nvenc=caps.has_nvenc, cuts_rel=cuts_rel or None,
+                                            transition=_pause_transition())
     # Old renders of this clip with other settings are no longer reachable.
     for old in vdir.glob(f"clip_{idx}_*_{'s' if subs else 'n'}.mp4"):
         if old != path:
@@ -1413,7 +1423,7 @@ _EDITABLE_SETTINGS = {
     "whisper": {"model", "language"},
     "clips": {"default_min_len", "default_max_len", "max_overlap_sec"},
     "gemini": {"rerank"},
-    "studio": {"default_clips", "default_filter", "cleanup_days"},
+    "studio": {"default_clips", "default_filter", "cleanup_days", "pause_transition"},
 }
 
 

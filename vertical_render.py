@@ -836,6 +836,7 @@ def render_vertical(
     has_nvenc: bool = False,
     timeout: int = 900,
     cuts_rel: Optional[Sequence[Tuple[float, float]]] = None,
+    transition: str = "hard",
 ) -> str:
     """
     Renders one vertical clip. Writes to a temp file and renames, so a half-written file is never served.
@@ -861,7 +862,8 @@ def render_vertical(
             import pauses
             audio = pauses.has_audio(source)
             segs = pauses.relative(pauses.kept_segments(0.0, dur, cuts_rel), 0.0)
-            fc = pauses.concat_filter(segs, audio) + ";" + fc.replace("[0:v]", "[cv]")
+            # «Наїзд» would shift the face framing worked out on the full frame, so the vertical clip blends instead
+            fc = pauses.concat_filter(segs, audio, transition="soft" if transition == "zoom" else transition) + ";" + fc.replace("[0:v]", "[cv]")
             amap = ["-map", "[ca]"] if audio else []
         last_err = ""
         for enc in _encoders(has_nvenc):

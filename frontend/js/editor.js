@@ -13,7 +13,7 @@ const Editor = (() => {
   const st = {
     project: null, clips: [], cur: -1, filter: "new", anchor: 0, tab: "text", sort: "score", mode: "table",
     words: [], wordsFor: null, stopAt: null, backToStart: false, saveTimer: null,
-    zoom: { lo: 0, hi: 1 }, zoomManual: false, levels: null, restored: [], drag: null, scrub: null, mapDrag: null, pop: null,
+    zoom: { lo: 0, hi: 1 }, zoomManual: false, levels: null, restored: [], drag: null, scrub: null, mapDrag: null, transition: "soft", pop: null,
   };
   const MIN_LEN = 3;
 
@@ -869,11 +869,32 @@ const Editor = (() => {
       const gap = pauseGap();
       bar.innerHTML = `<span class="res">Прибрано <b>${cuts.length} ${cuts.length === 1 ? "паузу" : cuts.length > 1 && cuts.length < 5 ? "паузи" : "пауз"} · −${fmt1(rm)} с</b></span>
         <span>довші за</span><span class="seg" role="group" aria-label="Поріг паузи">${[0.4, 0.6, 1].map((g) => `<button type="button" data-g="${g}" aria-pressed="${g === gap}">${fmt1(g)} с</button>`).join("")}</span>
-        <span class="hint">· клік по смужці повертає паузу</span><button type="button" class="link" data-a="all">↶ Повернути все</button>`;
+        <span class="hint">· клік по смужці повертає паузу</span><button type="button" class="link" data-a="all">↶ Повернути все</button>
+        <span class="tr" title="Як виглядає місце вирізаної паузи у скачаному відео">Перехід <span class="seg" role="group" aria-label="Перехід">${TRANSITIONS.map(([v, l, t]) => `<button type="button" data-t="${v}" title="${t}" aria-pressed="${v === st.transition}">${l}</button>`).join("")}</span></span>`;
     }
     $("edMp4Lab").textContent = cuts.length ? "⬇ Кліп 16:9 · без пауз" : "⬇ Кліп 16:9 · MP4";
     $("edMp4Info").innerHTML = cuts.length ? `${fmt1(len(c) - rm)} с` : `${Math.round(len(c))} с<span class="q"> · оригінальна якість</span>`;
     $("edMp4Raw").hidden = !cuts.length;
+  }
+
+  const TRANSITIONS = [
+    ["hard", "Різкий", "Звичайний jump cut: картинка змінюється миттєво"],
+    ["soft", "Мʼякий", "Картинка й звук плавно перетікають за 0,12 с"],
+    ["zoom", "Наїзд", "Кожен другий шматок трохи ближче, наче інша камера (у 9:16 буде мʼякий перехід)"],
+  ];
+  async function loadTransition() {
+    try { st.transition = (await api("/api/settings")).values.studio.pause_transition || "soft"; } catch (_) { st.transition = "soft"; }
+    if (clip()) renderPauses();
+  }
+  async function setTransition(t) {
+    const prev = st.transition;
+    st.transition = t;
+    renderPauses();
+    try {
+      await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ studio: { pause_transition: t } }) });
+      toast(`Перехід: ${TRANSITIONS.find((x) => x[0] === t)[1].toLowerCase()}. Діє для всіх кліпів у скачуванні`);
+      if (typeof Vertical !== "undefined") Vertical.onClip();
+    } catch (e) { st.transition = prev; renderPauses(); toast("Не вдалося зберегти перехід: " + e.message, true); }
   }
 
   async function savePauses(c, cuts, msg) {
@@ -1035,6 +1056,7 @@ const Editor = (() => {
       Vertical.attach({ clip, pid, api, patch, toast, download, video, seek, togglePlay, postText, copy, keptCount });
     }
     document.addEventListener("keydown", onKey);
+    loadTransition();
     document.addEventListener("pointerdown", (e) => { if (st.pop && !e.target.closest(".ed-pop")) closePop(); });
     window.addEventListener("resize", () => { if (!$("editor").hidden && st.project) { renderOverview(); renderTrack(); updateScroll(); } });
     $("edList").addEventListener("scroll", updateScroll, { passive: true });
@@ -1105,6 +1127,8 @@ const Editor = (() => {
     document.addEventListener("click", (e) => { if (!e.target.closest("#edStatusMenu")) closeStatusMenu(); });
     $("edPauses").addEventListener("click", () => findPauses());
     $("edPauseBar").addEventListener("click", (e) => {
+      const tb = e.target.closest("button[data-t]");
+      if (tb) { if (tb.dataset.t !== st.transition) setTransition(tb.dataset.t); return; }
       const g = e.target.closest("button[data-g]");
       if (g) { try { localStorage.setItem("studio-pause-gap", g.dataset.g); } catch (_) {} findPauses(Number(g.dataset.g)); return; }
       if (e.target.closest("button[data-a='all']")) { const c = clip(); st.restored = []; savePauses(c, [], "Усі паузи повернуто"); }

@@ -63,6 +63,7 @@ class StudioConfig(BaseModel):
     default_clips: int = Field(default=0, ge=0, le=100)         # 0 = auto (by video length)
     default_filter: str = Field(default="Viral Hooks")
     cleanup_days: int = Field(default=0, ge=0, le=3650)         # delete re-creatable clip files older than N days; 0 = never
+    pause_transition: str = Field(default="soft", pattern=r"^(hard|soft|zoom)$")  # how a cut pause looks: різкий / м'який / наїзд
 
 
 class AppConfig(BaseModel):

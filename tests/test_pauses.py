@@ -113,3 +113,37 @@ def test_render_with_cuts_is_shorter(tmp_path):
     assert 2.8 < dur < 3.3
     levels = pauses.audio_levels(str(src), 0.0, 2.0)
     assert len(levels) == 2 * R and max(levels) > -40
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg is not installed")
+@pytest.mark.parametrize("transition", ["soft", "zoom"])
+def test_render_transitions_keep_length(tmp_path, transition):
+    src = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=160x90:rate=10",
+                    "-f", "lavfi", "-i", "sine=frequency=300", "-t", "8", "-c:v", "libx264", "-preset", "ultrafast",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", str(src)], check=True, timeout=60)
+    out = tmp_path / f"{transition}.mp4"
+    pauses.render_with_cuts(str(src), 1.0, 7.0, [(2.0, 3.0), (4.5, 5.0)], str(out), transition=transition)
+    probe = lambda what: subprocess.run(["ffprobe", "-v", "error", "-show_entries", what, "-of", "csv=p=0", str(out)],
+                                        capture_output=True, text=True, timeout=20).stdout.split()
+    assert 4.3 < float(probe("format=duration")[0]) < 4.7  # 6 s minus 1.5 s of pauses, whatever the transition
+    assert probe("stream=width")[0] == "160"
+
+
+def test_transition_filters():
+    segs = [(0.0, 2.0), (3.0, 5.0), (6.0, 8.0)]
+    soft = pauses.concat_filter(segs, True, transition="soft")
+    assert soft.count("xfade=") == 2 and soft.count("acrossfade=") == 2 and "[cv]" in soft and "[ca]" in soft
+    assert "trim=start=2.940" in soft  # the 2nd piece borrows half the fade from the cut before it
+    zoom = pauses.concat_filter(segs, False, transition="zoom", size=(1920, 1080))
+    assert zoom.count("crop=") == 1 and "scale=1920:1080" in zoom
+    assert "crop=" not in pauses.concat_filter(segs, False, transition="zoom")  # no frame size → plain cut
+    hard = pauses.concat_filter(segs, True)
+    assert "afade=t=out" in hard and "xfade" not in hard
+
+
+def test_transition_setting_is_saved(monkeypatch):
+    saved = {}
+    monkeypatch.setattr("config_loader.save_user_settings", lambda patch: saved.update(patch))
+    assert client.post("/api/settings", json={"studio": {"pause_transition": "zoom"}}).status_code == 200
+    assert saved == {"studio": {"pause_transition": "zoom"}}
