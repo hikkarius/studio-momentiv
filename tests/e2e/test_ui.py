@@ -116,7 +116,8 @@ def test_status_menu_shelves_and_keys(page, studio, project):
     assert page.locator("#edStatus").inner_text().startswith("Нове")
     page.click("#edStatus")  # the menu lists all four statuses
     assert page.locator("#edStatusMenu").is_visible()
-    assert page.locator("#edStatusMenu button").count() == 4
+    assert page.locator("#edStatusMenu button[data-s]").count() == 4
+    assert page.locator("#edPromote").is_hidden()  # «⬆ Перенести в Нові» only for clips from «Запас»
     page.click("#edStatusMenu button[data-s='keep']")  # best clip (#2) → В роботі; it stays open
     assert wait_for(page, lambda: clip(2)["review_status"] == "keep")
     assert page.locator("#edStatusMenu").is_hidden()
