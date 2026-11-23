@@ -18,7 +18,7 @@ const Editor = (() => {
   const MIN_LEN = 3;
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
-  const fmt = (s) => { s = Math.max(0, s); const m = Math.floor(s / 60); const x = s - m * 60; return `${m}:${x < 10 ? "0" : ""}${x.toFixed(1)}`; };
+  const fmt = (s) => { s = Math.max(0, s); const m = Math.floor(s / 60); const x = s - m * 60; return `${m}:${x < 10 ? "0" : ""}${x.toFixed(1).replace(".", ",")}`; }; // Ukrainian decimal comma
   const fmtS = (s) => { s = Math.round(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
   const esc = (s) => (typeof escapeHtml === "function" ? escapeHtml(String(s ?? "")) : String(s ?? ""));
   const pid = () => encodeURIComponent(st.project.id);
@@ -100,9 +100,9 @@ const Editor = (() => {
       L.innerHTML = `<li class="ed-empty">${st.mode === "vx" ? "Тут поки порожньо." : empty[st.filter]}</li>`;
     }
     const anyKept = st.clips.some((c) => c.review_status === "keep");
-    $("edStripTitle").textContent = st.mode === "vx" && anyKept ? "Обрані кліпи" : "Кліпи";
+    $("edStripTitle").textContent = st.mode === "vx" && anyKept ? "Кліпи в роботі" : "Кліпи";
     const note = document.querySelector("#editor .ed-vx-note");
-    note.textContent = anyKept ? "Тут лише кліпи «В роботі». Щоб додати ще, повернись на крок 1." : "Ще нічого не обрано: познач кліпи «В роботі» на кроці 1, тоді тут будуть лише вони.";
+    note.textContent = anyKept ? "Тут лише кліпи «В роботі». Щоб додати ще, повернись на крок 1." : "У роботі поки нічого: познач кліпи «В роботі» на кроці 1, тоді тут будуть лише вони.";
 
     SHELVES.forEach((f) => {
       $(`edCnt_${f}`).textContent = st.clips.filter((c) => shelfOf(c) === f).length;
@@ -123,8 +123,8 @@ const Editor = (() => {
     const allSeen = seen === st.clips.length && st.clips.length > 0;
     const b1 = document.querySelector('#edMode [data-m="table"]');
     b1.classList.toggle("done", allSeen && st.mode === "vx");
-    $("edStep1").textContent = allSeen && st.mode === "vx" ? (mini ? `✓ ${kept}` : `✓ обрано ${kept}`) : (mini ? `${seen}/${st.clips.length}` : `переглянуто ${seen}/${st.clips.length}`);
-    $("edStep2").textContent = mini ? String(kept) : st.mode === "vx" ? `${kept} ${kept === 1 ? "кліп" : kept > 1 && kept < 5 ? "кліпи" : "кліпів"}` : `обрано ${kept}`;
+    $("edStep1").textContent = allSeen && st.mode === "vx" ? (mini ? `✓ ${kept}` : `✓ в роботі ${kept}`) : (mini ? `${seen}/${st.clips.length}` : `переглянуто ${seen}/${st.clips.length}`);
+    $("edStep2").textContent = mini ? String(kept) : `в роботі ${kept}`;
   }
 
   function updateScroll() {
@@ -143,12 +143,18 @@ const Editor = (() => {
   function renderOverview() {
     const el = $("edOv");
     const dur = st.project.duration || 1;
+    const W = el.clientWidth || 600;
     let h = "";
+    let free = -Infinity; // where the last number ends: a number is shown only where it fits and does not overlap
     [...st.clips.keys()].sort((a, b) => st.clips[a].start_sec - st.clips[b].start_sec).forEach((i) => {
       const c = st.clips[i];
-      const w = Math.max(0.6, (len(c) / dur) * 100);
-      h += `<div class="c${c.review_status ? " " + c.review_status : c.reserve ? " reserve" : ""}${i === st.cur ? " sel" : ""}" data-i="${i}"
-        style="left:${(c.start_sec / dur) * 100}%;width:${w}%" title="№${c.num} ${esc(c.title)} (${fmtS(c.start_sec)})"><span class="lab">${c.num}</span></div>`;
+      const w = Math.max(0.4, (len(c) / dur) * 100);
+      const x = (c.start_sec / dur) * W, px = (w / 100) * W;
+      const need = String(c.num).length * 7.5 + 6;
+      const fits = px >= need && x >= free;
+      if (fits) free = x + px + 1;
+      h += `<div class="c${c.review_status ? " " + c.review_status : c.reserve ? " reserve" : ""}${i === st.cur ? " sel" : ""}${fits ? "" : " slim"}" data-i="${i}"
+        style="left:${(c.start_sec / dur) * 100}%;width:${w}%" title="№${c.num} · ${esc(c.title)} (${fmtS(c.start_sec)})">${fits ? `<span class="lab">${c.num}</span>` : ""}</div>`;
     });
     h += `<div class="pl" id="edPh"></div>`;
     el.innerHTML = h;
@@ -237,7 +243,13 @@ const Editor = (() => {
     document.getElementById("editor").classList.toggle("is-vx", vx);
     $("edVx").hidden = !vx;
     if (st.project) renderList();
-    if (vx) { if (typeof Vertical !== "undefined") Vertical.onShow(); }
+    if (vx) {
+      // step 2 works on the clips «В роботі»: open the first of them unless one is open already
+      const list = st.project ? stripClips() : [];
+      const c = clip();
+      if (list.length && (!c || c.review_status !== "keep") && st.clips[list[0]].review_status === "keep") select(list[0]);
+      if (typeof Vertical !== "undefined") Vertical.onShow();
+    }
     else if (st.project && clip()) { renderOverview(); renderTrack(); }
   }
 
@@ -994,7 +1006,12 @@ const Editor = (() => {
     bar.hidden = false;
     const pv = st.pausePreview && st.pausePreview.key === previewKey(c) ? st.pausePreview.tempos : null;
     if (!pv) loadPausePreview(c);
-    bar.innerHTML = `<span>Темп:</span><span class="seg" role="group" aria-label="Темп: наскільки різати паузи">${Object.entries(PAUSE_MODES).map(([k, m]) => {
+    const none = !cut && pv && Object.values(pv).every((r) => !r.count);
+    btn.disabled = !!none;
+    btn.classList.toggle("none", !!none);
+    btn.title = none ? "У цьому кліпі довгих пауз немає" : "Вирізати довгі паузи всередині кліпу (jump cut). Чистий оригінал лишається для скачування";
+    if (none) { bar.innerHTML = '<span class="hint">Довгих пауз немає: кліп і так іде щільно.</span>'; }
+    else bar.innerHTML = `<span>Темп:</span><span class="seg" role="group" aria-label="Темп: наскільки різати паузи">${Object.entries(PAUSE_MODES).map(([k, m]) => {
         const r = pv && pv[k];
         const res = r ? (r.count ? ` · −${fmt1(r.removed_sec)} с` : " · 0 с") : "";
         return `<button type="button" data-m="${k}" aria-pressed="${k === mode}" title="${m.label}: ${m.hint}">${m.label}${res}</button>`;
@@ -1194,7 +1211,7 @@ const Editor = (() => {
     let sort = "score";
     try { sort = localStorage.getItem("studio-sort") || "score"; } catch (_) {}
     setSort(sort);
-    select(visible()[0] ?? ordered()[0] ?? 0);
+    select((st.mode === "vx" ? stripClips()[0] : visible()[0]) ?? ordered()[0] ?? 0);
   }
 
   function close() {

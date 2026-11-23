@@ -8,15 +8,15 @@
 .welcome-steps b { color: var(--text-strong); }
 .welcome-key { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
 .welcome-key .input-text { flex: 1; min-width: 200px; }
-.welcome-msg { font-size: 13.5px; margin-top: 8px; min-height: 1.2em; }
+.welcome-msg { font-size: var(--fs-md); margin-top: 8px; min-height: 1.2em; }
 .welcome-msg.ok { color: var(--accent-emerald); }
-.welcome-msg.err { color: #e0675a; }
-.welcome-gpu { font-size: 13.5px; padding: 10px 12px; border-radius: var(--radius-md); background: var(--bg-card-alt); border: 1px solid var(--border-color); color: var(--text-main); }
+.welcome-msg.err { color: var(--danger-text); }
+.welcome-gpu { font-size: var(--fs-md); padding: 10px 12px; border-radius: var(--r-md); background: var(--bg-card-alt); border: 1px solid var(--border-color); color: var(--text-main); }
 .welcome-gpu:empty { display: none; }
-.welcome-more { font-size: 13.5px; color: var(--text-muted); }
+.welcome-more { font-size: var(--fs-md); color: var(--text-muted); }
 .welcome-more summary { cursor: pointer; font-weight: 600; color: var(--text-main); }
 .welcome-more p { margin: 8px 0 0; line-height: 1.5; }
-.update-pill { padding: 7px 14px; font-size: 13px; }
+.update-pill { padding: 7px 14px; font-size: var(--fs-sm); }
 .update-pill[hidden] { display: none; }
 @media (max-width: 600px) { .welcome-body { padding: 6px 16px 16px; } }
 .report-foot { border-top: 1px dashed var(--border-color); }

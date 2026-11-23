@@ -597,6 +597,12 @@ def get_project_thumbnail(project_id: str):
 @app.delete("/api/projects/{project_id}")
 def delete_project_endpoint(project_id: str):
     """Deletes a project and cleanly purges all its physical files from disk and database."""
+    _purge_project(project_id)
+    return {"status": "deleted", "project_id": project_id}
+
+
+def _purge_project(project_id: str) -> None:
+    """Removes a project with its output folder, temporary audio, source video (if no other project uses it) and DB rows."""
     output_dir = _safe_project_output_dir(project_id)
     temp_audio = _safe_temp_audio_path(project_id)
     proj = db.get_project(project_id)
@@ -633,8 +639,6 @@ def delete_project_endpoint(project_id: str):
     success = db.delete_project(project_id)
     if not success:
         raise HTTPException(status_code=404, detail="Помилка видалення з бази даних.")
-
-    return {"status": "deleted", "project_id": project_id}
 
 
 def _clip_file_stem(clip: Dict[str, Any]) -> str:
@@ -1626,6 +1630,28 @@ def cleanup_storage(payload: StorageCleanupRequest):
     result = storage.cleanup(UPLOADS_DIR, OUTPUT_DIR, junk=payload.junk, clips=payload.clips,
                              older_than_days=payload.older_than_days, project_ids=payload.project_ids)
     return {**result, "storage": storage.scan(UPLOADS_DIR, OUTPUT_DIR)}
+
+
+class RemoveSourcesRequest(BaseModel):
+    project_ids: List[str] = Field(min_length=1, max_length=500)
+
+
+@app.post("/api/storage/delete-finished")
+def delete_finished_videos(payload: RemoveSourcesRequest):
+    """«Видалити відео, з якими закінчив»: deletes whole finished projects, the same way as «Видалити відео»."""
+    for pid in payload.project_ids:
+        _validate_project_id(pid)
+    try:
+        ids = storage.check_finished(UPLOADS_DIR, payload.project_ids, busy=db.busy_project_ids())
+    except storage.NotRemovable as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    before = storage.scan(UPLOADS_DIR, OUTPUT_DIR)
+    sizes = {p["id"]: p["total_bytes"] for p in before["projects"]}
+    for pid in ids:
+        _purge_project(pid)
+        log.info(f"Видалено відео, з яким закінчили: {pid}")
+    after = storage.scan(UPLOADS_DIR, OUTPUT_DIR)
+    return {"deleted": len(ids), "freed_bytes": sum(sizes.get(pid, 0) for pid in ids), "storage": after}
 
 
 @app.get("/api/media")

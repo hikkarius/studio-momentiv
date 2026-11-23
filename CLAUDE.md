@@ -23,6 +23,8 @@
   ключ у `.env` (`GEMINI_API_KEY`). `config_loader.py`, `config_schema.py`.
 - `frontend/` — vanilla JS без збірки: `app.js` (головна), `editor.js` (монтажний стіл), `vertical.js`,
   `queue.js`, `settings.js`, `welcome.js` (перший запуск, ключ), `theme.js` (ключ localStorage `studio-theme`).
+  Стилі: `frontend/css/tokens.css` — єдина дизайн-система (кольори обох тем, шкала шрифтів `--fs-*`, заокруглення
+  `--r-*`); інші CSS беруть значення лише звідти. `scripts/design_shots.py` — знімки екранів до/після, `scripts/css_stats.py` — підрахунок.
 - `installer/install.ps1`, `installer/update.ps1` + `Встановити.bat`, `Запустити.bat`, `Оновити.bat` —
   інсталятор для друзів (uv + власний Python у `tools/`, ffmpeg у `tools/ffmpeg`, `.venv`).
 - `version.json` + `.github/workflows/release.yml` — реліз (див. скіл `release-for-friends`).

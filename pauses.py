@@ -227,12 +227,18 @@ def relative(cuts: Sequence[Cut], start: float) -> List[Cut]:
 
 
 def remap_words(words: Sequence[Dict[str, Any]], cuts_rel: Sequence[Cut]) -> List[Dict[str, Any]]:
-    """Clip-relative words → the cut timeline. A word that starts inside a cut is dropped."""
+    """
+    Clip-relative words → the cut timeline. A word that lies inside a cut is dropped.
+    A word that starts inside a cut but ends after it is kept and starts at the join: speech recognition
+    sometimes stretches a word over the silence before it, and that silence is what the cut removed.
+    """
     out = []
     for w in words:
         s = map_time(float(w["start"]), cuts_rel)
         if s is None:
-            continue
+            if map_time(float(w["end"]), cuts_rel) is None:
+                continue
+            s = map_time_clamped(float(w["start"]), cuts_rel)
         e = map_time_clamped(float(w["end"]), cuts_rel)
         out.append({**w, "start": round(s, 3), "end": round(max(s + 0.05, e), 3)})
     return out
@@ -244,8 +250,9 @@ def cuts_key(cuts: Sequence[Cut]) -> str:
         return ""
     import hashlib
 
-    # SMOOTH is part of the key: files cut with hard jumps are rendered again with the crossfades
-    return hashlib.sha1(repr(([(round(a, 2), round(b, 2)) for a, b in cuts], SMOOTH)).encode()).hexdigest()[:8]
+    # SMOOTH and the word-remap version are part of the key, so older cut renders are made again
+    # (v2: words stretched over a cut pause are no longer missing from the subtitles)
+    return hashlib.sha1(repr(([(round(a, 2), round(b, 2)) for a, b in cuts], SMOOTH, "words-v2")).encode()).hexdigest()[:8]
 
 
 # ─── Rendering ────────────────────────────────────────────────────────────────

@@ -414,6 +414,17 @@ def get_job(job_id: str) -> Optional[Dict[str, Any]]:
         return dict(row)
 
 
+def busy_project_ids() -> List[str]:
+    """Projects being analysed or waiting in the queue right now."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT project_id FROM jobs WHERE status IN ('queued', 'running') "
+            "UNION SELECT project_id FROM queue_items WHERE project_id IS NOT NULL "
+            "AND status IN ('waiting', 'downloading', 'analyzing')"
+        ).fetchall()
+    return [r[0] for r in rows if r[0]]
+
+
 def get_project_by_source_path(source_path: str) -> Optional[Dict[str, Any]]:
     """Returns an existing project matching source_path or identical file content on disk."""
     if not source_path:
@@ -464,7 +475,9 @@ def list_recent_projects(limit: int = 25, include_test: Optional[bool] = None) -
         SELECT p.*, COUNT(c.id) AS clips_count,
                SUM(CASE WHEN COALESCE(c.review_status, '') != '' THEN 1 ELSE 0 END) AS reviewed_count,
                SUM(CASE WHEN c.review_status = 'keep' THEN 1 ELSE 0 END) AS kept_count,
-               SUM(CASE WHEN c.review_status = 'done' THEN 1 ELSE 0 END) AS done_count
+               SUM(CASE WHEN c.review_status = 'done' THEN 1 ELSE 0 END) AS done_count,
+               SUM(CASE WHEN COALESCE(c.review_status, '') = '' AND c.reserve = 0 THEN 1 ELSE 0 END) AS new_count,
+               SUM(CASE WHEN COALESCE(c.review_status, '') = '' AND c.reserve = 1 THEN 1 ELSE 0 END) AS reserve_count
         FROM projects p
         LEFT JOIN candidate_clips c ON p.id = c.project_id
         GROUP BY p.id
@@ -644,7 +657,11 @@ def list_all_projects() -> List[Dict[str, Any]]:
     with get_db() as conn:
         rows = conn.execute(
             "SELECT p.*, SUM(CASE WHEN c.review_status = 'keep' THEN 1 ELSE 0 END) AS kept_count, "
-            "COUNT(c.id) AS clips_count "
+            "COUNT(c.id) AS clips_count, "
+            "SUM(CASE WHEN c.review_status = '' AND c.reserve = 0 THEN 1 ELSE 0 END) AS new_count, "
+            "SUM(CASE WHEN c.review_status = 'done' THEN 1 ELSE 0 END) AS done_count, "
+            "SUM(CASE WHEN c.review_status = 'drop' THEN 1 ELSE 0 END) AS drop_count, "
+            "SUM(CASE WHEN c.review_status = '' AND c.reserve = 1 THEN 1 ELSE 0 END) AS reserve_count "
             "FROM projects p LEFT JOIN candidate_clips c ON p.id = c.project_id GROUP BY p.id"
         ).fetchall()
         return [dict(r) for r in rows]

@@ -135,6 +135,33 @@ def _junk(uploads: Path, output: Path, projects: List[Dict[str, Any]], with_tran
     return junk
 
 
+def is_finished(p: Dict[str, Any]) -> bool:
+    """
+    «Закінчив з цим відео»: it has clips and none is left in «Нові» or «В роботі».
+    Clips in «Запас», «Виконано» and «Не беру» do not hold the video.
+    """
+    return bool(p.get("clips_count")) and not p.get("new_count") and not p.get("kept_count")
+
+
+def _source_in_uploads(src: str, uploads: Path) -> Optional[Path]:
+    """The source video, only when it is a file inside the studio's uploads folder (never anything else)."""
+    if not src:
+        return None
+    path = Path(src)
+    try:
+        if path.is_file() and path.resolve().is_relative_to(uploads.resolve()):
+            return path
+    except OSError:
+        return None
+    return None
+
+
+def _shared_with_unfinished(projects: List[Dict[str, Any]], pid: str, src: str) -> bool:
+    n = _norm(src)
+    return any(q["id"] != pid and q.get("source_path") and _norm(q["source_path"]) == n and not is_finished(q)
+               for q in projects)
+
+
 def scan(uploads: Path, output: Path) -> Dict[str, Any]:
     """Sizes by category plus a per-video list (biggest first)."""
     projects = db.list_all_projects()
@@ -157,15 +184,24 @@ def scan(uploads: Path, output: Path) -> Dict[str, Any]:
         totals["sources"] += src_size
         totals["clips"] += clips
         totals["vertical"] += vertical
+        finished = is_finished(p)
         by_project.append({
             "id": p["id"],
             "title": p.get("title") or p["id"],
             "created_at": p.get("created_at"),
             "clips_count": p.get("clips_count") or 0,
             "kept_count": p.get("kept_count") or 0,
+            "new_count": p.get("new_count") or 0,
+            "done_count": p.get("done_count") or 0,
+            "drop_count": p.get("drop_count") or 0,
+            "reserve_count": p.get("reserve_count") or 0,
             "source_bytes": src_size,
             "clips_bytes": clips + vertical,
             "total_bytes": src_size + clips + vertical + other,
+            "finished": finished,
+            # can «Видалити відео, з якими закінчив» take it: in uploads and not shared with a video still in work
+            "removable": finished and _source_in_uploads(src, uploads) is not None
+                         and not _shared_with_unfinished(projects, p["id"], src),
         })
 
     cache_dir = _transcript_dir()
@@ -182,13 +218,46 @@ def scan(uploads: Path, output: Path) -> Dict[str, Any]:
         disk = {"free": 0, "total": 0}
 
     by_project.sort(key=lambda r: r["total_bytes"], reverse=True)
+    can_go = [r for r in by_project if r["removable"]]
     return {
         "totals": totals,
         "studio_bytes": sum(totals.values()),
         "disk": disk,
         "projects": by_project,
         "junk_items": len(junk),
+        "finished_count": len(can_go),
+        "finished_bytes": sum(r["total_bytes"] for r in can_go),
     }
+
+
+class NotRemovable(ValueError):
+    """A video that «Видалити відео, з якими закінчив» must not touch; the message is for the user."""
+
+
+def check_finished(uploads: Path, project_ids: List[str], busy: Iterable[str] = ()) -> List[str]:
+    """
+    «Видалити відео, з якими закінчив»: checks every project first (all or nothing) and returns the ids to delete.
+    busy: projects being analysed or waiting in the queue right now.
+    """
+    projects = {p["id"]: p for p in db.list_all_projects()}
+    busy = set(busy)
+    out = []
+    for pid in project_ids:
+        p = projects.get(pid)
+        if not p:
+            raise NotRemovable("Такого відео немає.")
+        title = p.get("title") or pid
+        if pid in busy:
+            raise NotRemovable(f"«{title}» зараз аналізується або чекає в черзі.")
+        if not is_finished(p):
+            raise NotRemovable(f"У «{title}» ще є кліпи в «Нових» або «В роботі».")
+        src = _source_in_uploads(p.get("source_path") or "", uploads)
+        if src is None:
+            raise NotRemovable(f"Файл відео «{title}» лежить не в папці студії, тому студія його не видаляє.")
+        if _shared_with_unfinished(list(projects.values()), pid, str(src)):
+            raise NotRemovable(f"Той самий файл «{title}» ще використовує інше відео, з яким ти не закінчив.")
+        out.append(pid)
+    return out
 
 
 def cleanup(

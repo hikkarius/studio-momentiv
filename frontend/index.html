@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Студія моментів</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/tokens.css">
   <link rel="stylesheet" href="/css/style.css">
   <link rel="stylesheet" href="/css/editor.css">
   <link rel="stylesheet" href="/css/queue-settings.css">
@@ -240,6 +241,23 @@
   </main>
 
   <!-- Modal for Interactive Clip Trimming / Fine-Tuning -->
+  <div class="modal-backdrop rm-dialog" id="rmDialog" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="rmTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap"><h3 class="modal-title" id="rmTitle">Видалити відео?</h3></div>
+        <button class="modal-close-btn" type="button" onclick="Settings.closeRemoveDialog()" aria-label="Закрити">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="rm-lead" id="rmLead"></p>
+        <ul class="rm-list" id="rmList"></ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="Settings.closeRemoveDialog()">Скасувати</button>
+        <button type="button" class="btn btn-primary" id="rmGo" onclick="Settings.confirmRemove()">Видалити</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="trimModal" style="display:none;">
     <div class="modal-card">
       <div class="modal-header">
@@ -320,12 +338,14 @@
   <!-- ═══ Налаштування ═══ -->
   <div class="settings-backdrop" id="settingsScreen" hidden>
     <section class="settings-sheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
-      <nav class="settings-tabs" role="tablist" aria-label="Розділи налаштувань">
+      <nav class="settings-tabs" aria-label="Налаштування">
         <h2 id="settingsTitle">Налаштування</h2>
+        <div class="settings-tablist" role="tablist" aria-label="Розділи налаштувань">
         <button type="button" role="tab" data-tab="clips" aria-selected="true"><i aria-hidden="true">✂</i>Кліпи</button>
         <button type="button" role="tab" data-tab="ai" aria-selected="false"><i aria-hidden="true">✨</i>Ключ і розпізнавання<span class="set-dot" id="setKeyDot" hidden></span></button>
         <button type="button" role="tab" data-tab="disk" aria-selected="false"><i aria-hidden="true">💾</i>Місце на диску</button>
         <button type="button" role="tab" data-tab="about" aria-selected="false"><i aria-hidden="true">ℹ</i>Про студію</button>
+        </div>
         <span class="settings-nav-note">Зміни зберігаються одразу</span>
       </nav>
 
@@ -358,10 +378,10 @@
           </div>
           <div class="set-grp">
             <h4>Що шукати в нових відео</h4>
-            <div class="set-cards" data-key="studio.default_filter" role="radiogroup" aria-label="Що шукати">
-              <button type="button" role="radio" data-v="Viral Hooks"><b>🔥 Вірусні гачки</b><small>Сильний початок, суперечка, несподіванка. Для Shorts і TikTok.</small></button>
-              <button type="button" role="radio" data-v="Actionable Advice"><b>💡 Корисні поради</b><small>Завершена думка, яку можна застосувати.</small></button>
-              <button type="button" role="radio" data-v="Storytelling"><b>🎭 Емоційні історії</b><small>Розповідь з початком і розв’язкою.</small></button>
+            <div class="set-cards" data-key="studio.default_filter" role="group" aria-label="Що шукати">
+              <button type="button" data-v="Viral Hooks"><b>🔥 Вірусні гачки</b><small>Сильний початок, суперечка, несподіванка. Для Shorts і TikTok.</small></button>
+              <button type="button" data-v="Actionable Advice"><b>💡 Корисні поради</b><small>Завершена думка, яку можна застосувати.</small></button>
+              <button type="button" data-v="Storytelling"><b>🎭 Емоційні історії</b><small>Розповідь з початком і розв’язкою.</small></button>
             </div>
           </div>
           <div class="set-grp">
@@ -397,10 +417,10 @@
           </div>
           <div class="set-grp">
             <h4>Розпізнавання мови</h4>
-            <div class="set-cards" data-key="whisper.model" id="setModel" role="radiogroup" aria-label="Якість розпізнавання">
-              <button type="button" role="radio" data-v="small"><b>Швидко</b><small>Для слабких комп’ютерів. Можуть траплятися помилки в словах.</small></button>
-              <button type="button" role="radio" data-v="medium"><b>Збалансовано</b><small>Добре для чистого звуку, удвічі швидше.</small></button>
-              <button type="button" role="radio" data-v="large-v3-turbo"><span class="set-tag">Рекомендовано</span><b>Найточніше</b><small>Найкраще для подкастів і стендапу.</small></button>
+            <div class="set-cards" data-key="whisper.model" id="setModel" role="group" aria-label="Якість розпізнавання">
+              <button type="button" data-v="small"><b>Швидко</b><small>Для слабких комп’ютерів. Можуть траплятися помилки в словах.</small></button>
+              <button type="button" data-v="medium"><b>Збалансовано</b><small>Добре для чистого звуку, удвічі швидше.</small></button>
+              <button type="button" data-v="large-v3-turbo"><span class="set-tag">Рекомендовано</span><b>Найточніше</b><small>Найкраще для подкастів і стендапу.</small></button>
             </div>
             <small class="set-note">Після зміни наступне відео розпізнається заново, навіть якщо вже оброблялося.</small>
             <div class="set-box">
@@ -430,6 +450,13 @@
           </div>
           <div class="set-grp">
             <h4>Звільнити місце</h4>
+            <div class="disk-done" id="diskDonePlate" hidden>
+              <div class="dd-l">
+                <b>Видалити відео, з якими закінчив <span id="diskDoneCount"></span></b>
+                <small>Закінчив = у відео не лишилось кліпів у «Нові» і «В роботі». Відео зникне повністю разом із кліпами.</small>
+              </div>
+              <button type="button" class="btn btn-primary" id="btnCleanDone" onclick="Settings.openRemoveDialog()">Видалити</button>
+            </div>
             <div class="set-box">
               <div class="set-line">
                 <div class="set-l"><b>Прибрати сміття <span id="diskJunk"></span></b><small>Недокачані файли, тимчасовий звук, залишки видалених відео. Нічого потрібного.</small></div>
@@ -438,7 +465,7 @@
               <div class="set-line">
                 <div class="set-l"><b>Видалити готові файли кліпів <span id="diskClips"></span></b><small>Кліпи й позначки лишаються: файл зробиться знову, коли натиснеш «Скачати».</small></div>
                 <div class="disk-action-ctl">
-                  <select class="input-select" id="diskOlder">
+                  <select class="input-select" id="diskOlder" aria-label="Старші за">
                     <option value="0">усі</option><option value="7">старші за 7 днів</option>
                     <option value="30" selected>старші за 30 днів</option><option value="90">старші за 90 днів</option>
                   </select>
@@ -559,7 +586,7 @@
             <button type="button" class="ed-shelf" data-f="drop" aria-pressed="false" title="Відкинуті кліпи"><span><i class="ed-sdot" data-s="drop"></i>Не беру</span><b id="edCnt_drop">0</b></button>
             <button type="button" class="ed-shelf" data-f="reserve" aria-pressed="false" title="Слабші кліпи: ШІ знайшов, але вони гірші за інші"><span><i class="ed-sdot" data-s="reserve"></i>Запас</span><b id="edCnt_reserve">0</b></button>
           </div>
-          <div class="ed-stat keep ed-stat-vx"><span>У добірці</span><b id="edCntPick">0</b></div>
+          <div class="ed-stat keep ed-stat-vx"><span>В роботі</span><b id="edCntPick">0</b></div>
         </div>
         <span class="ed-spacer"></span>
         <button class="ed-reanalyze" id="edReanalyze" type="button" title="Gemini ще раз перегляне розмову і запропонує нові кліпи. Транскрипція береться з кешу, тож це швидко.">
@@ -621,7 +648,7 @@
             <button type="button" role="tab" data-tab="text" aria-selected="true" aria-controls="edTabText">Текст кліпу</button>
             <button type="button" role="tab" data-tab="post" aria-selected="false" aria-controls="edTabPost">Допис</button>
           </div>
-          <div class="ed-tabbody" id="edTabText" role="tabpanel">
+          <div class="ed-tabbody" id="edTabText" role="tabpanel" tabindex="0">
             <div class="ed-words" id="edWords"></div>
             <div class="ed-small">Клік по слову: слухати з цього місця. Сірі слова поза кліпом.</div>
           </div>
@@ -651,8 +678,8 @@
                   <button class="ed-sbtn sm" id="vxStatus" type="button" aria-haspopup="menu" aria-expanded="false" title="Статус кліпу"><i class="ed-sdot"></i><span class="ed-sbtn-l">Нове</span><small aria-hidden="true">▾</small></button>
                 </div>
                 <div class="vx-nav">
-                  <button type="button" class="ed-btn sm" id="vxPrev" title="Попередній обраний кліп (↑)">↑ Попередній</button>
-                  <button type="button" class="ed-btn sm" id="vxNext" title="Наступний обраний кліп (↓)">Наступний ↓</button>
+                  <button type="button" class="ed-btn sm" id="vxPrev" title="Попередній кліп (↑)" aria-label="Попередній кліп">↑</button>
+                  <button type="button" class="ed-btn sm" id="vxNext" title="Наступний кліп (↓)" aria-label="Наступний кліп">↓</button>
                 </div>
               </div>
               <div class="vx-screen">
