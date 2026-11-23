@@ -113,3 +113,32 @@ def test_render_with_cuts_is_shorter(tmp_path):
     assert 2.8 < dur < 3.3
     levels = pauses.audio_levels(str(src), 0.0, 2.0)
     assert len(levels) == 2 * R and max(levels) > -40
+
+
+def test_smooth_joins_keep_the_timing():
+    segs = [(0.0, 1.0), (2.0, 4.0), (4.1, 5.0)]
+    fc = pauses.concat_filter(segs, True)
+    assert "xfade" not in pauses.concat_filter([(0.0, 1.0), (1.02, 2.0)], True)  # gap too small
+    # each join borrows at most half of its gap: 0.08 s of the 1 s gap, 0.04 s of the 0.1 s one
+    assert fc.count("xfade=") == 2 and fc.count("acrossfade=") == 2 and "[cv]" in fc and "[ca]" in fc
+    assert "trim=start=0.000:end=1.080" in fc and "trim=start=1.920:end=4.040" in fc and "duration=0.080" in fc
+    # 0.08 s borrowed from each side of the 1 s gap: the second part still starts right after the first
+    assert "offset=0.920" in fc
+    assert "xfade" not in pauses.concat_filter(segs, True, smooth=0)
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg is not installed")
+def test_smooth_join_renders_with_the_same_length(tmp_path):
+    src = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=160x90:rate=25",
+                    "-f", "lavfi", "-i", "sine=frequency=300", "-t", "6", "-c:v", "libx264", "-preset", "ultrafast",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", str(src)], check=True, timeout=60)
+    segs = [(0.0, 1.0), (2.0, 4.0)]
+    out = tmp_path / "smooth.mp4"
+    proc = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-filter_complex", pauses.concat_filter(segs, True),
+                           "-map", "[cv]", "-map", "[ca]", "-c:v", "libx264", "-preset", "ultrafast", str(out)],
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr[-400:]
+    dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(out)],
+                               capture_output=True, text=True, timeout=20).stdout)
+    assert 2.9 < dur < 3.15

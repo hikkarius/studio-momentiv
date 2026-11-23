@@ -29,6 +29,7 @@ MIN_GAP_CHOICES = (0.4, 0.6, 1.0)
 KEEP = 0.2               # silence left in place of a cut pause
 EDGE = 0.25              # never cut this close to the clip bounds
 MIN_CUT = 0.15           # a cut shorter than this is not worth a jump
+SMOOTH = 0.16            # crossfade at each cut (s); it overlaps into the removed pause, timing stays
 
 Cut = Tuple[float, float]
 
@@ -241,7 +242,8 @@ def cuts_key(cuts: Sequence[Cut]) -> str:
         return ""
     import hashlib
 
-    return hashlib.sha1(repr([(round(a, 2), round(b, 2)) for a, b in cuts]).encode()).hexdigest()[:8]
+    # SMOOTH is part of the key: files cut with hard jumps are rendered again with the crossfades
+    return hashlib.sha1(repr(([(round(a, 2), round(b, 2)) for a, b in cuts], SMOOTH)).encode()).hexdigest()[:8]
 
 
 # ─── Rendering ────────────────────────────────────────────────────────────────
@@ -255,17 +257,56 @@ def has_audio(source: str, timeout: int = 20) -> bool:
         return True
 
 
-def concat_filter(segments_rel: Sequence[Cut], audio: bool, vin: str = "0:v", ain: str = "0:a") -> str:
-    """filter_complex part that keeps only segments_rel of the input and joins them into [cv] (+ [ca])."""
-    parts, ins = [], []
-    for k, (a, b) in enumerate(segments_rel):
-        parts.append(f"[{vin}]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS[v{k}]")
-        ins.append(f"[v{k}]")
-        if audio:
-            parts.append(f"[{ain}]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS[a{k}]")
-            ins.append(f"[a{k}]")
+def concat_filter(segments_rel: Sequence[Cut], audio: bool, vin: str = "0:v", ain: str = "0:a",
+                  smooth: float = SMOOTH) -> str:
+    """
+    filter_complex part that keeps only segments_rel of the input and joins them into [cv] (+ [ca]).
+    smooth > 0: each join is a short crossfade (picture and sound) instead of a hard jump. Both sides
+    borrow half of it from the removed pause, so the speech lands at exactly the same moments as with
+    a hard cut and the subtitles stay in sync. smooth = 0: plain concat.
+    """
     n = len(segments_rel)
-    parts.append("".join(ins) + f"concat=n={n}:v=1:a={1 if audio else 0}[cv]" + ("[ca]" if audio else ""))
+    # half-overlap at each join, never more than half of the removed gap
+    ext = [0.0] * max(0, n - 1)
+    if smooth > 0:
+        for k in range(n - 1):
+            gap = segments_rel[k + 1][0] - segments_rel[k][1]
+            ext[k] = round(max(0.0, min(smooth / 2, gap / 2 - 0.01)), 3)
+    if n < 2 or not any(e >= 0.02 for e in ext):
+        parts, ins = [], []
+        for k, (a, b) in enumerate(segments_rel):
+            parts.append(f"[{vin}]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS[v{k}]")
+            ins.append(f"[v{k}]")
+            if audio:
+                parts.append(f"[{ain}]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS[a{k}]")
+                ins.append(f"[a{k}]")
+        parts.append("".join(ins) + f"concat=n={n}:v=1:a={1 if audio else 0}[cv]" + ("[ca]" if audio else ""))
+        return ";".join(parts)
+
+    parts, lens = [], []
+    for k, (a, b) in enumerate(segments_rel):
+        a2 = a - (ext[k - 1] if k > 0 else 0.0)
+        b2 = b + (ext[k] if k < n - 1 else 0.0)
+        lens.append(b2 - a2)
+        parts.append(f"[{vin}]trim=start={a2:.3f}:end={b2:.3f},setpts=PTS-STARTPTS,settb=AVTB[v{k}]")
+        if audio:
+            parts.append(f"[{ain}]atrim=start={a2:.3f}:end={b2:.3f},asetpts=PTS-STARTPTS[a{k}]")
+    vprev, aprev, total = "v0", "a0", lens[0]
+    for k in range(1, n):
+        d = 2 * ext[k - 1]
+        vout = "cv" if k == n - 1 else f"vx{k}"
+        aout = "ca" if k == n - 1 else f"ax{k}"
+        if d >= 0.04:
+            parts.append(f"[{vprev}][v{k}]xfade=transition=fade:duration={d:.3f}:offset={total - d:.3f}[{vout}]")
+            if audio:
+                parts.append(f"[{aprev}][a{k}]acrossfade=d={d:.3f}:c1=tri:c2=tri[{aout}]")
+        else:
+            parts.append(f"[{vprev}][v{k}]concat=n=2:v=1:a=0[{vout}]")
+            if audio:
+                parts.append(f"[{aprev}][a{k}]concat=n=2:v=0:a=1[{aout}]")
+            d = 0.0
+        total += lens[k] - d
+        vprev, aprev = vout, aout
     return ";".join(parts)
 
 
@@ -274,7 +315,7 @@ def render_with_cuts(source: str, start: float, end: float, cuts: Sequence[Cut],
     """The plain 16:9 clip with the pauses taken out (re-encoded, high quality)."""
     segs = relative(kept_segments(start, end, cuts), start)
     audio = has_audio(source)
-    fc = concat_filter(segs, audio)
+    filters = [concat_filter(segs, audio), concat_filter(segs, audio, smooth=0)]
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(f"tmp_{uuid.uuid4().hex[:6]}_{out.name}")
@@ -283,7 +324,7 @@ def render_with_cuts(source: str, start: float, end: float, cuts: Sequence[Cut],
         encoders.insert(0, ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "19", "-b:v", "12M", "-pix_fmt", "yuv420p"])
     last = ""
     try:
-        for enc in encoders:
+        for fc, enc in ((f, e) for f in dict.fromkeys(filters) for e in encoders):
             cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{start:.3f}", "-i", os.path.abspath(source), "-t", f"{end - start:.3f}",
                    "-filter_complex", fc, "-map", "[cv]", *(["-map", "[ca]", "-c:a", "aac", "-b:a", "192k"] if audio else []),
                    *enc, "-movflags", "+faststart", str(tmp.resolve())]

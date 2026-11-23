@@ -860,7 +860,7 @@ const Editor = (() => {
     $("edLen").textContent = cuts.length ? `${Math.round(len(c))} с → ${fmt1(len(c) - rm)} с` : `${Math.round(len(c))} с`;
     const btn = $("edPauses");
     btn.classList.toggle("on", cuts.length > 0);
-    btn.textContent = cuts.length ? "✂ Паузи прибрано" : "✂ Прибрати паузи";
+    btn.textContent = cuts.length ? `✓ Паузи прибрано · −${fmt1(rm)} с` : "✂ Прибрати паузи";
     const bar = $("edPauseBar");
     const show = cuts.length > 0 || st.restored.length > 0;
     bar.hidden = !show;
