@@ -580,9 +580,11 @@
             <div class="ed-bigplay" aria-hidden="true">▶</div>
           </div>
           <div class="ed-trim" id="edTrim" aria-label="Межі кліпу">
-            <div class="ed-trim-info"><span>Початок <b id="edStartTc"></b></span><span class="ed-len" id="edLen"></span><button type="button" class="ed-silence" id="edSilence" title="Прибрати тишу на початку і в кінці кліпу: межі стануть одразу перед першим і після останнього слова">✂ Підрізати тишу</button><span>Кінець <b id="edEndTc"></b></span></div>
+            <div class="ed-trim-info"><span>Початок <b id="edStartTc"></b></span><span class="ed-len" id="edLen"></span><button type="button" class="ed-silence" id="edPauses" title="Вирізати довгі паузи всередині кліпу (jump cut). Чистий оригінал лишається для скачування">✂ Прибрати паузи</button><span>Кінець <b id="edEndTc"></b></span></div>
+            <div class="ed-ruler" id="edRuler" aria-hidden="true"></div>
             <div class="ed-track" id="edTrack" title="Тягни по доріжці: перемотка в межах кліпу. Тягни краї рамки: початок і кінець. Клік по слову: почати чи закінчити ним."></div>
-            <div class="ed-small">Тягни краї рамки, щоб змінити межі. Клік по слову: почати або закінчити ним.</div>
+            <div class="ed-small" id="edTrackHint">Тягни краї рамки, щоб змінити межі. Клік по слову: почати або закінчити ним. Колесо миші над доріжкою: наблизити.</div>
+            <div class="ed-pausebar" id="edPauseBar" hidden></div>
           </div>
           <div class="ed-controls">
             <button class="ed-play" id="edPlay" type="button" title="Грати або пауза (Пробіл)" aria-label="Грати">▶</button>
@@ -597,7 +599,8 @@
 
         <section class="ed-panel ed-side" aria-label="Кліп">
           <div class="ed-cap">Скачати цей кліп</div>
-          <button class="ed-bigdl" id="edMp4" type="button">⬇ Кліп 16:9 · MP4 <small id="edMp4Info"></small></button>
+          <button class="ed-bigdl" id="edMp4" type="button"><span id="edMp4Lab">⬇ Кліп 16:9 · MP4</span> <small id="edMp4Info"></small></button>
+          <button class="ed-btn ed-rawdl" id="edMp4Raw" type="button" hidden title="Той самий кліп з усіма паузами, без перекодування: для монтажу в CapCut">⬇ Без вирізів · оригінал</button>
           <div class="ed-dl2">
             <button class="ed-btn" id="edSrt" type="button">💬 Субтитри SRT</button>
             <button class="ed-btn" id="edGoVx" type="button">📱 Зробити 9:16 →</button>

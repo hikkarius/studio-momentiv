@@ -115,6 +115,10 @@ def init_db():
             # JSON: vertical 9:16 export settings of the clip (caption style, framing, word edits)
             conn.execute("ALTER TABLE candidate_clips ADD COLUMN vertical_opts TEXT NOT NULL DEFAULT '{}';")
 
+        if "cuts" not in columns:
+            # JSON: pauses cut out of the clip («Прибрати паузи»), absolute seconds [[a, b], ...]
+            conn.execute("ALTER TABLE candidate_clips ADD COLUMN cuts TEXT NOT NULL DEFAULT '[]';")
+
         queue_columns = [row["name"] for row in conn.execute("PRAGMA table_info(queue_items);").fetchall()]
         if "language" not in queue_columns:
             conn.execute("ALTER TABLE queue_items ADD COLUMN language TEXT NOT NULL DEFAULT '';")
@@ -199,6 +203,11 @@ def _clip_row(row: Any) -> Dict[str, Any]:
         d["vertical_opts"] = vo if isinstance(vo, dict) else {}
     except Exception:
         d["vertical_opts"] = {}
+    try:
+        cuts = json.loads(d.get("cuts") or "[]")
+        d["cuts"] = cuts if isinstance(cuts, list) else []
+    except Exception:
+        d["cuts"] = []
     return d
 
 
@@ -267,6 +276,9 @@ def update_clip_fields(project_id: str, clip_index: int, **fields: Any) -> Optio
         tags = [str(t).strip() for t in fields["hashtags"] if str(t).strip()]
         sets.append("hashtags = ?")
         values.append(json.dumps(tags, ensure_ascii=False))
+    if fields.get("cuts") is not None:
+        sets.append("cuts = ?")
+        values.append(json.dumps([[float(a), float(b)] for a, b in fields["cuts"]]))
     if fields.get("vertical_opts") is not None:
         sets.append("vertical_opts = ?")
         values.append(json.dumps(fields["vertical_opts"], ensure_ascii=False))

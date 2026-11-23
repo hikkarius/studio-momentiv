@@ -11,7 +11,7 @@ import os
 import re
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from transcription import load_transcript_cache
 
@@ -77,9 +77,11 @@ def generate_srt_for_clip(
     start_sec: float,
     end_sec: float,
     target_words_per_cue: int = 3,
+    cuts: Optional[Sequence[Sequence[float]]] = None,
 ) -> str:
     """
     Generates a full .SRT string for a clip slice [start_sec, end_sec].
+    cuts: absolute pauses taken out of the clip («Прибрати паузи»); the cues follow the cut timeline.
     Uses cached word timestamps if available, shifting timecodes relative to start_sec (00:00:00,000).
     Falls back gracefully to sentence-level segments if word timestamps are missing.
     """
@@ -93,6 +95,18 @@ def generate_srt_for_clip(
 
     if cached:
         segments, words, _ = cached
+
+    if cuts:
+        import pauses
+        cl = pauses.normalize_cuts(cuts, start_sec, end_sec)
+        if cl:
+            rel = [{**w, "start": float(w["start"]) - start_sec, "end": float(w["end"]) - start_sec}
+                   for w in (words or []) if float(w.get("end", 0.0)) > start_sec and float(w.get("start", 0.0)) < end_sec]
+            words = [{**w, "start": start_sec + w["start"], "end": start_sec + w["end"]}
+                     for w in pauses.remap_words(rel, pauses.relative(cl, start_sec))]
+            end_sec = end_sec - pauses.removed(cl)
+            clip_duration = end_sec - start_sec
+            segments = []  # sentence fallback would ignore the cuts
 
     srt_entries: List[str] = []
     entry_index = 1
@@ -179,6 +193,7 @@ def write_clip_srt_file(
     end_sec: float,
     output_path: str,
     target_words_per_cue: int = 3,
+    cuts: Optional[Sequence[Sequence[float]]] = None,
 ) -> str:
     """Generates SRT content and writes it directly to disk (UTF-8)."""
     srt_content = generate_srt_for_clip(
@@ -186,6 +201,7 @@ def write_clip_srt_file(
         start_sec=start_sec,
         end_sec=end_sec,
         target_words_per_cue=target_words_per_cue,
+        cuts=cuts,
     )
     p = Path(output_path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -218,6 +234,7 @@ def create_all_subtitles_zip(
                 start_sec=start_s,
                 end_sec=end_s,
                 target_words_per_cue=3,
+                cuts=c.get("cuts"),
             )
             arcname = f"clip_{idx:02d}_{int(start_s)}s_{safe_title}.srt"
             zf.writestr(arcname, srt_text.encode("utf-8"))
