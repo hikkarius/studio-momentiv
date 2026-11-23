@@ -121,6 +121,27 @@
 .ed-ruler i { position: absolute; bottom: 0; width: 1px; height: 4px; background: var(--ed-line); }
 .ed-ruler i.big { height: 7px; background: var(--ed-faint); }
 .ed-ruler b { position: absolute; bottom: 8px; line-height: 12px; transform: translateX(-50%); font: 500 10.5px var(--ed-mono); color: var(--ed-faint); white-space: nowrap; }
+/* Map of the whole clip above the track: the light frame is what the track below shows */
+.ed-map { position: relative; height: 26px; border-radius: 8px; background: var(--ed-sunk); overflow: hidden; touch-action: none; user-select: none; cursor: pointer; }
+.ed-map canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.ed-map .clip { position: absolute; top: 0; bottom: 0; border-top: 2px solid var(--ed-accent); border-bottom: 2px solid var(--ed-accent); pointer-events: none; }
+.ed-map .win { position: absolute; top: 1px; bottom: 1px; min-width: 10px; box-sizing: border-box; border: 2px solid var(--ed-fg); border-radius: 6px; cursor: grab;
+  background: color-mix(in srgb, var(--ed-fg) 10%, transparent); opacity: .45; }
+.ed-map.zoomed .win { opacity: 1; }
+.ed-map .win::before, .ed-map .win::after { content: ""; position: absolute; top: 5px; bottom: 5px; width: 3px; border-radius: 2px; background: var(--ed-fg); cursor: ew-resize; }
+.ed-map .win::before { left: 2px; } .ed-map .win::after { right: 2px; }
+.ed-map .ph { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--ed-fg); pointer-events: none; }
+/* Hint + zoom buttons under the track */
+.ed-navrow { display: flex; align-items: center; gap: 12px; min-height: 26px; }
+.ed-navrow .ed-small { flex: 1; min-width: 0; }
+.ed-navrow kbd { font: 700 10.5px var(--ed-mono); border: 1px solid var(--ed-line); border-bottom-width: 2px; border-radius: 5px; padding: 0 4px; color: var(--ed-muted); background: var(--ed-panel2); }
+.ed-zoom { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+.ed-zoom button { min-width: 26px; height: 24px; border-radius: 7px; border: 1px solid var(--ed-line); background: var(--ed-panel2); color: var(--ed-fg); font: 800 14px var(--ed-sans); cursor: pointer; display: grid; place-items: center; padding: 0 6px; }
+.ed-zoom button.wide { font-size: 12px; padding: 0 9px; }
+.ed-zoom button:hover:not(:disabled) { border-color: var(--ed-accent); }
+.ed-zoom button:disabled { opacity: .45; cursor: default; }
+.ed-zoom input[type=range] { width: 110px; accent-color: var(--ed-accent); cursor: pointer; }
+.ed-ruler b.l { transform: none; } .ed-ruler b.r { transform: translateX(-100%); }
 /* Bar under the track after pauses were cut */
 .ed-pausebar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--ed-muted); }
 .ed-pausebar .res b { color: #d9584d; font-weight: 700; }

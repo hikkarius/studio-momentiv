@@ -13,7 +13,7 @@ const Editor = (() => {
   const st = {
     project: null, clips: [], cur: -1, filter: "new", anchor: 0, tab: "text", sort: "score", mode: "table",
     words: [], wordsFor: null, stopAt: null, backToStart: false, saveTimer: null,
-    zoom: { lo: 0, hi: 1 }, zoomManual: false, levels: null, restored: [], drag: null, scrub: null, pop: null,
+    zoom: { lo: 0, hi: 1 }, zoomManual: false, levels: null, restored: [], drag: null, scrub: null, mapDrag: null, pop: null,
   };
   const MIN_LEN = 3;
 
@@ -276,9 +276,116 @@ const Editor = (() => {
     h += `<div class="hd" data-h="end" style="left:${p(c.end_sec)}%" title="Тягни: кінець кліпу"></div>`;
     h += `<div class="zph" id="edZph"></div>`;
     T.innerHTML = h;
+    renderMap();
     drawWave();
     renderRuler();
     placePlayhead(video().currentTime || 0);
+  }
+
+  // ─── Moving around the track: wheel scrolls, Ctrl+wheel and − + zoom, the map above shows where you are ───
+  const MIN_SPAN = 3;
+  /** What the map above the track shows: the whole clip with some room around it (and the view, if it is wider). */
+  function mapRange() {
+    const d = computeZoom();
+    return { lo: Math.min(d.lo, st.zoom.lo), hi: Math.max(d.hi, st.zoom.hi) };
+  }
+  function setZoom(lo, span) {
+    const dur = st.project.duration || st.zoom.hi;
+    span = Math.max(MIN_SPAN, Math.min(dur, span));
+    lo = Math.max(0, Math.min(dur - span, lo));
+    const d = computeZoom();
+    st.zoom = { lo, hi: lo + span };
+    st.zoomManual = Math.abs(lo - d.lo) > 0.01 || Math.abs(lo + span - d.hi) > 0.01;
+    renderTrack();
+  }
+  function resetZoom() { st.zoomManual = false; renderTrack(); }
+  /** Zoom keeps the white playhead in place (or the middle, when the playhead is out of view). */
+  function zoomBy(f) {
+    const { lo, hi } = st.zoom;
+    const t = video().currentTime || 0;
+    const a = t >= lo && t <= hi ? t : (lo + hi) / 2;
+    const dur = st.project.duration || hi;
+    const span = Math.max(MIN_SPAN, Math.min(dur, (hi - lo) * f));
+    setZoom(a - (a - lo) * (span / (hi - lo)), span);
+  }
+  function panBy(dt) { setZoom(st.zoom.lo + dt, st.zoom.hi - st.zoom.lo); }
+
+  /** Zoom slider: left = the whole clip, right = 3 seconds (log scale, so each step feels the same). */
+  const zoomFull = () => computeZoom().hi - computeZoom().lo;
+  function spanToSlider(span) {
+    const full = zoomFull();
+    if (full <= MIN_SPAN) return 0;
+    return Math.round(100 * Math.max(0, Math.min(1, Math.log(full / span) / Math.log(full / MIN_SPAN))));
+  }
+  function sliderToSpan(v) { const full = zoomFull(); return full * Math.pow(MIN_SPAN / full, v / 100); }
+
+  function renderMap() {
+    const M = $("edMap");
+    const c = clip();
+    if (!M || !c) return;
+    const { lo, hi } = mapRange();
+    const p = (t) => ((t - lo) / (hi - lo)) * 100;
+    if (!M.querySelector("canvas")) M.innerHTML = `<canvas aria-hidden="true"></canvas><div class="clip"></div><div class="win" title="Тягни: рухати доріжку. Тягни краї: масштаб"></div><div class="ph"></div>`;
+    const cl = M.querySelector(".clip"), win = M.querySelector(".win");
+    cl.style.left = `${p(c.start_sec)}%`; cl.style.width = `${p(c.end_sec) - p(c.start_sec)}%`;
+    win.style.left = `${p(st.zoom.lo)}%`; win.style.width = `${p(st.zoom.hi) - p(st.zoom.lo)}%`;
+    M.classList.toggle("zoomed", st.zoomManual);
+    const sl = $("edZoomRange");
+    if (sl) sl.value = spanToSlider(st.zoom.hi - st.zoom.lo);
+    const all = $("edZoomAll");
+    if (all) all.disabled = !st.zoomManual;
+  }
+
+  function onMapDown(e) {
+    if (e.button > 0 || !clip()) return;
+    e.preventDefault();
+    const M = $("edMap");
+    const r = M.getBoundingClientRect();
+    const { lo, hi } = mapRange();
+    const tAt = (x) => lo + ((x - r.left) / r.width) * (hi - lo);
+    const win = M.querySelector(".win").getBoundingClientRect();
+    const edge = 8;
+    let mode = "move";
+    if (Math.abs(e.clientX - win.left) <= edge) mode = "left";
+    else if (Math.abs(e.clientX - win.right) <= edge) mode = "right";
+    else if (e.clientX < win.left || e.clientX > win.right) { // jump: centre the view where you clicked
+      const span = st.zoom.hi - st.zoom.lo;
+      setZoom(tAt(e.clientX) - span / 2, span);
+    }
+    M.setPointerCapture(e.pointerId);
+    st.mapDrag = { mode, x: e.clientX, z: { ...st.zoom }, tAt, range: { lo, hi } };
+  }
+  function onMapMove(e) {
+    const d = st.mapDrag;
+    if (!d) return;
+    const r = $("edMap").getBoundingClientRect();
+    const dt = ((e.clientX - d.x) / r.width) * (d.range.hi - d.range.lo);
+    if (d.mode === "move") setZoom(d.z.lo + dt, d.z.hi - d.z.lo);
+    else if (d.mode === "left") { const nlo = Math.min(d.z.hi - MIN_SPAN, d.z.lo + dt); setZoom(nlo, d.z.hi - nlo); }
+    else { const nhi = Math.max(d.z.lo + MIN_SPAN, d.z.hi + dt); setZoom(d.z.lo, nhi - d.z.lo); }
+  }
+  function onMapUp() { st.mapDrag = null; }
+
+  /** While playing a zoomed-in track, it turns the page when the playhead reaches the right edge. */
+  function followPlayhead(t) {
+    if (!st.zoomManual || st.drag || st.scrub || st.mapDrag || video().paused) return;
+    const { lo, hi } = st.zoom;
+    const span = hi - lo;
+    if (t > hi - span * 0.04 || t < lo) setZoom(t - span * 0.1, span);
+  }
+
+  /** Dragging a yellow edge to the side of a zoomed-in track scrolls it further. */
+  function edgeScroll() {
+    if (!st.drag || !st.drag.dir) { if (st.drag) st.drag.raf = null; return; }
+    const span = st.zoom.hi - st.zoom.lo;
+    const before = st.zoom.lo;
+    st.zoomManual = true;
+    const dur = st.project.duration || st.zoom.hi;
+    const lo = Math.max(0, Math.min(dur - span, before + st.drag.dir * span * 0.012));
+    st.zoom = { lo, hi: lo + span };
+    if (lo !== before) moveBound(st.drag.lastX);
+    renderTrack();
+    st.drag.raf = requestAnimationFrame(edgeScroll);
   }
 
   /** Time ruler above the track: a tick every second (or more when zoomed out), labels every 5 s or more. */
@@ -291,14 +398,17 @@ const Editor = (() => {
     for (let t = Math.ceil(lo / minor) * minor; t <= hi; t += minor) {
       const big = t % major === 0;
       h += `<i class="${big ? "big" : ""}" style="left:${p(t)}%"></i>`;
-      if (big) h += `<b style="left:${p(t)}%">${fmtS(t)}</b>`;
+      if (big) h += `<b style="left:${p(t)}%"${p(t) < 3 ? ' class="l"' : p(t) > 97 ? ' class="r"' : ""}>${fmtS(t)}</b>`;
     }
     $("edRuler").innerHTML = h;
   }
 
   /** Sound wave behind the words: where people talk, laugh and where it is quiet. */
   function drawWave() {
-    const cv = $("edTrack").querySelector("canvas.wave");
+    drawLevels($("edTrack").querySelector("canvas.wave"), st.zoom.lo, st.zoom.hi);
+    drawLevels($("edMap").querySelector("canvas"), mapRange().lo, mapRange().hi);
+  }
+  function drawLevels(cv, lo, hi) {
     const L = st.levels;
     if (!cv || !L || !L.db.length) return;
     const c = clip();
@@ -312,7 +422,6 @@ const Editor = (() => {
     const colIn = css.getPropertyValue("--ed-accent").trim() || "#d4a944";
     const colOut = css.getPropertyValue("--ed-faint").trim() || "#6b665e";
     const floor = L.floor, top = L.top;
-    const { lo, hi } = st.zoom;
     const step = 3;
     for (let x = 0; x < W; x += step) {
       const t0 = lo + (x / W) * (hi - lo), t1 = lo + ((x + step) / W) * (hi - lo);
@@ -346,6 +455,8 @@ const Editor = (() => {
   }
 
   function placePlayhead(t) {
+    const mp = $("edMap")?.querySelector(".ph");
+    if (mp) { const { lo, hi } = mapRange(); mp.style.left = `${((t - lo) / (hi - lo)) * 100}%`; }
     const ph = $("edPh");
     if (ph) ph.style.left = `${(t / (st.project.duration || 1)) * 100}%`;
     const z = $("edZph");
@@ -439,6 +550,7 @@ const Editor = (() => {
       t = clamp(t);
     }
     skipCuts();
+    followPlayhead(t);
     placePlayhead(t);
     renderTc(t);
     if (st.stopAt != null && t >= st.stopAt && !v.paused) {
@@ -587,8 +699,17 @@ const Editor = (() => {
       return;
     }
     if (!st.drag) return;
+    moveBound(e.clientX);
+    const r = $("edTrack").getBoundingClientRect();
+    const dir = e.clientX > r.right - 24 ? 1 : e.clientX < r.left + 24 ? -1 : 0;
+    st.drag.dir = dir;
+    if (dir && !st.drag.raf) st.drag.raf = requestAnimationFrame(edgeScroll);
+  }
+  function moveBound(x) {
     const c = clip();
-    const t = trackTime(e);
+    if (!st.drag || !c) return;
+    st.drag.lastX = x;
+    const t = trackTime({ clientX: x });
     if (st.drag.which === "start") setBounds(Math.min(t, c.end_sec - MIN_LEN), c.end_sec, { save: false });
     else setBounds(c.start_sec, Math.max(t, c.start_sec + MIN_LEN), { save: false });
     seek(st.drag.which === "start" ? c.start_sec : Math.max(c.start_sec, c.end_sec - 1));
@@ -605,6 +726,7 @@ const Editor = (() => {
     if (!st.drag) return;
     const c = clip();
     const which = st.drag.which;
+    if (st.drag.raf) cancelAnimationFrame(st.drag.raf);
     st.drag = null;
     if (which === "start") setBounds(snap("start", c.start_sec), c.end_sec);
     else setBounds(c.start_sec, snap("end", c.end_sec));
@@ -988,21 +1110,26 @@ const Editor = (() => {
       if (e.target.closest("button[data-a='all']")) { const c = clip(); st.restored = []; savePauses(c, [], "Усі паузи повернуто"); }
     });
     $("edMp4Raw").addEventListener("click", () => { toast("Готуємо відео…"); download(`/api/projects/${pid()}/clips/${clip().clip_index}/download?raw=1`); });
-    // mouse wheel over the track: zoom in and out around the pointer
-    $("edTrack").addEventListener("wheel", (e) => {
-      if (!clip() || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+    // mouse wheel over the track scrolls it sideways; Ctrl+wheel (or a trackpad pinch) zooms around the playhead
+    const onWheel = (e) => {
+      if (!clip()) return;
       e.preventDefault();
-      const t = trackTime(e);
-      const { lo, hi } = st.zoom;
-      const f = e.deltaY > 0 ? 1.25 : 0.8;
-      const dur = st.project.duration || hi;
-      const span = Math.max(3, Math.min(dur, (hi - lo) * f));
-      let nlo = t - (t - lo) * (span / (hi - lo));
-      nlo = Math.max(0, Math.min(dur - span, nlo));
-      st.zoom = { lo: nlo, hi: nlo + span };
-      st.zoomManual = true;
-      renderTrack();
-    }, { passive: false });
+      if (e.ctrlKey || e.metaKey) { zoomBy(e.deltaY > 0 ? 1.25 : 0.8); return; }
+      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      const px = e.deltaMode === 1 ? d * 30 : d; // lines → pixels (Firefox)
+      panBy((px / 100) * (st.zoom.hi - st.zoom.lo) * 0.15);
+    };
+    $("edTrack").addEventListener("wheel", onWheel, { passive: false });
+    $("edMap").addEventListener("wheel", onWheel, { passive: false });
+    $("edMap").addEventListener("pointerdown", onMapDown);
+    $("edMap").addEventListener("pointermove", onMapMove);
+    $("edMap").addEventListener("pointerup", onMapUp);
+    $("edMap").addEventListener("pointercancel", onMapUp);
+    $("edMap").addEventListener("dblclick", resetZoom);
+    $("edZoomOut").addEventListener("click", () => zoomBy(1.5));
+    $("edZoomIn").addEventListener("click", () => zoomBy(1 / 1.5));
+    $("edZoomAll").addEventListener("click", resetZoom);
+    $("edZoomRange").addEventListener("input", (e) => zoomBy(sliderToSpan(Number(e.target.value)) / (st.zoom.hi - st.zoom.lo)));
     const T = $("edTrack");
     T.addEventListener("pointerdown", onTrackDown);
     T.addEventListener("pointermove", onTrackMove);
