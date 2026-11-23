@@ -139,14 +139,17 @@ const Editor = (() => {
     if (row) row.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
-  /** Thin map of the whole video next to the strip filters: every clip numbered by its place in the video. */
+  /** Clips the map shows: those of the open shelf, plus the open clip (it may have just left the shelf). */
+  const mapClips = () => [...st.clips.keys()].filter((i) => matches(st.clips[i]) || i === st.cur);
+
+  /** Thin map of the whole video under the shelf tabs: the clips of the open shelf, numbered by their place in the video. */
   function renderOverview() {
     const el = $("edOv");
     const dur = st.project.duration || 1;
     const W = el.clientWidth || 600;
     let h = "";
     let free = -Infinity; // where the last number ends: a number is shown only where it fits and does not overlap
-    [...st.clips.keys()].sort((a, b) => st.clips[a].start_sec - st.clips[b].start_sec).forEach((i) => {
+    mapClips().sort((a, b) => st.clips[a].start_sec - st.clips[b].start_sec).forEach((i) => {
       const c = st.clips[i];
       const w = Math.max(0.4, (len(c) / dur) * 100);
       const x = (c.start_sec / dur) * W, px = (w / 100) * W;
@@ -1348,7 +1351,7 @@ const Editor = (() => {
       const r = e.currentTarget.getBoundingClientRect();
       const t = ((e.clientX - r.left) / r.width) * (st.project.duration || 0);
       let best = 0, bd = Infinity;
-      st.clips.forEach((c, i) => { const d = Math.min(Math.abs(c.start_sec - t), Math.abs(c.end_sec - t)); if (d < bd) { bd = d; best = i; } });
+      mapClips().forEach((i) => { const c = st.clips[i]; const d = Math.min(Math.abs(c.start_sec - t), Math.abs(c.end_sec - t)); if (d < bd) { bd = d; best = i; } });
       select(best);
     });
     document.querySelectorAll("#edShelves button").forEach((b) => b.addEventListener("click", () => {
@@ -1356,6 +1359,7 @@ const Editor = (() => {
       const vis = visible();
       st.anchor = 0;
       renderList();
+      renderOverview();
       $("edList").scrollLeft = 0;
       if (vis.length && !vis.includes(st.cur)) select(vis[0]); // open the first clip of the shelf
     }));

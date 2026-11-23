@@ -410,15 +410,16 @@
 .ed-filters button[aria-pressed="true"] { background: var(--ed-accent-soft); border-color: var(--ed-accent); color: var(--ed-accent-text); }
 .ed-filters span { font: var(--fs-xs) var(--ed-mono); opacity: .7; margin-left: 4px; }
 .ed-vx-note { display: none; }
-.ed-ov { flex: 1; position: relative; height: 36px; min-width: 80px; border-radius: var(--r-md); background: var(--ed-sunk); cursor: pointer; margin: 0 6px; }
-.ed-ov .c { position: absolute; top: 4px; bottom: 4px; border-radius: var(--r-sm); min-width: 4px; background: var(--ed-cand); display: grid; place-items: center; overflow: hidden; }
+/* the map under the tabs: the whole video, only the clips of the open shelf */
+.ed-ov { flex: none; position: relative; height: 24px; border-radius: var(--r-sm); background: var(--ed-sunk); cursor: pointer; }
+.ed-ov .c { position: absolute; top: 3px; bottom: 3px; border-radius: var(--r-sm); min-width: 4px; background: var(--ed-cand); display: grid; place-items: center; overflow: hidden; }
 .ed-ov .c:hover { filter: brightness(1.12); }
 .ed-ov .c.keep { background: var(--ed-keep); } .ed-ov .c.keep .lab { color: var(--white); } .ed-ov .c.drop { background: var(--ed-drop); opacity: .45; } .ed-ov .c.drop .lab { color: var(--white); }
 .ed-ov .c.sel { background: var(--ed-accent); opacity: 1; top: 0; bottom: 0; min-width: 6px; box-shadow: 0 0 0 2px var(--ed-fg); z-index: 2; }
 .ed-ov .lab { font: 800 var(--fs-sm) var(--ed-sans); color: var(--ed-muted); line-height: 1; }
 .ed-ov .c.sel .lab { color: var(--ed-accent-ink); }
 /* a clip too narrow for its number: a slim bar, the number is in the tooltip */
-.ed-ov .c.slim { top: 9px; bottom: 9px; border-radius: var(--r-pill); }
+.ed-ov .c.slim { top: 8px; bottom: 8px; border-radius: var(--r-pill); }
 .ed-ov .c.sel.slim { top: 2px; bottom: 2px; }
 .ed-ov .pl { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ed-fg); z-index: 3; pointer-events: none; }
 .ed-sort { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--r-md); border: 1px solid var(--ed-line); background: var(--ed-sunk); flex: none; }
@@ -569,6 +570,7 @@
   .ed-main { padding: 0 12px 12px; }
   .ed-prog { display: none; }
   .ed-strip-head { flex-wrap: wrap; }
+  #editor .ed-shelves { order: 5; flex: 1 1 100%; min-width: 0; overflow-x: auto; scrollbar-width: none; }
   .ed-controls { flex-wrap: wrap; }
   .ed-decide { flex-basis: 100%; max-width: none; }
 }
@@ -576,14 +578,14 @@
 /* ─── Clip statuses, like a todo list: Нове · В роботі · Виконано · Не беру ─────────── */
 .ed-sdot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--ed-faint); }
 .ed-sdot[data-s="reserve"] { background: var(--ed-faint); opacity: .7; } .ed-sdot[data-s="keep"] { background: var(--ed-accent); } .ed-sdot[data-s="done"] { background: var(--ed-done); } .ed-sdot[data-s="drop"] { background: var(--ed-drop); }
-/* the four shelves at the top: they count the clips and choose what the strip shows */
-.ed-shelves { display: flex; gap: 8px; }
-.ed-shelf { display: flex; flex-direction: column; justify-content: center; gap: 1px; min-width: 104px; padding: 6px 14px; border-radius: var(--r-md); cursor: pointer; text-align: left;
-  background: var(--ed-panel); border: 1.5px solid var(--ed-line2); color: var(--ed-muted); font: inherit; white-space: nowrap; }
-.ed-shelf span { display: flex; align-items: center; gap: 7px; font-size: var(--fs-sm); font-weight: 600; }
-.ed-shelf b { font: 800 var(--fs-lg) var(--ed-sans); color: var(--ed-fg); font-variant-numeric: tabular-nums; line-height: 1.15; }
-.ed-shelf:hover { border-color: var(--ed-line); }
-.ed-shelf[aria-pressed="true"] { border-color: var(--ed-accent); background: var(--ed-accent-soft); color: var(--ed-fg); }
+/* the five shelves are tabs of the «Кліпи» strip: they count the clips and choose what the strip and the map show */
+.ed-shelves { display: flex; gap: 2px; padding: 2px; border-radius: var(--r-md); border: 1px solid var(--ed-line); background: var(--ed-sunk); flex: none; }
+.ed-shelf { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: var(--r-sm); cursor: pointer;
+  background: none; border: 0; color: var(--ed-muted); font: 700 var(--fs-md) var(--ed-sans); white-space: nowrap; }
+.ed-shelf span { display: inline-flex; align-items: center; gap: 7px; }
+.ed-shelf b { font-weight: 800; color: var(--ed-fg); font-variant-numeric: tabular-nums; }
+.ed-shelf:hover { color: var(--ed-fg); background: var(--ed-panel); }
+.ed-shelf[aria-pressed="true"] { background: var(--ed-accent-soft); color: var(--ed-fg); box-shadow: inset 0 0 0 1.5px var(--ed-accent); }
 .ed-shelf-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 /* status button + its menu */
 .ed-sbtn { display: inline-flex; align-items: center; gap: 9px; padding: 9px 16px; border-radius: var(--r-pill); cursor: pointer; white-space: nowrap;
@@ -616,7 +618,7 @@
 /* toast with «↶ Повернути» */
 .ed-toast.act { pointer-events: auto; display: flex; align-items: center; gap: 12px; }
 .ed-toast-undo { border: 0; background: none; color: inherit; font: 800 var(--fs-md) var(--ed-sans); text-decoration: underline; cursor: pointer; padding: 0; }
-@media (max-width: 1439px) { .ed-shelf { min-width: 0; padding: 6px 11px; } }
+@media (max-width: 1439px) { .ed-shelf { padding: 6px 9px; } }
 .ed-decide .ed-gonext { padding: 8px 14px; border-radius: var(--r-pill); font-size: var(--fs-md); }
 
 /* «Прибрати паузи»: quiet outline in the accent colour (text ≥ 7:1, outline ≥ 4.5:1 in both themes); filled once pauses are cut */

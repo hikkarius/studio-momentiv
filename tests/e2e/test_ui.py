@@ -92,7 +92,7 @@ def test_open_project_shows_editor_sorted_by_score(page, studio, project):
     assert "переглянуто 0/4" in page.locator("#edStep1").inner_text()
     assert page.locator("#edMp4").is_visible()
     assert "Сильний хук" in page.locator("#edWhy").inner_text()
-    # four status shelves on top; the strip opens on «Нові»
+    # five status shelves are tabs of the «Кліпи» strip; it opens on «Нові»
     assert page.locator("#edCnt_new").inner_text() == "4"
     assert page.locator("#edShelves [data-f='new'][aria-pressed='true']").is_visible()
     assert page.locator("#edFilters").count() == 0
@@ -142,8 +142,9 @@ def test_status_menu_shelves_and_keys(page, studio, project):
     assert page.locator("#edList .ed-row").count() == 1
     assert head(page).startswith("№2")
     assert page.locator("#edOv .c.keep").count() == 1
-    assert page.locator("#edOv .c.done").count() == 1
-    # a clip picked on the map opens its own shelf
+    assert page.locator("#edOv .c").count() == 1  # the map shows only the clips of the open shelf
+    page.click("#edShelves [data-f='done']")
+    assert page.locator("#edOv .c.done").count() == 1 and page.locator("#edOv .c.keep").count() == 0
     page.locator("#edOv .c.done").click()
     assert page.locator("#edShelves [data-f='done'][aria-pressed='true']").is_visible()
     page.keyboard.press("0")  # 0 → back to Нове
