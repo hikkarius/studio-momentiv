@@ -161,3 +161,12 @@ def test_tempo_keep_and_preview(tmp_path, monkeypatch):
     airy = client.post(f"/api/projects/{pid}/clips/1/pauses", json={"min_gap": 1.0, "keep": 0.4}).json()
     assert tight["removed_sec"] == pytest.approx(airy["removed_sec"] + 0.3, abs=0.02)
     assert client.post(f"/api/projects/{pid}/clips/1/pauses", json={"min_gap": 1.0, "keep": 0.9}).status_code == 422
+
+
+def test_word_stretched_over_a_cut_pause_is_kept():
+    # speech recognition put the start of «свого» into the silence that was cut; the word itself is after it
+    cuts = [(2.0, 3.0)]
+    words = [{"start": 1.5, "end": 1.9, "word": "а"}, {"start": 2.1, "end": 2.6, "word": "у паузі"},
+             {"start": 2.05, "end": 4.0, "word": "свого"}, {"start": 4.1, "end": 4.5, "word": "житла"}]
+    out = [(w["word"], w["start"], w["end"]) for w in pauses.remap_words(words, cuts)]
+    assert out == [("а", 1.5, 1.9), ("свого", 2.0, 3.0), ("житла", 3.1, 3.5)]
