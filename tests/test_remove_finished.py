@@ -63,7 +63,7 @@ def test_delete_finished_removes_everything():
 def test_delete_finished_refuses_unfinished_busy_outside_and_shared(tmp_path, monkeypatch):
     _make("rf_new", ["", "done", "drop", "drop", "drop"])
     r = client.post(URL, json={"project_ids": ["rf_new"]})
-    assert r.status_code == 400 and "Нових" in r.json()["detail"]
+    assert r.status_code == 400 and "Вірусних" in r.json()["detail"]
     assert db.get_project("rf_new")
 
     outside = tmp_path / "elsewhere.mp4"

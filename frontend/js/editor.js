@@ -58,7 +58,7 @@ const Editor = (() => {
   /** Clip statuses, like a todo list. '' = Нове, keep = В роботі, done = Виконано, drop = Не беру. */
   const STATUS = { "": "Нове", keep: "В роботі", done: "Виконано", drop: "Не беру" };
   const SHELVES = ["new", "keep", "done", "drop", "reserve"];
-  /** «Запас»: weaker clips the AI found; they wait there so «Нові» shows only the best ones. */
+  /** «Запас»: weaker clips the AI found; they wait there so «Вірусні» shows only the best ones. */
   const shelfOf = (c) => c.review_status || (c.reserve ? "reserve" : "new");
   const TIER = { top: '<span class="ed-tier top" title="Серед найкращих кліпів цього відео">🔥 Топ</span>', good: '<span class="ed-tier good" title="Краще за половину кліпів цього відео">Добре</span>' };
   const matches = (c) => shelfOf(c) === st.filter;
@@ -95,8 +95,8 @@ const Editor = (() => {
       L.appendChild(li);
     });
     if (!vis.length) {
-      const empty = { new: "Нових кліпів немає: усі розібрано.", keep: "У роботі поки нічого. Познач кліп «В роботі» в меню статусу.",
-        done: "Виконаних ще немає.", drop: "Відкинутих кліпів немає.", reserve: "У запасі порожньо: усі кліпи на полиці «Нові»." };
+      const empty = { new: "Вірусних кліпів не лишилось: усі розібрано.", keep: "У роботі поки нічого. Познач кліп «В роботі» в меню статусу.",
+        done: "Виконаних ще немає.", drop: "Відкинутих кліпів немає.", reserve: "У запасі порожньо: усі кліпи на полиці «Вірусні»." };
       L.innerHTML = `<li class="ed-empty">${st.mode === "vx" ? "Тут поки порожньо." : empty[st.filter]}</li>`;
     }
     const anyKept = st.clips.some((c) => c.review_status === "keep");
@@ -892,9 +892,9 @@ const Editor = (() => {
     }
   }
 
-  const shelfName = (f) => ({ new: "Нові", keep: "В роботі", done: "Виконані", drop: "Не беру", reserve: "Запас" })[f];
+  const shelfName = (f) => ({ new: "Вірусні", keep: "В роботі", done: "Виконані", drop: "Не беру", reserve: "Запас" })[f];
 
-  /** «⬆ Перенести в Нові»: a clip from «Запас» joins the main shelf. */
+  /** «⬆ Перенести у «Вірусні»»: a clip from «Запас» joins the main shelf. */
   async function promote(c = clip()) {
     closeStatusMenu();
     if (!c || !c.reserve) return;
@@ -906,7 +906,7 @@ const Editor = (() => {
       await api(`/api/projects/${pid()}/clips/${c.clip_index}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reserve: false }),
       });
-      toast("⬆ Перенесено в «Нові»");
+      toast("⬆ Перенесено у «Вірусні»");
     } catch (e) {
       c.reserve = 1;
       renderList(); renderOverview(); renderDetails();

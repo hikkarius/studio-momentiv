@@ -43,9 +43,9 @@ const Home = (() => {
       case "empty": return "Клік, щоб знайти кліпи";
       case "done": return `<b>${kept} в роботі</b> з ${total} · усі переглянуто`;
       default: {
-        // «Нові» first; weaker clips wait in «Запас» (older projects without the counts fall back to the total)
+        // «Вірусні» first; weaker clips wait in «Запас» (older projects without the counts fall back to the total)
         if (p.new_count == null) return `<b>${total} кліпів</b>${kept ? ` · ${kept} в роботі` : ""}`;
-        const parts = [`<b>${p.new_count} ${p.new_count === 1 ? "новий" : "нових"}</b>`];
+        const parts = [`<b>${p.new_count} ${p.new_count === 1 ? "вірусний" : "вірусних"}</b>`];
         if (kept) parts.push(`${kept} в роботі`);
         if (p.reserve_count) parts.push(`${p.reserve_count} у запасі`);
         return parts.join(" · ");

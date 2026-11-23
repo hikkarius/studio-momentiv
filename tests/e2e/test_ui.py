@@ -92,7 +92,7 @@ def test_open_project_shows_editor_sorted_by_score(page, studio, project):
     assert "переглянуто 0/4" in page.locator("#edStep1").inner_text()
     assert page.locator("#edMp4").is_visible()
     assert "Сильний хук" in page.locator("#edWhy").inner_text()
-    # five status shelves are tabs of the «Кліпи» strip; it opens on «Нові»
+    # five status shelves are tabs of the «Кліпи» strip; it opens on «Вірусні»
     assert page.locator("#edCnt_new").inner_text() == "4"
     assert page.locator("#edShelves [data-f='new'][aria-pressed='true']").is_visible()
     assert page.locator("#edFilters").count() == 0
@@ -117,11 +117,11 @@ def test_status_menu_shelves_and_keys(page, studio, project):
     page.click("#edStatus")  # the menu lists all four statuses
     assert page.locator("#edStatusMenu").is_visible()
     assert page.locator("#edStatusMenu button[data-s]").count() == 4
-    assert page.locator("#edPromote").is_hidden()  # «⬆ Перенести в Нові» only for clips from «Запас»
+    assert page.locator("#edPromote").is_hidden()  # «⬆ Перенести у «Вірусні»» only for clips from «Запас»
     page.click("#edStatusMenu button[data-s='keep']")  # best clip (#2) → В роботі
     assert wait_for(page, lambda: clip(2)["review_status"] == "keep")
     assert page.locator("#edStatusMenu").is_hidden()
-    # it left the «Нові» shelf, so the next new clip opens by itself; the counters moved
+    # it left the «Вірусні» shelf, so the next new clip opens by itself; the counters moved
     assert head(page).startswith("№4")
     assert page.locator("#edStatus").inner_text().startswith("Нове")
     assert page.locator("#edList .ed-row").count() == 3
@@ -580,7 +580,7 @@ def test_reanalyze_visible_and_next_button(page, studio, project):
     assert wait_for(page, lambda: clip(2)["review_status"] == "keep")
     assert "1/4" in page.locator("#edStep1").inner_text()
     assert page.locator("#edCnt_keep").inner_text() == "1"
-    page.wait_for_function("Editor.state().num === 4")  # the kept clip left «Нові»: the next one opened by itself
+    page.wait_for_function("Editor.state().num === 4")  # the kept clip left «Вірусні»: the next one opened by itself
     page.click("#edGoNext")  # «Наступний»: on to the next clip in the strip
     page.wait_for_function("Editor.state().num !== 4")
     assert not page.errors
@@ -595,7 +595,7 @@ def test_step_two_strip_lists_kept_clips(page, studio, project):
     assert page.locator("#edStripTitle").inner_text().lower() == "кліпи в роботі"
     assert page.locator("#edShelves").is_hidden()
     page.click("#edMode button[data-m='table']")
-    assert page.locator("#edList .ed-row").count() == 3  # the «Нові» shelf
+    assert page.locator("#edList .ed-row").count() == 3  # the «Вірусні» shelf
     assert not page.errors
 
 
