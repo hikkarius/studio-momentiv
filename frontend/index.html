@@ -243,20 +243,16 @@
   <div class="modal-backdrop rm-dialog" id="rmDialog" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="rmTitle">
     <div class="modal-card">
       <div class="modal-header">
-        <div class="modal-title-wrap"><h3 class="modal-title" id="rmTitle">Прибрати відео?</h3></div>
+        <div class="modal-title-wrap"><h3 class="modal-title" id="rmTitle">Видалити відео?</h3></div>
         <button class="modal-close-btn" type="button" onclick="Settings.closeRemoveDialog()" aria-label="Закрити">✕</button>
       </div>
       <div class="modal-body">
         <p class="rm-lead" id="rmLead"></p>
         <ul class="rm-list" id="rmList"></ul>
-        <div class="rm-cols">
-          <div class="rm-keep"><b>✓ Лишається</b><span>список кліпів, статуси, назви, описи, транскрипція</span></div>
-          <div class="rm-gone"><b>✕ Вже не вийде</b><span>скачати кліп знову, змінити межі, зробити вертикаль</span></div>
-        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="Settings.closeRemoveDialog()">Скасувати</button>
-        <button type="button" class="btn btn-primary" id="rmGo" onclick="Settings.confirmRemove()">Прибрати</button>
+        <button type="button" class="btn btn-primary" id="rmGo" onclick="Settings.confirmRemove()">Видалити</button>
       </div>
     </div>
   </div>
@@ -453,10 +449,10 @@
             <h4>Звільнити місце</h4>
             <div class="disk-done" id="diskDonePlate" hidden>
               <div class="dd-l">
-                <b>Прибрати відео, з якими закінчив <span id="diskDoneCount"></span></b>
-                <small>Закінчив = у відео не лишилось кліпів у «Нові» і «В роботі». Зникне лише саме довге відео, а кліпи, позначки й тексти лишаться.</small>
+                <b>Видалити відео, з якими закінчив <span id="diskDoneCount"></span></b>
+                <small>Закінчив = у відео не лишилось кліпів у «Нові» і «В роботі». Відео зникне повністю разом із кліпами.</small>
               </div>
-              <button type="button" class="btn btn-primary" id="btnCleanDone" onclick="Settings.openRemoveDialog()">Прибрати</button>
+              <button type="button" class="btn btn-primary" id="btnCleanDone" onclick="Settings.openRemoveDialog()">Видалити</button>
             </div>
             <div class="set-box">
               <div class="set-line">

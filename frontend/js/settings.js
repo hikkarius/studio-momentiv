@@ -399,7 +399,7 @@ const Settings = (() => {
     $("diskClips").textContent = `· ${fmtBytes(t.clips + t.vertical)}`;
     $("diskDonePlate").hidden = !disk.finished_count;
     $("diskDoneCount").textContent = `· ${disk.finished_count} відео`;
-    $("btnCleanDone").textContent = `Прибрати · звільнить ${fmtBytes(disk.finished_bytes)}`;
+    $("btnCleanDone").textContent = `Видалити · звільнить ${fmtBytes(disk.finished_bytes)}`;
 
     const list = disk.projects;
     $("diskProjects").innerHTML = list.length ? list.map((p) => `
@@ -407,12 +407,12 @@ const Settings = (() => {
         <img class="dp-th" src="/api/projects/${encodeURIComponent(p.id)}/thumbnail" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
         <div class="dp-main">
           <span class="dp-title" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>${chipOf(p)}
-          <span class="dp-meta">${p.source_removed ? "кліпи й позначки лишились" : `відео ${fmtBytes(p.source_bytes)}`}${p.clips_bytes ? ` · файли кліпів ${fmtBytes(p.clips_bytes)}` : ""}${p.kept_count ? ` · обрано ${p.kept_count}` : ""}</span>
+          <span class="dp-meta">відео ${fmtBytes(p.source_bytes)}${p.clips_bytes ? ` · файли кліпів ${fmtBytes(p.clips_bytes)}` : ""}${p.kept_count ? ` · обрано ${p.kept_count}` : ""}</span>
         </div>
         <b class="dp-size">${fmtBytes(p.total_bytes)}</b>
         <div class="dp-actions">
-          ${p.removable ? `<button type="button" class="btn btn-primary btn-sm" data-finish="${escapeHtml(p.id)}" title="Видалити саме довге відео; кліпи, позначки й тексти лишаться">Прибрати відео</button>` : ""}
-          ${p.clips_bytes && !p.source_removed ? `<button type="button" class="btn btn-secondary btn-sm" data-clean="${escapeHtml(p.id)}" title="Видалити тільки готові файли кліпів">Файли кліпів</button>` : ""}
+          ${p.removable ? `<button type="button" class="btn btn-primary btn-sm" data-finish="${escapeHtml(p.id)}" title="Ти закінчив з цим відео: видалити його повністю разом із кліпами">Видалити</button>` : ""}
+          ${p.clips_bytes ? `<button type="button" class="btn btn-secondary btn-sm" data-clean="${escapeHtml(p.id)}" title="Видалити тільки готові файли кліпів">Файли кліпів</button>` : ""}
           <button type="button" class="btn btn-secondary btn-sm dp-del" data-del="${escapeHtml(p.id)}" title="Видалити відео з усіма кліпами">Видалити відео</button>
         </div>
       </li>`).join("") : `<li class="dp-empty">Відео ще немає.</li>`;
@@ -441,13 +441,12 @@ const Settings = (() => {
 
   /** Shelf summary next to a video's title: «✓ закінчено», or what is still left to watch. */
   function chipOf(p) {
-    if (p.source_removed) return '<span class="dp-chip gone">відео прибрано</span>';
     if (p.finished) return '<span class="dp-chip done" title="У «Нових» і «В роботі» нічого не лишилось">✓ закінчено</span>';
     if (!p.clips_count) return "";
     return `<span class="dp-chip left">нових ${p.new_count} · в роботі ${p.kept_count}</span>`;
   }
 
-  // ─── «Прибрати відео, з якими закінчив»: a dialog with a checkbox per video ───
+  // ─── «Видалити відео, з якими закінчив»: a dialog with a checkbox per video ───
   let rmIds = [];
   function openRemoveDialog(ids) {
     const list = disk.projects.filter((p) => p.removable && (!ids || ids.includes(p.id)));
@@ -457,7 +456,7 @@ const Settings = (() => {
       <li><label>
         <input type="checkbox" data-rm="${escapeHtml(p.id)}" checked>
         <span class="rm-t"><b>${escapeHtml(p.title)}</b><small>виконано ${p.done_count} · у запасі ${p.reserve_count}${p.drop_count ? ` · не беру ${p.drop_count}` : ""}</small></span>
-        <span class="rm-s">${fmtBytes(p.source_bytes + p.clips_bytes)}</span>
+        <span class="rm-s">${fmtBytes(p.total_bytes)}</span>
       </label></li>`).join("");
     $("rmList").onchange = updateRemoveDialog;
     updateRemoveDialog();
@@ -467,10 +466,10 @@ const Settings = (() => {
   function rmChosen() { return [...$("rmList").querySelectorAll("input[data-rm]:checked")].map((i) => i.dataset.rm); }
   function updateRemoveDialog() {
     const ids = rmChosen();
-    const bytes = disk.projects.filter((p) => ids.includes(p.id)).reduce((s, p) => s + p.source_bytes + p.clips_bytes, 0);
-    $("rmTitle").textContent = `Прибрати ${ids.length} відео?`;
-    $("rmLead").textContent = `Звільнить ${fmtBytes(bytes)}. Відео зникнуть з диска, але лишаться в списку з позначкою «відео прибрано».`;
-    $("rmGo").textContent = `Прибрати · ${fmtBytes(bytes)}`;
+    const bytes = disk.projects.filter((p) => ids.includes(p.id)).reduce((s, p) => s + p.total_bytes, 0);
+    $("rmTitle").textContent = `Видалити ${ids.length} відео?`;
+    $("rmLead").textContent = `Звільнить ${fmtBytes(bytes)}. Відео зникнуть зі студії повністю, разом із кліпами й позначками. Це не скасувати.`;
+    $("rmGo").textContent = `Видалити · ${fmtBytes(bytes)}`;
     $("rmGo").disabled = !ids.length;
   }
   function closeRemoveDialog() { $("rmDialog").style.display = "none"; }
@@ -479,7 +478,7 @@ const Settings = (() => {
     const ids = rmChosen();
     if (!ids.length) return;
     $("rmGo").disabled = true;
-    const res = await fetch("/api/storage/remove-sources", {
+    const res = await fetch("/api/storage/delete-finished", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_ids: ids }),
     });
     $("rmGo").disabled = false;
@@ -488,7 +487,7 @@ const Settings = (() => {
     closeRemoveDialog();
     disk = data.storage;
     renderDisk();
-    showToast(`Прибрано ${data.removed} відео: звільнено ${fmtBytes(data.freed_bytes)}`, "success");
+    showToast(`Видалено ${data.deleted} відео: звільнено ${fmtBytes(data.freed_bytes)}`, "success");
     if (typeof loadRecentProjects === "function") loadRecentProjects();
   }
 

@@ -1529,7 +1529,3 @@ body:not(.home-empty) .home-how { display: none !important; }
   body.home-empty #step1Card.home-add { padding: 32px 18px; }
   .home-search { width: 100%; order: 3; }
 }
-
-/* «відео прибрано» on a home video card */
-.vc-gone { position: absolute; left: 8px; top: 8px; font: 700 11px var(--head-font, sans-serif); letter-spacing: .02em; color: var(--text-main);
-  background: rgba(0, 0, 0, .7); padding: 2px 7px; border-radius: 4px; }
