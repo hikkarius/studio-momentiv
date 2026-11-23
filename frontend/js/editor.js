@@ -243,13 +243,14 @@ const Editor = (() => {
     return { lo: Math.max(0, c.start_sec - pad), hi: Math.min(st.project.duration || c.end_sec + pad, c.end_sec + pad) };
   }
 
-  /** Splits the words into phrases at pauses (and keeps a phrase under ~5 s), as [first, last] word indexes. */
+  /** Splits the words into phrases at pauses and sentence ends (a phrase stays under ~6 s, a short sentence joins the next), as [first, last] word indexes. */
   function phrasesOf(words) {
     const out = [];
     let j0 = 0;
     for (let j = 1; j <= words.length; j++) {
       const w = words[j], prev = words[j - 1];
-      const brk = !w || w.start - prev.end > 0.35 || w.start - words[j0].start > 5 || /[.!?…]$/.test(prev.word.trim());
+      const brk = !w || w.start - prev.end > 0.5 || w.start - words[j0].start > 6
+        || (/[.!?…]$/.test(prev.word.trim()) && prev.end - words[j0].start > 1.5);
       if (brk) { out.push([j0, j - 1]); j0 = j; }
     }
     return words.length ? out : [];
@@ -264,7 +265,7 @@ const Editor = (() => {
     const W = T.clientWidth || 600;
     const p = (t) => ((t - lo) / (hi - lo)) * 100;
     let h = `<canvas class="wave" aria-hidden="true"></canvas>`;
-    // the words as phrases (split at pauses), each laid out on time; every word in a phrase is clickable
+    // phrase cards (split at pauses), each laid out on time: the text, then its start time; every word is clickable
     phrasesOf(st.words).forEach(([j0, j1]) => {
       const a = st.words[j0].start, b = st.words[j1].end;
       if (b < lo || a > hi) return;
@@ -273,33 +274,35 @@ const Editor = (() => {
       const inside = a < c.end_sec && b > c.start_sec;
       let inner = "";
       if (px >= 40) {
-        for (let j = j0; j <= j1; j++) {
-          const w = st.words[j];
-          const wIn = w.start >= c.start_sec - 0.05 && w.start < c.end_sec;
-          inner += `<span class="w${wIn ? " in" : ""}" data-j="${j}">${esc(w.word)}</span> `;
-        }
+        for (let j = j0; j <= j1; j++) inner += `<span class="w" data-j="${j}">${esc(st.words[j].word)}</span> `;
+        inner = `<div class="tx">${inner}</div>` + (px >= 56 ? `<small>${fmt(a)}</small>` : "");
       }
-      h += `<div class="phr${inside ? " in" : ""}${px < 40 ? " tiny" : ""}" data-a="${a}" data-b="${b}" style="left:${left}%;width:${width}%;--w:${width}%"
-        title="${fmt(a)} – ${fmt(b)}">${inner}</div>`;
+      h += `<div class="phr${inside ? " in" : ""}${px < 40 ? " tiny" : px < 56 ? " notime" : ""}" data-a="${a}" data-b="${b}"
+        style="left:${left}%;width:calc(${width}% - 3px)" title="${fmt(a)} – ${fmt(b)}">${inner}</div>`;
     });
+    // a cut pause: a small square with ✂ between the phrases, and a hatched band on the wave
+    const gapMark = (a, b, cls, data, title) => {
+      const mid = (p(a) + p(b)) / 2, wpx = Math.max(18, ((p(b) - p(a)) / 100) * W - 4);
+      return `<div class="cut${cls}" ${data} style="left:calc(${mid}% - ${wpx / 2}px);width:${wpx}px" title="${title}">✂</div>`
+        + `<div class="cutw" style="left:${p(a)}%;width:${p(b) - p(a)}%"></div>`;
+    };
     cutsOf(c).forEach(([a, b], k) => {
       if (b < lo || a > hi) return;
-      h += `<div class="cut" data-k="${k}" style="left:${p(a)}%;width:${p(b) - p(a)}%" title="Пауза ${fmt1(b - a + 0.2)} с вирізана. Клік: повернути"></div>`;
+      h += gapMark(a, b, "", `data-k="${k}"`, `Пауза ${fmt1(b - a + 0.2)} с вирізана. Клік: повернути`);
     });
     st.restored.forEach(([a, b], k) => {
       if (b < lo || a > hi || a < c.start_sec || b > c.end_sec) return;
-      h += `<div class="cut ghost" data-r="${k}" style="left:${p(a)}%;width:${p(b) - p(a)}%" title="Пауза повернута. Клік: вирізати знову"></div>`;
+      h += gapMark(a, b, " ghost", `data-r="${k}"`, "Пауза повернута. Клік: вирізати знову").replace('<div class="cutw"', '<div class="cutw" hidden');
     });
     h += `<div class="shade" style="left:0;width:${p(c.start_sec)}%"></div><div class="shade" style="left:${p(c.end_sec)}%;right:0"></div>`;
-    h += `<div class="rg" style="left:${p(c.start_sec)}%;width:${p(c.end_sec) - p(c.start_sec)}%"></div>`;
-    h += `<div class="hd" data-h="start" style="left:${p(c.start_sec)}%" title="Тягни: початок кліпу"></div>`;
-    h += `<div class="hd" data-h="end" style="left:${p(c.end_sec)}%" title="Тягни: кінець кліпу"></div>`;
+    h += `<div class="hd" data-h="start" style="left:${p(c.start_sec)}%" title="Тягни: початок кліпу"><em>${fmt(c.start_sec)}</em></div>`;
+    h += `<div class="hd" data-h="end" style="left:${p(c.end_sec)}%" title="Тягни: кінець кліпу"><em>${fmt(c.end_sec)}</em></div>`;
     h += `<div class="zph" id="edZph"></div>`;
     hidePhraseCard(true);
     T.innerHTML = h;
     // a phrase whose text does not fit gets the full text in a card above the track on hover
-    T.querySelectorAll(".phr:not(.tiny)").forEach((el) => {
-      if (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) el.classList.add("more");
+    T.querySelectorAll(".phr .tx").forEach((el) => {
+      if (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) el.parentElement.classList.add("more");
     });
     renderMap();
     drawWave();
@@ -458,7 +461,7 @@ const Editor = (() => {
       const bh = Math.max(1.5, a * (H - 2));
       const tm = (t0 + t1) / 2;
       const inClip = tm >= c.start_sec && tm <= c.end_sec;
-      g.globalAlpha = inClip ? 0.85 : 0.45;
+      g.globalAlpha = inClip ? 0.7 : 0.45;
       g.fillStyle = inClip ? colIn : colOut;
       g.fillRect(x, (H - bh) / 2, step - 1, bh);
     }

@@ -152,7 +152,7 @@ def test_status_menu_shelves_and_keys(page, studio, project):
 
 def test_pauses_button_and_track(page, studio, project):
     open_editor(page, studio)  # best clip №2: 30-50 s, words every 0.5 s, so there are no long pauses
-    assert page.locator("#edRuler b").count() > 0  # time ruler
+    assert page.locator("#edTrack .phr").count() > 0  # phrase cards
     assert page.locator("#edTrack canvas.wave").count() == 1
     page.click("#edPauses")
     page.wait_for_function("document.getElementById('edToast').textContent.includes('Пауз')")
@@ -304,7 +304,7 @@ def test_drag_handle(page, studio, project):
 
 def test_track_navigation(page, studio, project):
     open_editor(page, studio)
-    first_label = lambda: page.locator("#edRuler b").first.inner_text()
+    first_label = lambda: page.evaluate("document.querySelector('#edTrack .phr').style.left")
     span = lambda: page.evaluate("(() => { const w = document.querySelector('#edMap .win'); return w.getBoundingClientRect().width / w.parentElement.getBoundingClientRect().width; })()")
     assert span() > 0.95 and page.locator("#edZoomAll").is_disabled()  # whole clip in view
     page.click("#edZoomIn"); page.click("#edZoomIn"); page.click("#edZoomIn")
