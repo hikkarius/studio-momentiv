@@ -250,7 +250,7 @@ def check_finished(uploads: Path, project_ids: List[str], busy: Iterable[str] = 
         if pid in busy:
             raise NotRemovable(f"«{title}» зараз аналізується або чекає в черзі.")
         if not is_finished(p):
-            raise NotRemovable(f"У «{title}» ще є кліпи в «Нових» або «В роботі».")
+            raise NotRemovable(f"У «{title}» ще є кліпи у «Вірусних» або «В роботі».")
         src = _source_in_uploads(p.get("source_path") or "", uploads)
         if src is None:
             raise NotRemovable(f"Файл відео «{title}» лежить не в папці студії, тому студія його не видаляє.")

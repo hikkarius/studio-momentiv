@@ -283,7 +283,7 @@ const Vertical = (() => {
       const sx = Math.max(0, Math.min(vw - cw, cropX(lay.keyframes, t) * vw - cw / 2));
       g.drawImage(v, sx, 0, cw, vh, 0, 0, W, H);
     }
-    drawCaption(t);
+    drawCaption(t, v.paused);
     const tc = `${fmtT(t)} / ${fmtT(c.end_sec - c.start_sec)}`;
     if ($("vxTc").textContent !== tc) $("vxTc").textContent = tc;
     const sc = $("vxScrub");
@@ -307,7 +307,8 @@ const Vertical = (() => {
     return out;
   }
 
-  function drawCaption(t) {
+  /** paused: show the nearest subtitle line even in a gap, so a still preview looks like the finished clip. */
+  function drawCaption(t, paused = false) {
     const el = $("vxCap");
     const s = styleOf(st.opts.style);
     $("vxHook").hidden = !(st.opts.hook && (st.opts.hook_full || t < 3));
@@ -316,11 +317,12 @@ const Vertical = (() => {
     const cs = chunks(words, s.chunk, s.chars);
     let ci = -1;
     cs.forEach((ch, i) => { if (t >= ch[0].start - 0.02) ci = i; });
+    if (ci < 0 && paused && cs.length) ci = 0;
     if (ci < 0) { if (st.capKey !== "") { el.innerHTML = ""; st.capKey = ""; } return; }
     const ch = cs[ci];
     const next = cs[ci + 1];
     const end = Math.min(next ? next[0].start : 1e9, ch[ch.length - 1].end + 0.35);
-    if (t > end) { if (st.capKey !== "") { el.innerHTML = ""; st.capKey = ""; } return; }
+    if (t > end && !paused) { if (st.capKey !== "") { el.innerHTML = ""; st.capKey = ""; } return; }
     let wi = 0;
     ch.forEach((w, i) => { if (t >= w.start - 0.02) wi = i; });
     const key = `${ci}:${wi}:${s.id}`;

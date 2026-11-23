@@ -58,7 +58,7 @@ const Editor = (() => {
   /** Clip statuses, like a todo list. '' = Нове, keep = В роботі, done = Виконано, drop = Не беру. */
   const STATUS = { "": "Нове", keep: "В роботі", done: "Виконано", drop: "Не беру" };
   const SHELVES = ["new", "keep", "done", "drop", "reserve"];
-  /** «Запас»: weaker clips the AI found; they wait there so «Нові» shows only the best ones. */
+  /** «Запас»: weaker clips the AI found; they wait there so «Вірусні» shows only the best ones. */
   const shelfOf = (c) => c.review_status || (c.reserve ? "reserve" : "new");
   const TIER = { top: '<span class="ed-tier top" title="Серед найкращих кліпів цього відео">🔥 Топ</span>', good: '<span class="ed-tier good" title="Краще за половину кліпів цього відео">Добре</span>' };
   const matches = (c) => shelfOf(c) === st.filter;
@@ -95,8 +95,8 @@ const Editor = (() => {
       L.appendChild(li);
     });
     if (!vis.length) {
-      const empty = { new: "Нових кліпів немає: усі розібрано.", keep: "У роботі поки нічого. Познач кліп «В роботі» в меню статусу.",
-        done: "Виконаних ще немає.", drop: "Відкинутих кліпів немає.", reserve: "У запасі порожньо: усі кліпи на полиці «Нові»." };
+      const empty = { new: "Вірусних кліпів не лишилось: усі розібрано.", keep: "У роботі поки нічого. Познач кліп «В роботі» в меню статусу.",
+        done: "Виконаних ще немає.", drop: "Відкинутих кліпів немає.", reserve: "У запасі порожньо: усі кліпи на полиці «Вірусні»." };
       L.innerHTML = `<li class="ed-empty">${st.mode === "vx" ? "Тут поки порожньо." : empty[st.filter]}</li>`;
     }
     const anyKept = st.clips.some((c) => c.review_status === "keep");
@@ -139,14 +139,17 @@ const Editor = (() => {
     if (row) row.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
-  /** Thin map of the whole video next to the strip filters: every clip numbered by its place in the video. */
+  /** Clips the map shows: those of the open shelf, plus the open clip (it may have just left the shelf). */
+  const mapClips = () => [...st.clips.keys()].filter((i) => matches(st.clips[i]) || i === st.cur);
+
+  /** Thin map of the whole video under the shelf tabs: the clips of the open shelf, numbered by their place in the video. */
   function renderOverview() {
     const el = $("edOv");
     const dur = st.project.duration || 1;
     const W = el.clientWidth || 600;
     let h = "";
     let free = -Infinity; // where the last number ends: a number is shown only where it fits and does not overlap
-    [...st.clips.keys()].sort((a, b) => st.clips[a].start_sec - st.clips[b].start_sec).forEach((i) => {
+    mapClips().sort((a, b) => st.clips[a].start_sec - st.clips[b].start_sec).forEach((i) => {
       const c = st.clips[i];
       const w = Math.max(0.4, (len(c) / dur) * 100);
       const x = (c.start_sec / dur) * W, px = (w / 100) * W;
@@ -297,11 +300,15 @@ const Editor = (() => {
       const px = (width / 100) * W;
       const inside = a < c.end_sec && b > c.start_sec;
       let inner = "";
-      if (px >= 40) {
+      // the first word must fit whole (≈7.5 px a letter + padding); otherwise «…» instead of a chopped word
+      const firstFits = px >= 40 && st.words[j0].word.trim().length * 7.5 + 18 <= px;
+      if (firstFits) {
         for (let j = j0; j <= j1; j++) inner += `<span class="w" data-j="${j}">${esc(st.words[j].word)}</span> `;
         inner = `<div class="tx">${inner}</div>` + (px >= 56 ? `<small>${fmt(a)}</small>` : "");
+      } else if (px >= 26) {
+        inner = `<div class="tx dots">…</div>`;
       }
-      h += `<div class="phr${inside ? " in" : ""}${px < 40 ? " tiny" : px < 56 ? " notime" : ""}" data-a="${a}" data-b="${b}"
+      h += `<div class="phr${inside ? " in" : ""}${!firstFits ? (px < 26 ? " tiny" : " more") : px < 56 ? " notime" : ""}" data-a="${a}" data-b="${b}"
         style="left:${left}%;width:calc(${width}% - 3px)" title="${fmt(a)} – ${fmt(b)}">${inner}</div>`;
     });
     // a cut pause: a small square with ✂ between the phrases, and a hatched band on the wave
@@ -885,9 +892,9 @@ const Editor = (() => {
     }
   }
 
-  const shelfName = (f) => ({ new: "Нові", keep: "В роботі", done: "Виконані", drop: "Не беру", reserve: "Запас" })[f];
+  const shelfName = (f) => ({ new: "Вірусні", keep: "В роботі", done: "Виконані", drop: "Не беру", reserve: "Запас" })[f];
 
-  /** «⬆ Перенести в Нові»: a clip from «Запас» joins the main shelf. */
+  /** «⬆ Перенести у «Вірусні»»: a clip from «Запас» joins the main shelf. */
   async function promote(c = clip()) {
     closeStatusMenu();
     if (!c || !c.reserve) return;
@@ -899,7 +906,7 @@ const Editor = (() => {
       await api(`/api/projects/${pid()}/clips/${c.clip_index}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reserve: false }),
       });
-      toast("⬆ Перенесено в «Нові»");
+      toast("⬆ Перенесено у «Вірусні»");
     } catch (e) {
       c.reserve = 1;
       renderList(); renderOverview(); renderDetails();
@@ -908,7 +915,7 @@ const Editor = (() => {
   }
 
   /**
-   * Sets the clip status. The clip stays open (↓ moves on). «Виконано» and «Не беру» delete the clip's
+   * Sets the clip status. A clip that leaves the open shelf makes way: the next clip of that shelf opens. «Виконано» and «Не беру» delete the clip's
    * rendered files on the server; its bounds, text and style stay, so «Скачати» makes them again.
    */
   async function mark(status, c = clip(), { undo = true } = {}) {
@@ -922,14 +929,17 @@ const Editor = (() => {
     c.review_status = status;
     if (status) c.reserve = 0; // a reviewed clip leaves «Запас» (the server does the same)
     renderList(); renderOverview(); renderDetails();
+    const left = c === clip() && st.mode !== "vx" && !matches(c);
+    if (left) { const rest = stripClips(); if (rest.length) select(rest[Math.min(st.anchor, rest.length - 1)]); }
     try {
       const data = await api(`/api/projects/${pid()}/clips/${c.clip_index}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ review_status: status }),
       });
       const freed = data.freed_bytes || 0;
-      const msg = { "": "Знову «Нове»", keep: "✓ В роботі. Наступний кліп: ↓", done: "✓ Виконано", drop: "✕ Не беру" }[status]
+      const msg = { "": "Знову «Нове»", keep: "✓ В роботі", done: "✓ Виконано", drop: "✕ Не беру" }[status]
         + (freed ? `. Звільнено ${kb(freed)}` : "");
-      if (undo && prev !== status) toastUndo(msg, () => mark(prev, c, { undo: false }));
+      const back = () => { const i = st.clips.indexOf(c); mark(prev, c, { undo: false }); if (st.mode !== "vx" && i >= 0) select(i); };
+      if (undo && prev !== status) toastUndo(left ? `${msg} · №${c.num} → «${shelfName(shelfOf(c))}»` : msg, back);
       else toast(msg);
     } catch (e) {
       c.review_status = prev;
@@ -1007,7 +1017,7 @@ const Editor = (() => {
     const pv = st.pausePreview && st.pausePreview.key === previewKey(c) ? st.pausePreview.tempos : null;
     if (!pv) loadPausePreview(c);
     const none = !cut && pv && Object.values(pv).every((r) => !r.count);
-    btn.disabled = !!none;
+    btn.disabled = !!none || cuts.length > 0; // once cut, the button only shows the result; «↶ Повернути все» undoes it
     btn.classList.toggle("none", !!none);
     btn.title = none ? "У цьому кліпі довгих пауз немає" : "Вирізати довгі паузи всередині кліпу (jump cut). Чистий оригінал лишається для скачування";
     if (none) { bar.innerHTML = '<span class="hint">Довгих пауз немає: кліп і так іде щільно.</span>'; }
@@ -1344,7 +1354,7 @@ const Editor = (() => {
       const r = e.currentTarget.getBoundingClientRect();
       const t = ((e.clientX - r.left) / r.width) * (st.project.duration || 0);
       let best = 0, bd = Infinity;
-      st.clips.forEach((c, i) => { const d = Math.min(Math.abs(c.start_sec - t), Math.abs(c.end_sec - t)); if (d < bd) { bd = d; best = i; } });
+      mapClips().forEach((i) => { const c = st.clips[i]; const d = Math.min(Math.abs(c.start_sec - t), Math.abs(c.end_sec - t)); if (d < bd) { bd = d; best = i; } });
       select(best);
     });
     document.querySelectorAll("#edShelves button").forEach((b) => b.addEventListener("click", () => {
@@ -1352,6 +1362,7 @@ const Editor = (() => {
       const vis = visible();
       st.anchor = 0;
       renderList();
+      renderOverview();
       $("edList").scrollLeft = 0;
       if (vis.length && !vis.includes(st.cur)) select(vis[0]); // open the first clip of the shelf
     }));

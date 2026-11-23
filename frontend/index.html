@@ -453,7 +453,7 @@
             <div class="disk-done" id="diskDonePlate" hidden>
               <div class="dd-l">
                 <b>Видалити відео, з якими закінчив <span id="diskDoneCount"></span></b>
-                <small>Закінчив = у відео не лишилось кліпів у «Нові» і «В роботі». Відео зникне повністю разом із кліпами.</small>
+                <small>Закінчив = у відео не лишилось кліпів у «Вірусні» і «В роботі». Відео зникне повністю разом із кліпами.</small>
               </div>
               <button type="button" class="btn btn-primary" id="btnCleanDone" onclick="Settings.openRemoveDialog()">Видалити</button>
             </div>
@@ -579,13 +579,6 @@
       <header class="ed-top">
         <div class="ed-crumb"><b id="edProjTitle"></b><span id="edProjMeta"></span></div>
         <div class="ed-prog" id="edProg">
-          <div class="ed-shelves" id="edShelves" role="group" aria-label="Полиці кліпів: що показати внизу">
-            <button type="button" class="ed-shelf" data-f="new" aria-pressed="true" title="Кліпи, які ти ще не розібрав"><span><i class="ed-sdot" data-s=""></i>Нові</span><b id="edCnt_new">0</b></button>
-            <button type="button" class="ed-shelf" data-f="keep" aria-pressed="false" title="Беру, буду монтувати"><span><i class="ed-sdot" data-s="keep"></i>В роботі</span><b id="edCnt_keep">0</b></button>
-            <button type="button" class="ed-shelf" data-f="done" aria-pressed="false" title="Опубліковані: їхні файли прибрано, межі й текст лишились"><span><i class="ed-sdot" data-s="done"></i>Виконані</span><b id="edCnt_done">0</b></button>
-            <button type="button" class="ed-shelf" data-f="drop" aria-pressed="false" title="Відкинуті кліпи"><span><i class="ed-sdot" data-s="drop"></i>Не беру</span><b id="edCnt_drop">0</b></button>
-            <button type="button" class="ed-shelf" data-f="reserve" aria-pressed="false" title="Слабші кліпи: ШІ знайшов, але вони гірші за інші"><span><i class="ed-sdot" data-s="reserve"></i>Запас</span><b id="edCnt_reserve">0</b></button>
-          </div>
           <div class="ed-stat keep ed-stat-vx"><span>В роботі</span><b id="edCntPick">0</b></div>
         </div>
         <span class="ed-spacer"></span>
@@ -823,14 +816,22 @@
       <section class="ed-strip" aria-label="Кліпи">
         <div class="ed-strip-head">
           <h2 id="edStripTitle">Кліпи</h2>
+          <div class="ed-shelves" id="edShelves" role="group" aria-label="Полиці кліпів: що показати">
+            <button type="button" class="ed-shelf" data-f="new" aria-pressed="true" title="Найвірусніші моменти, які знайшов ШІ. Ти їх ще не розібрав"><span><i class="ed-sdot" data-s=""></i>🔥 Вірусні</span><b id="edCnt_new">0</b></button>
+            <button type="button" class="ed-shelf" data-f="keep" aria-pressed="false" title="Беру, буду монтувати"><span><i class="ed-sdot" data-s="keep"></i>В роботі</span><b id="edCnt_keep">0</b></button>
+            <button type="button" class="ed-shelf" data-f="done" aria-pressed="false" title="Опубліковані: їхні файли прибрано, межі й текст лишились"><span><i class="ed-sdot" data-s="done"></i>Виконані</span><b id="edCnt_done">0</b></button>
+            <button type="button" class="ed-shelf" data-f="drop" aria-pressed="false" title="Відкинуті кліпи"><span><i class="ed-sdot" data-s="drop"></i>Не беру</span><b id="edCnt_drop">0</b></button>
+            <button type="button" class="ed-shelf" data-f="reserve" aria-pressed="false" title="Слабші кліпи: ШІ знайшов, але вони гірші за інші"><span><i class="ed-sdot" data-s="reserve"></i>Запас</span><b id="edCnt_reserve">0</b></button>
+          </div>
           <span class="ed-small ed-shelf-note" id="edShelfNote"></span>
           <span class="ed-small ed-vx-note">Тут лише кліпи «В роботі». Щоб додати ще, повернись на крок 1.</span>
-          <div class="ed-ov" id="edOv" title="Усе відео: де кожен кліп. Клік відкриває кліп"></div>
+          <span class="ed-spacer"></span>
           <div class="ed-sort" id="edSort" role="group" aria-label="Порядок">
             <button type="button" data-s="score" aria-pressed="true" title="Найвища оцінка спершу">Найкращі</button>
             <button type="button" data-s="time" aria-pressed="false" title="Як ідуть у відео">По черзі</button>
           </div>
         </div>
+        <div class="ed-ov" id="edOv" title="Усе відео: де кліпи цієї полиці. Клік відкриває кліп"></div>
         <div class="ed-films">
           <button class="ed-scroll prev" id="edScrollPrev" type="button" aria-label="Гортати назад" hidden>←</button>
           <ul class="ed-list" id="edList"></ul>
@@ -845,7 +846,7 @@
       <button type="button" role="menuitemradio" data-s="keep"><i class="ed-sdot" data-s="keep"></i><span><b>В роботі</b><small>беру, буду монтувати</small></span><kbd>Y</kbd></button>
       <button type="button" role="menuitemradio" data-s="done"><i class="ed-sdot" data-s="done"></i><span><b>Виконано</b><small>опублікував, файли прибрати</small></span><kbd>U</kbd></button>
       <button type="button" role="menuitemradio" data-s="drop"><i class="ed-sdot" data-s="drop"></i><span><b>Не беру</b><small>сховати, файли прибрати</small></span><kbd>N</kbd></button>
-      <button type="button" role="menuitem" id="edPromote" hidden><i class="ed-sdot" data-s=""></i><span><b>⬆ Перенести в Нові</b><small>зі слабших у головну полицю</small></span></button>
+      <button type="button" role="menuitem" id="edPromote" hidden><i class="ed-sdot" data-s=""></i><span><b>⬆ Перенести у «Вірусні»</b><small>із запасу в головну полицю</small></span></button>
     </div>
   </section>
 

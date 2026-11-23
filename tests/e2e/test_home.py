@@ -51,7 +51,7 @@ def test_with_videos_compact_block_badge_and_menu(page, studio, project):
     assert page.locator(".home-add-title").is_visible()
     assert page.locator(".home-how").is_hidden()
     assert "Нове" in card.locator(".vc-badge").inner_text()
-    assert "4 нових" in card.locator(".video-card-meta").inner_text()
+    assert "4 вірусних" in card.locator(".video-card-meta").inner_text()
     assert page.locator("#dropzone, #queueSection, #hwBadge").count() == 0
 
     # «Видалити» hides in the «⋯» menu; Escape closes it
@@ -79,7 +79,7 @@ def test_reviewed_video_shows_progress(page, studio, project):
     card = page.locator(".video-card", has_text="Тестовий подкаст")
     card.wait_for()
     assert "В роботі" in card.locator(".vc-badge").inner_text()
-    assert "2 нових · 1 в роботі" in card.locator(".video-card-meta").inner_text()
+    assert "2 вірусних · 1 в роботі" in card.locator(".video-card-meta").inner_text()
     for idx in (3, 4):
         db.update_clip_fields(PROJECT_ID, idx, review_status="drop")
     page.reload()
