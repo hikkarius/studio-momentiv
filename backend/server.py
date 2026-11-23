@@ -756,6 +756,7 @@ class ClipUpdateRequest(BaseModel):
     hashtags: Optional[List[str]] = Field(default=None, max_length=30)
     vertical_opts: Optional[Dict[str, Any]] = None
     cuts: Optional[List[List[float]]] = Field(default=None, max_length=300)
+    reserve: Optional[bool] = None  # False = «⬆ Перенести в Нові»
 
 
 @app.patch("/api/projects/{project_id}/clips/{clip_index}")
@@ -767,6 +768,8 @@ def update_clip(project_id: str, clip_index: int, payload: ClipUpdateRequest):
         fields["cuts"] = pauses.normalize_cuts(fields["cuts"], float(current["start_sec"]), float(current["end_sec"]))
     if "vertical_opts" in fields:
         fields["vertical_opts"] = vertical_render.normalize_opts(fields["vertical_opts"])
+    if fields.get("review_status"):
+        fields["reserve"] = False  # a reviewed clip leaves «Запас» for good
     if "title" in fields and not fields["title"].strip():
         raise HTTPException(status_code=400, detail="Заголовок не може бути порожнім.")
     clip = db.update_clip_fields(project_id, clip_index, **fields)

@@ -5,6 +5,7 @@ Stores projects, candidate clips, and background analyze jobs.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sqlite3
@@ -119,9 +120,61 @@ def init_db():
             # JSON: pauses cut out of the clip («Прибрати паузи»), absolute seconds [[a, b], ...]
             conn.execute("ALTER TABLE candidate_clips ADD COLUMN cuts TEXT NOT NULL DEFAULT '[]';")
 
+        if "reserve" not in columns:
+            # 1 = «Запас»: a weaker clip, kept out of «Нові» so the shelf is not flooded
+            conn.execute("ALTER TABLE candidate_clips ADD COLUMN reserve INTEGER NOT NULL DEFAULT 0;")
+            for (pid,) in conn.execute("SELECT DISTINCT project_id FROM candidate_clips").fetchall():
+                _mark_reserve(conn, pid, only_new=True)
+
         queue_columns = [row["name"] for row in conn.execute("PRAGMA table_info(queue_items);").fetchall()]
         if "language" not in queue_columns:
             conn.execute("ALTER TABLE queue_items ADD COLUMN language TEXT NOT NULL DEFAULT '';")
+
+
+def new_shelf_size(duration_sec: float) -> int:
+    """How many of the best clips go to «Нові»: about one per 90 s of video, 5…15."""
+    return max(5, min(15, int(round(float(duration_sec or 0) / 90))))
+
+
+def _mark_reserve(conn: Any, project_id: str, only_new: bool = False) -> None:
+    """
+    Puts every clip outside the project's top N (by AI score) into «Запас».
+    only_new: touch only clips nobody has reviewed yet (review_status '').
+    """
+    row = conn.execute("SELECT duration FROM projects WHERE id = ?", (project_id,)).fetchone()
+    n = new_shelf_size(row["duration"] if row else 0)
+    clips = conn.execute(
+        "SELECT clip_index, virality_score, review_status FROM candidate_clips WHERE project_id = ?",
+        (project_id,),
+    ).fetchall()
+    ranked = sorted(clips, key=lambda r: (-int(r["virality_score"] or 0), r["clip_index"]))
+    for pos, r in enumerate(ranked):
+        if only_new and r["review_status"]:
+            continue
+        conn.execute(
+            "UPDATE candidate_clips SET reserve = ? WHERE project_id = ? AND clip_index = ?",
+            (1 if pos >= n else 0, project_id, r["clip_index"]),
+        )
+
+
+def with_ranks(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Adds honest display scores: rank_score spreads the project's clips from 99 (best) to 40 (worst) by rank
+    (equal AI scores share one), and tier is 'top' (best 20 %, at least 3), 'good' (next 30 %) or ''.
+    The raw AI score (virality_score) is left as it is.
+    """
+    n = len(clips)
+    scores = [int(c.get("virality_score") or 0) for c in clips]
+    uniq = sorted(set(scores), reverse=True)
+    pos = {s: i for i, s in enumerate(uniq)}
+    n_top = min(n, max(3, math.ceil(n * 0.2)))
+    n_good = math.ceil(n * 0.3)
+    for c, s in zip(clips, scores):
+        i = pos[s]
+        c["rank_score"] = 99 if len(uniq) == 1 else round(99 - 59 * i / (len(uniq) - 1))
+        better = sum(1 for x in scores if x > s)
+        c["tier"] = "top" if better < n_top else "good" if better < n_top + n_good else ""
+    return clips
 
 
 def _parse_score(raw_score: Any, default: int = 85) -> int:
@@ -189,6 +242,7 @@ def save_candidate_clips(project_id: str, clips: List[Dict[str, Any]]):
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
                 (clip_id, project_id, idx, start, end, dur, score, title, hook, reason, caption, tags_json),
             )
+        _mark_reserve(conn, project_id)
 
 
 def _clip_row(row: Any) -> Dict[str, Any]:
@@ -217,10 +271,7 @@ def get_candidate_clips(project_id: str) -> List[Dict[str, Any]]:
             "SELECT * FROM candidate_clips WHERE project_id = ? ORDER BY clip_index ASC",
             (project_id,),
         ).fetchall()
-        result = []
-        for r in rows:
-            result.append(_clip_row(r))
-        return result
+        return with_ranks([_clip_row(r) for r in rows])
 
 
 def update_clip_bounds(
@@ -279,6 +330,9 @@ def update_clip_fields(project_id: str, clip_index: int, **fields: Any) -> Optio
     if fields.get("cuts") is not None:
         sets.append("cuts = ?")
         values.append(json.dumps([[float(a), float(b)] for a, b in fields["cuts"]]))
+    if fields.get("reserve") is not None:
+        sets.append("reserve = ?")
+        values.append(1 if fields["reserve"] else 0)
     if fields.get("vertical_opts") is not None:
         sets.append("vertical_opts = ?")
         values.append(json.dumps(fields["vertical_opts"], ensure_ascii=False))
@@ -290,13 +344,9 @@ def update_clip_fields(project_id: str, clip_index: int, **fields: Any) -> Optio
             )
             if cur.rowcount == 0:
                 return None
-        row = conn.execute(
-            "SELECT * FROM candidate_clips WHERE project_id = ? AND clip_index = ?",
-            (project_id, clip_index),
-        ).fetchone()
-        if not row:
-            return None
-        return _clip_row(row)
+        rows = conn.execute("SELECT * FROM candidate_clips WHERE project_id = ?", (project_id,)).fetchall()
+    clip = next((c for c in with_ranks([_clip_row(r) for r in rows]) if c["clip_index"] == clip_index), None)
+    return clip
 
 
 def create_job(job_id: str, project_id: str, job_type: str) -> Dict[str, Any]:

@@ -596,7 +596,7 @@
 
 /* ─── Clip statuses, like a todo list: Нове · В роботі · Виконано · Не беру ─────────── */
 .ed-sdot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--ed-faint); }
-.ed-sdot[data-s="keep"] { background: var(--ed-accent); } .ed-sdot[data-s="done"] { background: var(--ed-done); } .ed-sdot[data-s="drop"] { background: var(--ed-drop); }
+.ed-sdot[data-s="reserve"] { background: var(--ed-faint); opacity: .7; } .ed-sdot[data-s="keep"] { background: var(--ed-accent); } .ed-sdot[data-s="done"] { background: var(--ed-done); } .ed-sdot[data-s="drop"] { background: var(--ed-drop); }
 /* the four shelves at the top: they count the clips and choose what the strip shows */
 .ed-shelves { display: flex; gap: 8px; }
 .ed-shelf { display: flex; flex-direction: column; justify-content: center; gap: 1px; min-width: 104px; padding: 6px 14px; border-radius: 11px; cursor: pointer; text-align: left;
@@ -649,3 +649,12 @@
 /* Preview jumps over a cut pause with a short dip, like the cross-fade in the downloaded file */
 .ed-screen video.cutdip { animation: ed-cutdip .12s ease; }
 @keyframes ed-cutdip { 0% { opacity: 1; } 45% { opacity: .45; } 100% { opacity: 1; } }
+
+/* Honest score badges on the thumbnails (by rank among this video's clips) */
+.ed-th .ed-tier { position: absolute; left: 5px; bottom: 5px; font: 800 10.5px var(--ed-sans); border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+.ed-th .ed-tier.top { background: var(--ed-accent); color: var(--ed-accent-ink); }
+.ed-th .ed-tier.good { background: var(--ed-accent-soft); color: var(--ed-accent-text); border: 1px solid color-mix(in srgb, var(--ed-accent) 45%, transparent); }
+/* «Запас» clips are dimmer on the video map */
+#edOv .c.reserve { opacity: .45; }
+/* the tier badge takes the bottom-left corner, so the «В роботі» tick moves to the top right */
+.ed-th .ed-ok { left: auto; right: 5px; top: 5px; bottom: auto; }

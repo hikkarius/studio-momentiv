@@ -50,13 +50,17 @@ const Editor = (() => {
   function assignNumbers() {
     [...st.clips.keys()].sort((a, b) => st.clips[a].start_sec - st.clips[b].start_sec).forEach((i, k) => { st.clips[i].num = k + 1; });
   }
-  const byScore = () => [...st.clips.keys()].sort((a, b) => (st.clips[b].virality_score || 0) - (st.clips[a].virality_score || 0) || st.clips[a].num - st.clips[b].num);
+  /** The score shown everywhere: the clip's place among this video's clips (99 best … 40 worst), not the raw AI number. */
+  const scoreOf = (c) => (c.rank_score ?? c.virality_score ?? 0);
+  const byScore = () => [...st.clips.keys()].sort((a, b) => scoreOf(st.clips[b]) - scoreOf(st.clips[a]) || st.clips[a].num - st.clips[b].num);
   const byTime = () => [...st.clips.keys()].sort((a, b) => st.clips[a].num - st.clips[b].num);
   const ordered = () => (st.sort === "time" ? byTime() : byScore());
   /** Clip statuses, like a todo list. '' = Нове, keep = В роботі, done = Виконано, drop = Не беру. */
   const STATUS = { "": "Нове", keep: "В роботі", done: "Виконано", drop: "Не беру" };
-  const SHELVES = ["new", "keep", "done", "drop"];
-  const shelfOf = (c) => c.review_status || "new";
+  const SHELVES = ["new", "keep", "done", "drop", "reserve"];
+  /** «Запас»: weaker clips the AI found; they wait there so «Нові» shows only the best ones. */
+  const shelfOf = (c) => c.review_status || (c.reserve ? "reserve" : "new");
+  const TIER = { top: '<span class="ed-tier top" title="Серед найкращих кліпів цього відео">🔥 Топ</span>', good: '<span class="ed-tier good" title="Краще за половину кліпів цього відео">Добре</span>' };
   const matches = (c) => shelfOf(c) === st.filter;
   const kb = (n) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} КБ` : n < 1024 ** 3 ? `${Math.round(n / 1024 ** 2)} МБ` : `${(n / 1024 ** 3).toFixed(1).replace(".", ",")} ГБ`);
   const visible = () => ordered().filter((i) => matches(st.clips[i]));
@@ -83,16 +87,16 @@ const Editor = (() => {
       li.setAttribute("aria-current", String(i === st.cur));
       li.title = c.title || "";
       li.innerHTML = `<div class="ed-th"><img src="/api/projects/${pid()}/clips/${c.clip_index}/thumbnail?s=${Math.round(c.start_sec * 10)}" alt="" draggable="false" loading="lazy" onerror="this.remove()">
-          <span class="ed-num">№${c.num}</span><span class="ed-dur">${Math.round(len(c))} с</span>${r === "keep" ? '<span class="ed-ok" title="Беру">✓</span>' : ""}</div>
+          <span class="ed-num">№${c.num}</span><span class="ed-dur">${Math.round(len(c))} с</span>${TIER[c.tier] || ""}${r === "keep" ? '<span class="ed-ok" title="Беру">✓</span>' : ""}</div>
         <div class="ed-rb"><div class="ed-rt">${esc(c.title)}</div>
-        <div class="ed-rm"><span>${fmtS(c.start_sec)}${r === "drop" ? " · не беру" : ""}</span><span class="s">★ ${esc(c.virality_score)}</span></div></div>`;
+        <div class="ed-rm"><span>${fmtS(c.start_sec)}${r === "drop" ? " · не беру" : ""}</span><span class="s" title="Місце серед кліпів цього відео (ШІ дав ${esc(c.virality_score)})">★ ${esc(scoreOf(c))}</span></div></div>`;
       li.addEventListener("click", () => select(i));
       li.addEventListener("keydown", (e) => { if (e.key === "Enter") select(i); });
       L.appendChild(li);
     });
     if (!vis.length) {
       const empty = { new: "Нових кліпів немає: усі розібрано.", keep: "У роботі поки нічого. Познач кліп «В роботі» в меню статусу.",
-        done: "Виконаних ще немає.", drop: "Відкинутих кліпів немає." };
+        done: "Виконаних ще немає.", drop: "Відкинутих кліпів немає.", reserve: "У запасі порожньо: усі кліпи на полиці «Нові»." };
       L.innerHTML = `<li class="ed-empty">${st.mode === "vx" ? "Тут поки порожньо." : empty[st.filter]}</li>`;
     }
     const anyKept = st.clips.some((c) => c.review_status === "keep");
@@ -143,7 +147,7 @@ const Editor = (() => {
     [...st.clips.keys()].sort((a, b) => st.clips[a].start_sec - st.clips[b].start_sec).forEach((i) => {
       const c = st.clips[i];
       const w = Math.max(0.6, (len(c) / dur) * 100);
-      h += `<div class="c${c.review_status ? " " + c.review_status : ""}${i === st.cur ? " sel" : ""}" data-i="${i}"
+      h += `<div class="c${c.review_status ? " " + c.review_status : c.reserve ? " reserve" : ""}${i === st.cur ? " sel" : ""}" data-i="${i}"
         style="left:${(c.start_sec / dur) * 100}%;width:${w}%" title="№${c.num} ${esc(c.title)} (${fmtS(c.start_sec)})"><span class="lab">${c.num}</span></div>`;
     });
     h += `<div class="pl" id="edPh"></div>`;
@@ -156,7 +160,8 @@ const Editor = (() => {
     if (!c) return;
     $("edNo").textContent = `№${c.num}`;
     if (document.activeElement !== $("edClipTitle")) $("edClipTitle").textContent = c.title || "";
-    $("edScore").innerHTML = c.virality_score != null ? `оцінка ШІ <b>★ ${esc(c.virality_score)}</b>` : "";
+    $("edScore").innerHTML = c.virality_score != null ? `<span title="Місце серед кліпів цього відео: 99 найкращий, 40 найслабший. ШІ дав ${esc(c.virality_score)}">оцінка ШІ <b>★ ${esc(scoreOf(c))}</b></span>` : "";
+    $("edPromote").hidden = !(c.reserve && !c.review_status);
     $("vxNo").textContent = `№${c.num} · ${Math.round(len(c))} с`;
     $("vxClipNo").textContent = c.title || "";
     ["edStatus", "vxStatus"].forEach((id) => {
@@ -868,7 +873,27 @@ const Editor = (() => {
     }
   }
 
-  const shelfName = (f) => ({ new: "Нові", keep: "В роботі", done: "Виконані", drop: "Не беру" })[f];
+  const shelfName = (f) => ({ new: "Нові", keep: "В роботі", done: "Виконані", drop: "Не беру", reserve: "Запас" })[f];
+
+  /** «⬆ Перенести в Нові»: a clip from «Запас» joins the main shelf. */
+  async function promote(c = clip()) {
+    closeStatusMenu();
+    if (!c || !c.reserve) return;
+    const vis = stripClips();
+    if (c === clip() && vis.includes(st.cur)) st.anchor = vis.indexOf(st.cur);
+    c.reserve = 0;
+    renderList(); renderOverview(); renderDetails();
+    try {
+      await api(`/api/projects/${pid()}/clips/${c.clip_index}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reserve: false }),
+      });
+      toast("⬆ Перенесено в «Нові»");
+    } catch (e) {
+      c.reserve = 1;
+      renderList(); renderOverview(); renderDetails();
+      toast("Не вдалося перенести: " + e.message, true);
+    }
+  }
 
   /**
    * Sets the clip status. The clip stays open (↓ moves on). «Виконано» and «Не беру» delete the clip's
@@ -881,7 +906,9 @@ const Editor = (() => {
     if (prev === status) return;
     const vis = stripClips();
     if (c === clip() && vis.includes(st.cur)) st.anchor = vis.indexOf(st.cur);
+    const prevReserve = c.reserve;
     c.review_status = status;
+    if (status) c.reserve = 0; // a reviewed clip leaves «Запас» (the server does the same)
     renderList(); renderOverview(); renderDetails();
     try {
       const data = await api(`/api/projects/${pid()}/clips/${c.clip_index}`, {
@@ -894,6 +921,7 @@ const Editor = (() => {
       else toast(msg);
     } catch (e) {
       c.review_status = prev;
+      c.reserve = prevReserve;
       renderList(); renderOverview(); renderDetails();
       toast("Не вдалося змінити статус: " + e.message, true);
     }
@@ -1247,9 +1275,13 @@ const Editor = (() => {
       e.stopPropagation();
       if (st.menuBtn === e.currentTarget) closeStatusMenu(); else { closeStatusMenu(); openStatusMenu(e.currentTarget); }
     }));
-    $("edStatusMenu").addEventListener("click", (e) => { const b = e.target.closest("button[data-s]"); if (b) mark(b.dataset.s); });
+    $("edStatusMenu").addEventListener("click", (e) => {
+      if (e.target.closest("#edPromote")) { promote(); return; }
+      const b = e.target.closest("button[data-s]");
+      if (b) mark(b.dataset.s);
+    });
     $("edStatusMenu").addEventListener("keydown", (e) => {
-      const items = [...$("edStatusMenu").querySelectorAll("button")];
+      const items = [...$("edStatusMenu").querySelectorAll("button:not([hidden])")];
       const i = items.indexOf(document.activeElement);
       if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus(); }
       else if (e.key === "Tab") closeStatusMenu();
