@@ -100,9 +100,9 @@ const Editor = (() => {
       L.innerHTML = `<li class="ed-empty">${st.mode === "vx" ? "Тут поки порожньо." : empty[st.filter]}</li>`;
     }
     const anyKept = st.clips.some((c) => c.review_status === "keep");
-    $("edStripTitle").textContent = st.mode === "vx" && anyKept ? "Обрані кліпи" : "Кліпи";
+    $("edStripTitle").textContent = st.mode === "vx" && anyKept ? "Кліпи в роботі" : "Кліпи";
     const note = document.querySelector("#editor .ed-vx-note");
-    note.textContent = anyKept ? "Тут лише кліпи «В роботі». Щоб додати ще, повернись на крок 1." : "Ще нічого не обрано: познач кліпи «В роботі» на кроці 1, тоді тут будуть лише вони.";
+    note.textContent = anyKept ? "Тут лише кліпи «В роботі». Щоб додати ще, повернись на крок 1." : "У роботі поки нічого: познач кліпи «В роботі» на кроці 1, тоді тут будуть лише вони.";
 
     SHELVES.forEach((f) => {
       $(`edCnt_${f}`).textContent = st.clips.filter((c) => shelfOf(c) === f).length;
@@ -123,8 +123,8 @@ const Editor = (() => {
     const allSeen = seen === st.clips.length && st.clips.length > 0;
     const b1 = document.querySelector('#edMode [data-m="table"]');
     b1.classList.toggle("done", allSeen && st.mode === "vx");
-    $("edStep1").textContent = allSeen && st.mode === "vx" ? (mini ? `✓ ${kept}` : `✓ обрано ${kept}`) : (mini ? `${seen}/${st.clips.length}` : `переглянуто ${seen}/${st.clips.length}`);
-    $("edStep2").textContent = mini ? String(kept) : st.mode === "vx" ? `${kept} ${kept === 1 ? "кліп" : kept > 1 && kept < 5 ? "кліпи" : "кліпів"}` : `обрано ${kept}`;
+    $("edStep1").textContent = allSeen && st.mode === "vx" ? (mini ? `✓ ${kept}` : `✓ в роботі ${kept}`) : (mini ? `${seen}/${st.clips.length}` : `переглянуто ${seen}/${st.clips.length}`);
+    $("edStep2").textContent = mini ? String(kept) : `в роботі ${kept}`;
   }
 
   function updateScroll() {

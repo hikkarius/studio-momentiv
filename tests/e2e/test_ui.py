@@ -590,7 +590,7 @@ def test_step_two_strip_lists_kept_clips(page, studio, project):
     assert wait_for(page, lambda: clip(2)["review_status"] == "keep")
     page.click("#edMode button[data-m='vx']")
     assert page.locator("#edList .ed-row").count() == 1
-    assert page.locator("#edStripTitle").inner_text().lower() == "обрані кліпи"
+    assert page.locator("#edStripTitle").inner_text().lower() == "кліпи в роботі"
     assert page.locator("#edShelves").is_hidden()
     page.click("#edMode button[data-m='table']")
     assert page.locator("#edList .ed-row").count() == 3  # the «Нові» shelf

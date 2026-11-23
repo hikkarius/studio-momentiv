@@ -407,7 +407,7 @@ const Settings = (() => {
         <img class="dp-th" src="/api/projects/${encodeURIComponent(p.id)}/thumbnail" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
         <div class="dp-main">
           <span class="dp-title" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>${chipOf(p)}
-          <span class="dp-meta">відео ${fmtBytes(p.source_bytes)}${p.clips_bytes ? ` · файли кліпів ${fmtBytes(p.clips_bytes)}` : ""}${p.kept_count ? ` · обрано ${p.kept_count}` : ""}</span>
+          <span class="dp-meta">відео ${fmtBytes(p.source_bytes)}${p.clips_bytes ? ` · файли кліпів ${fmtBytes(p.clips_bytes)}` : ""}${p.kept_count ? ` · в роботі ${p.kept_count}` : ""}</span>
         </div>
         <b class="dp-size">${fmtBytes(p.total_bytes)}</b>
         <div class="dp-actions">

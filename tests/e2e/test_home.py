@@ -79,7 +79,7 @@ def test_reviewed_video_shows_progress(page, studio, project):
     card = page.locator(".video-card", has_text="Тестовий подкаст")
     card.wait_for()
     assert "В роботі" in card.locator(".vc-badge").inner_text()
-    assert "1 обрано з 4" in card.locator(".video-card-meta").inner_text()
+    assert "1 в роботі з 4" in card.locator(".video-card-meta").inner_text()
     for idx in (3, 4):
         db.update_clip_fields(PROJECT_ID, idx, review_status="drop")
     page.reload()

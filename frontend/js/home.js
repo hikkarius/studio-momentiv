@@ -42,8 +42,8 @@ const Home = (() => {
       case "failed": return "Клік, щоб спробувати ще раз";
       case "empty": return "Клік, щоб знайти кліпи";
       case "new": return `<b>${total} кліпів</b> · ще не дивився`;
-      case "done": return `<b>${kept} обрано</b> з ${total} · усі переглянуто`;
-      default: return `<b>${kept} обрано</b> з ${total} · переглянуто ${reviewed}`;
+      case "done": return `<b>${kept} в роботі</b> з ${total} · усі переглянуто`;
+      default: return `<b>${kept} в роботі</b> з ${total} · переглянуто ${reviewed}`;
     }
   }
 
