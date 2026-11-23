@@ -297,11 +297,15 @@ const Editor = (() => {
       const px = (width / 100) * W;
       const inside = a < c.end_sec && b > c.start_sec;
       let inner = "";
-      if (px >= 40) {
+      // the first word must fit whole (≈7.5 px a letter + padding); otherwise «…» instead of a chopped word
+      const firstFits = px >= 40 && st.words[j0].word.trim().length * 7.5 + 18 <= px;
+      if (firstFits) {
         for (let j = j0; j <= j1; j++) inner += `<span class="w" data-j="${j}">${esc(st.words[j].word)}</span> `;
         inner = `<div class="tx">${inner}</div>` + (px >= 56 ? `<small>${fmt(a)}</small>` : "");
+      } else if (px >= 26) {
+        inner = `<div class="tx dots">…</div>`;
       }
-      h += `<div class="phr${inside ? " in" : ""}${px < 40 ? " tiny" : px < 56 ? " notime" : ""}" data-a="${a}" data-b="${b}"
+      h += `<div class="phr${inside ? " in" : ""}${!firstFits ? (px < 26 ? " tiny" : " more") : px < 56 ? " notime" : ""}" data-a="${a}" data-b="${b}"
         style="left:${left}%;width:calc(${width}% - 3px)" title="${fmt(a)} – ${fmt(b)}">${inner}</div>`;
     });
     // a cut pause: a small square with ✂ between the phrases, and a hatched band on the wave

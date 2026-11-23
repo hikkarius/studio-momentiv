@@ -74,14 +74,18 @@
 .ed-track::after { content: ""; position: absolute; left: 0; right: 0; top: var(--wt); height: 30px; border-radius: var(--r-md); background: var(--ed-sunk); }
 .ed-track.scrubbing { cursor: grabbing; }
 .ed-track.dragging, .ed-track.dragging * { cursor: ew-resize; }
-/* Phrase cards: two lines of text and the start time under it; the box never changes on hover */
+/* Phrase cards: two lines of text and the start time under it; the box never changes on hover.
+   Outside the clip: muted text and faint time on the panel (≥ 4.5:1 in both themes) instead of see-through cards. */
 .ed-track .phr { position: absolute; top: 6px; height: 56px; box-sizing: border-box; padding: 5px 8px; border-radius: var(--r-md); overflow: hidden; z-index: 1;
-  background: var(--ed-panel); border: 1px solid var(--ed-line); color: var(--ed-fg); opacity: .55; font: 500 var(--fs-sm)/1.22 var(--ed-sans); cursor: default; }
+  background: var(--ed-panel); border: 1px solid var(--ed-line2); color: var(--ed-muted); font: 500 var(--fs-sm)/1.22 var(--ed-sans); cursor: default; }
 .ed-track .phr .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: normal; word-break: keep-all; }
 .ed-track .phr.notime .tx { -webkit-line-clamp: 3; }
-.ed-track .phr small { position: absolute; left: 8px; bottom: 3px; font: 500 var(--fs-xs) var(--ed-mono); opacity: .65; }
-.ed-track .phr.in { opacity: 1; background: var(--ed-accent-soft); border-color: color-mix(in srgb, var(--ed-accent) 45%, transparent); }
-.ed-track .phr.now { opacity: 1; background: var(--ed-accent); color: var(--ed-accent-ink); border-color: var(--ed-accent); font-weight: 700; }
+.ed-track .phr small { position: absolute; left: 8px; bottom: 3px; font: 500 var(--fs-xs) var(--ed-mono); color: var(--ed-faint); }
+.ed-track .phr.now small { color: inherit; opacity: .8; }
+/* a card too narrow for even one word: «…», the words are in the card above on hover */
+.ed-track .phr .tx.dots { font-weight: 700; letter-spacing: .05em; }
+.ed-track .phr.in { color: var(--ed-fg); background: var(--ed-accent-soft); border-color: color-mix(in srgb, var(--ed-accent) 45%, transparent); }
+.ed-track .phr.now { background: var(--ed-accent); color: var(--ed-accent-ink); border-color: var(--ed-accent); font-weight: 700; }
 .ed-track .phr.tiny { padding: 0; }
 .ed-track .phr .w { cursor: pointer; border-radius: var(--r-sm); }
 .ed-track .phr .w:hover { background: color-mix(in srgb, var(--ed-fg) 18%, transparent); }
