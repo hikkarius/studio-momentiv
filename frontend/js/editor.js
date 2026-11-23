@@ -915,7 +915,7 @@ const Editor = (() => {
   }
 
   /**
-   * Sets the clip status. The clip stays open (↓ moves on). «Виконано» and «Не беру» delete the clip's
+   * Sets the clip status. A clip that leaves the open shelf makes way: the next clip of that shelf opens. «Виконано» and «Не беру» delete the clip's
    * rendered files on the server; its bounds, text and style stay, so «Скачати» makes them again.
    */
   async function mark(status, c = clip(), { undo = true } = {}) {
@@ -929,14 +929,17 @@ const Editor = (() => {
     c.review_status = status;
     if (status) c.reserve = 0; // a reviewed clip leaves «Запас» (the server does the same)
     renderList(); renderOverview(); renderDetails();
+    const left = c === clip() && st.mode !== "vx" && !matches(c);
+    if (left) { const rest = stripClips(); if (rest.length) select(rest[Math.min(st.anchor, rest.length - 1)]); }
     try {
       const data = await api(`/api/projects/${pid()}/clips/${c.clip_index}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ review_status: status }),
       });
       const freed = data.freed_bytes || 0;
-      const msg = { "": "Знову «Нове»", keep: "✓ В роботі. Наступний кліп: ↓", done: "✓ Виконано", drop: "✕ Не беру" }[status]
+      const msg = { "": "Знову «Нове»", keep: "✓ В роботі", done: "✓ Виконано", drop: "✕ Не беру" }[status]
         + (freed ? `. Звільнено ${kb(freed)}` : "");
-      if (undo && prev !== status) toastUndo(msg, () => mark(prev, c, { undo: false }));
+      const back = () => { const i = st.clips.indexOf(c); mark(prev, c, { undo: false }); if (st.mode !== "vx" && i >= 0) select(i); };
+      if (undo && prev !== status) toastUndo(left ? `${msg} · №${c.num} → «${shelfName(shelfOf(c))}»` : msg, back);
       else toast(msg);
     } catch (e) {
       c.review_status = prev;
@@ -1014,7 +1017,7 @@ const Editor = (() => {
     const pv = st.pausePreview && st.pausePreview.key === previewKey(c) ? st.pausePreview.tempos : null;
     if (!pv) loadPausePreview(c);
     const none = !cut && pv && Object.values(pv).every((r) => !r.count);
-    btn.disabled = !!none;
+    btn.disabled = !!none || cuts.length > 0; // once cut, the button only shows the result; «↶ Повернути все» undoes it
     btn.classList.toggle("none", !!none);
     btn.title = none ? "У цьому кліпі довгих пауз немає" : "Вирізати довгі паузи всередині кліпу (jump cut). Чистий оригінал лишається для скачування";
     if (none) { bar.innerHTML = '<span class="hint">Довгих пауз немає: кліп і так іде щільно.</span>'; }

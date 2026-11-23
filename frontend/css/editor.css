@@ -613,7 +613,6 @@
 #editor .ed-silence:active { transform: scale(.97); }
 #editor .ed-silence:disabled { opacity: .6; cursor: progress; }
 #editor .ed-silence.on { background: var(--ed-accent); color: var(--ed-accent-ink); }
-#editor .ed-silence.on:hover { filter: brightness(1.08); }
 .ed-rawdl { width: 100%; justify-content: center; font-size: var(--fs-sm); }
 /* toast with «↶ Повернути» */
 .ed-toast.act { pointer-events: auto; display: flex; align-items: center; gap: 12px; }
@@ -627,6 +626,8 @@
 #editor .ed-silence:hover { background: var(--ed-accent-soft); border-color: var(--ed-accent); color: var(--ed-accent-text); filter: none; }
 #editor .ed-silence.on { background: var(--ed-accent); color: var(--ed-accent-ink); border-color: var(--ed-accent); }
 #editor .ed-silence.on:hover { filter: brightness(1.08); background: var(--ed-accent); color: var(--ed-accent-ink); }
+/* once cut, it only shows the result (not clickable): «↶ Повернути все» under the track undoes it */
+#editor .ed-silence.on:disabled { opacity: 1; cursor: default; filter: none; }
 /* Preview jumps over a cut pause with a short dip, like the cross-fade in the downloaded file */
 .ed-screen video.cutdip { animation: ed-cutdip .12s ease; }
 @keyframes ed-cutdip { 0% { opacity: 1; } 45% { opacity: .45; } 100% { opacity: 1; } }
