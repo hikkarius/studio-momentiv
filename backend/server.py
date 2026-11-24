@@ -647,6 +647,23 @@ def _clip_file_stem(clip: Dict[str, Any]) -> str:
     return f"clip_{clip['clip_index']}_{int(clip['start_sec'])}s_{safe_title}"
 
 
+def _clip_number(project_id: str, clip: Dict[str, Any]) -> int:
+    """The clip's number as the studio shows it (№1, №2…): its place by start time among the video's clips."""
+    clips = db.get_candidate_clips(project_id)
+    order = sorted(range(len(clips)), key=lambda i: clips[i]["start_sec"])  # stable, like the editor's sort
+    for num, i in enumerate(order, 1):
+        if clips[i]["clip_index"] == clip["clip_index"]:
+            return num
+    return int(clip["clip_index"]) + 1
+
+
+def _download_name(project_id: str, clip: Dict[str, Any], tag: str = "", ext: str = "mp4") -> str:
+    """Name of a file the user downloads: «06 Скільки грошей треба для щастя 9x16.mp4», number as in the studio."""
+    title = re.sub(r'[\x00-\x1f\\/:*?"<>|]', "", clip.get("title") or "")
+    title = re.sub(r"\s+", " ", title).strip(" .")[:60].rstrip(" .") or "кліп"
+    return f"{_clip_number(project_id, clip):02d} {title}{' ' + tag if tag else ''}.{ext}"
+
+
 def _ensure_clip_slice(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any]) -> tuple[str, str]:
     """Cuts (once, cached on disk) the MP4 for a clip. Returns (path, filename)."""
     project_out_dir = _safe_project_output_dir(project_id)
@@ -678,7 +695,7 @@ def _ensure_clip_slice(project_id: str, proj: Dict[str, Any], clip: Dict[str, An
                         os.remove(temp_slice_path)
                     except OSError:
                         pass
-    return output_slice_path, slice_filename
+    return output_slice_path, _download_name(project_id, clip)
 
 
 def _get_project_and_clip(project_id: str, clip_index: int) -> tuple[Dict[str, Any], Dict[str, Any]]:
@@ -719,7 +736,7 @@ def _ensure_clip_file(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any
                     pass
             pauses.render_with_cuts(source_path, float(clip["start_sec"]), float(clip["end_sec"]), cuts, str(path),
                                     has_nvenc=app_state.get_gpu_capabilities().has_nvenc)
-    return str(path), f"{stem}_bez_pauz.mp4"
+    return str(path), _download_name(project_id, clip, "без пауз")
 
 
 @app.get("/api/projects/{project_id}/clips/{clip_index}/download")
@@ -926,7 +943,7 @@ def export_selected_zip(project_id: str, clips: str = ""):
     else:
         chosen = [c for c in all_clips if c.get("review_status") == "keep"]
     if not chosen:
-        raise HTTPException(status_code=400, detail="Не обрано жодного кліпу. Позначте кліпи «Беру» і спробуйте ще раз.")
+        raise HTTPException(status_code=400, detail="Жодного кліпу «В роботі». Познач їх на кроці 1.")
     chosen.sort(key=lambda c: c.get("virality_score", 0), reverse=True)
 
     project_out_dir = _safe_project_output_dir(project_id)
@@ -937,18 +954,17 @@ def export_selected_zip(project_id: str, clips: str = ""):
     import zipfile
     try:
         with zipfile.ZipFile(tmp_zip, "w", compression=zipfile.ZIP_STORED) as zf:
-            for rank, c in enumerate(chosen, 1):
+            for c in chosen:
                 slice_path, slice_name = _ensure_clip_file(project_id, proj, c)
-                prefix = f"{rank:02d}_"
-                zf.write(slice_path, arcname=prefix + slice_name)
+                zf.write(slice_path, arcname=slice_name)
                 srt = subtitles_generator.generate_srt_for_clip(
                     video_path=proj["source_path"], start_sec=c["start_sec"], end_sec=c["end_sec"], target_words_per_cue=3,
                     cuts=_clip_cuts(c),
                 )
-                zf.writestr(prefix + slice_name[:-4] + ".srt", srt)
+                zf.writestr(slice_name[:-4] + ".srt", srt)
                 s_m, s_s = divmod(int(c["start_sec"]), 60)
                 posts.append(
-                    f"{rank:02d}. {c['title']}  (оцінка {c.get('virality_score', '')}, {s_m:02d}:{s_s:02d}, {int(c['duration'])} с)\n"
+                    f"№{_clip_number(project_id, c)}. {c['title']}  (оцінка {c.get('virality_score', '')}, {s_m:02d}:{s_s:02d}, {int(c['duration'])} с)\n"
                     f"{c.get('caption', '')}\n{' '.join(c.get('hashtags') or [])}\n"
                 )
             zf.writestr("posts.txt", f"{proj.get('title', '')}\n\n" + "\n".join(posts))
@@ -1000,7 +1016,7 @@ def export_clip_srt(project_id: str, clip_index: int):
     return FileResponse(
         output_srt_path,
         media_type="text/plain; charset=utf-8",
-        filename=srt_filename,
+        filename=_download_name(project_id, target_clip, ext="srt"),
     )
 
 
@@ -1095,8 +1111,7 @@ def _ensure_vertical(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any]
     key = vertical_render.cache_key(clip["start_sec"], clip["end_sec"], opts, subs, clip.get("title", "")) + pauses.cuts_key(cuts)
     idx = clip["clip_index"]
     vdir = _vertical_dir(project_id)
-    stem = _clip_file_stem(clip)
-    filename = f"{stem}_9x16{'_subs' if subs else ''}.mp4"
+    filename = _download_name(project_id, clip, "9x16" if subs else "9x16 без субтитрів")
     path = vdir / f"clip_{idx}_{key}_{'s' if subs else 'n'}.mp4"
     if path.exists():
         return str(path), filename
@@ -1209,7 +1224,7 @@ def _run_vertical_zip(job_id: str, project_id: str, proj: Dict[str, Any], chosen
             for rank, c in enumerate(chosen, 1):
                 job["current"] = c.get("title", "")
                 path, name = _ensure_vertical(project_id, proj, c, subs)
-                zf.write(path, arcname=f"{rank:02d}_{name}")
+                zf.write(path, arcname=name)
                 job["done"] = rank
         os.replace(tmp_zip, zip_path)
         job["status"] = "completed"
@@ -1241,7 +1256,7 @@ def start_vertical_zip(project_id: str, payload: VerticalZipRequest):
     else:
         chosen = [c for c in all_clips if c.get("review_status") == "keep"]
     if not chosen:
-        raise HTTPException(status_code=400, detail="Не обрано жодного кліпу. Позначте кліпи «Беру» і спробуйте ще раз.")
+        raise HTTPException(status_code=400, detail="Жодного кліпу «В роботі». Познач їх на кроці 1.")
     chosen.sort(key=lambda c: c.get("virality_score", 0), reverse=True)
     job_id = uuid.uuid4().hex[:12]
     safe = "".join(ch for ch in proj.get("title", "video") if ch.isalnum() or ch in (" ", "_", "-")).strip()

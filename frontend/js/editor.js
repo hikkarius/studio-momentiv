@@ -70,8 +70,11 @@ const Editor = (() => {
   function stripClips() {
     if (st.mode !== "vx") return visible();
     const kept = byTime().filter((i) => st.clips[i].review_status === "keep");
-    return kept.length ? kept : byTime();
+    return kept.length ? kept : byTime().filter((i) => st.clips[i].review_status !== "drop");
   }
+
+  /** Step 2 while no clip is «В роботі»: an explanation instead of the phone. */
+  const vxEmpty = () => st.mode === "vx" && !!st.project && !st.clips.some((c) => c.review_status === "keep");
 
   function renderList() {
     const L = $("edList");
@@ -87,11 +90,13 @@ const Editor = (() => {
       li.setAttribute("aria-current", String(i === st.cur));
       li.title = c.title || "";
       li.innerHTML = `<div class="ed-th"><img src="/api/projects/${pid()}/clips/${c.clip_index}/thumbnail?s=${Math.round(c.start_sec * 10)}" alt="" draggable="false" loading="lazy" onerror="this.remove()">
-          <span class="ed-num">№${c.num}</span><span class="ed-dur">${Math.round(len(c))} с</span>${TIER[c.tier] || ""}${r === "keep" ? '<span class="ed-ok" title="Беру">✓</span>' : ""}</div>
+          <span class="ed-num">№${c.num}</span><span class="ed-dur">${Math.round(len(c))} с</span>${TIER[c.tier] || ""}${r === "keep" ? '<span class="ed-ok" title="В роботі">✓</span>' : ""}</div>
         <div class="ed-rb"><div class="ed-rt">${esc(c.title)}</div>
         <div class="ed-rm"><span>${fmtS(c.start_sec)}${r === "drop" ? " · не беру" : ""}</span><span class="s" title="Місце серед кліпів цього відео (ШІ дав ${esc(c.virality_score)})">★ ${esc(scoreOf(c))}</span></div></div>`;
-      li.addEventListener("click", () => select(i));
-      li.addEventListener("keydown", (e) => { if (e.key === "Enter") select(i); });
+      // step 2 with nothing in work: a clip opens on step 1, where it can be taken «В роботі»
+      const pick = () => { if (vxEmpty()) setMode("table"); select(i); };
+      li.addEventListener("click", pick);
+      li.addEventListener("keydown", (e) => { if (e.key === "Enter") pick(); });
       L.appendChild(li);
     });
     if (!vis.length) {
@@ -100,9 +105,12 @@ const Editor = (() => {
       L.innerHTML = `<li class="ed-empty">${st.mode === "vx" ? "Тут поки порожньо." : empty[st.filter]}</li>`;
     }
     const anyKept = st.clips.some((c) => c.review_status === "keep");
+    $("edVx").classList.toggle("is-empty", vxEmpty());
+    $("vxEmpty").hidden = !vxEmpty();
+    $("editor").classList.toggle("vx-none", !anyKept);
     $("edStripTitle").textContent = st.mode === "vx" && anyKept ? "Кліпи в роботі" : "Кліпи";
     const note = document.querySelector("#editor .ed-vx-note");
-    note.textContent = anyKept ? "Тут лише кліпи «В роботі». Щоб додати ще, повернись на крок 1." : "У роботі поки нічого: познач кліпи «В роботі» на кроці 1, тоді тут будуть лише вони.";
+    note.textContent = anyKept ? "Тут лише кліпи «В роботі». Щоб додати ще, повернись на крок 1." : "Клік по кліпу відкриє його на кроці 1.";
 
     SHELVES.forEach((f) => {
       $(`edCnt_${f}`).textContent = st.clips.filter((c) => shelfOf(c) === f).length;
@@ -123,7 +131,7 @@ const Editor = (() => {
     const allSeen = seen === st.clips.length && st.clips.length > 0;
     const b1 = document.querySelector('#edMode [data-m="table"]');
     b1.classList.toggle("done", allSeen && st.mode === "vx");
-    $("edStep1").textContent = allSeen && st.mode === "vx" ? (mini ? `✓ ${kept}` : `✓ в роботі ${kept}`) : (mini ? `${seen}/${st.clips.length}` : `переглянуто ${seen}/${st.clips.length}`);
+    $("edStep1").textContent = allSeen && st.mode === "vx" ? (mini ? `✓ ${kept}` : `✓ в роботі ${kept}`) : (mini ? `${seen}/${st.clips.length}` : `розібрано ${seen} з ${st.clips.length}`);
     $("edStep2").textContent = mini ? String(kept) : `в роботі ${kept}`;
   }
 
@@ -136,7 +144,11 @@ const Editor = (() => {
 
   function scrollToCurrent() {
     const row = $("edList").querySelector('[aria-current="true"]');
-    if (row) row.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (!row) return;
+    // only sideways inside the strip: scrollIntoView also scrolled the whole editor down on a phone
+    const L = $("edList"), lr = L.getBoundingClientRect(), rr = row.getBoundingClientRect();
+    if (rr.left < lr.left) L.scrollLeft += rr.left - lr.left - 8;
+    else if (rr.right > lr.right) L.scrollLeft += rr.right - lr.right + 8;
   }
 
   /** Clips the map shows: those of the open shelf, plus the open clip (it may have just left the shelf). */
@@ -236,6 +248,31 @@ const Editor = (() => {
     if (st.project) renderList();
   }
 
+  // ─── Address ───────────────────────────────────────────────────────────────
+  /** The address keeps the open video, step and clip (#v=…&s=2&c=5): F5 comes back to the same place. */
+  function writeHash(push = false) {
+    if (!st.project || $("editor").hidden) return;
+    const p = new URLSearchParams({ v: st.project.id, s: st.mode === "vx" ? "2" : "1" });
+    const c = clip();
+    if (c) p.set("c", String(c.clip_index));
+    const h = "#" + p.toString();
+    if (location.hash === h) return;
+    try { history[push ? "pushState" : "replaceState"](null, "", h); } catch (_) {}
+  }
+  /** Leaves the video's address (replace: no new step in the browser history). */
+  function clearHash(push = false) {
+    const v = new URLSearchParams(location.hash.slice(1)).get("v");
+    if (!v || (!push && st.project && v !== st.project.id)) return; // the address already points at another video
+    try { history[push ? "pushState" : "replaceState"](null, "", location.pathname + location.search); } catch (_) {}
+  }
+  /** Same video, another step or clip (browser «Назад» / «Вперед» inside one video). */
+  function go(route) {
+    if (!st.project) return;
+    if ((route.mode === "vx") !== (st.mode === "vx")) setMode(route.mode);
+    const i = route.clip == null ? -1 : st.clips.findIndex((c) => c.clip_index === route.clip);
+    if (i >= 0 && i !== st.cur) select(i);
+  }
+
   /** «✂ Монтажний стіл» or «📱 Вертикальні кліпи»: two screens over the same clip list and player. */
   function setMode(m) {
     st.mode = m === "vx" ? "vx" : "table";
@@ -254,6 +291,7 @@ const Editor = (() => {
       if (typeof Vertical !== "undefined") Vertical.onShow();
     }
     else if (st.project && clip()) { renderOverview(); renderTrack(); }
+    writeHash();
   }
 
   // ─── Trim track ────────────────────────────────────────────────────────────
@@ -532,6 +570,7 @@ const Editor = (() => {
   async function select(i, autoplay = false) {
     if (i < 0 || i >= st.clips.length) return;
     st.cur = i;
+    writeHash();
     st.zoomManual = false;
     st.restored = [];
     st.levels = null;
@@ -1019,8 +1058,8 @@ const Editor = (() => {
     const none = !cut && pv && Object.values(pv).every((r) => !r.count);
     btn.disabled = !!none || cuts.length > 0; // once cut, the button only shows the result; «↶ Повернути все» undoes it
     btn.classList.toggle("none", !!none);
-    btn.title = none ? "У цьому кліпі довгих пауз немає" : "Вирізати довгі паузи всередині кліпу (jump cut). Чистий оригінал лишається для скачування";
-    if (none) { bar.innerHTML = '<span class="hint">Довгих пауз немає: кліп і так іде щільно.</span>'; }
+    btn.title = none ? "Довгих пауз немає: кліп і так іде щільно" : "Вирізати довгі паузи всередині кліпу (jump cut). Чистий оригінал лишається для скачування";
+    if (none) { btn.textContent = "✓ Пауз немає"; bar.innerHTML = ""; } // the button itself says it; the row keeps its height
     else bar.innerHTML = `<span>Темп:</span><span class="seg" role="group" aria-label="Темп: наскільки різати паузи">${Object.entries(PAUSE_MODES).map(([k, m]) => {
         const r = pv && pv[k];
         const res = r ? (r.count ? ` · −${fmt1(r.removed_sec)} с` : " · 0 с") : "";
@@ -1196,7 +1235,7 @@ const Editor = (() => {
   }
 
   // ─── Open / close ──────────────────────────────────────────────────────────
-  function open(project, clips) {
+  function open(project, clips, route = null) {
     st.project = project;
     st.clips = clips.map((c) => ({ ...c, review_status: c.review_status || "" }));
     assignNumbers();
@@ -1211,9 +1250,12 @@ const Editor = (() => {
     v.load();
     $("editor").hidden = false;
     document.body.style.overflow = "hidden";
+    st.cur = 0; // a clip of this video (not of the previous one) until select() picks the right one
+    if (!route) writeHash(true); // a new step in the browser history: «Назад» returns to the videos
     renderTabs();
     let mode = "table";
     try { mode = localStorage.getItem("studio-mode") || "table"; } catch (_) {}
+    if (route) mode = route.mode;
     setMode(mode);
     let mini = false;
     try { mini = localStorage.getItem("studio-rail") === "mini"; } catch (_) {}
@@ -1221,7 +1263,9 @@ const Editor = (() => {
     let sort = "score";
     try { sort = localStorage.getItem("studio-sort") || "score"; } catch (_) {}
     setSort(sort);
-    select((st.mode === "vx" ? stripClips()[0] : visible()[0]) ?? ordered()[0] ?? 0);
+    const fromRoute = route && route.clip != null ? st.clips.findIndex((c) => c.clip_index === route.clip) : -1;
+    if (fromRoute >= 0 && st.mode !== "vx" && !matches(st.clips[fromRoute])) st.filter = shelfOf(st.clips[fromRoute]);
+    select(fromRoute >= 0 ? fromRoute : (st.mode === "vx" ? stripClips()[0] : visible()[0]) ?? ordered()[0] ?? 0);
   }
 
   function close() {
@@ -1232,6 +1276,7 @@ const Editor = (() => {
     closePop();
     hidePhraseCard(true);
     closeStatusMenu();
+    clearHash();
     $("editor").hidden = true;
     document.body.style.overflow = "";
   }
@@ -1409,9 +1454,11 @@ const Editor = (() => {
     $("vxMorePop").addEventListener("click", (e) => { if (e.target.closest("button")) closeVxMore(); });
     document.addEventListener("click", (e) => { if (!e.target.closest(".vx-more")) closeVxMore(); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeVxMore(); });
+    $("vxEmptyBack").addEventListener("click", () => setMode("table"));
     $("vxPrev").addEventListener("click", () => step(-1));
     $("vxNext").addEventListener("click", () => step(1));
     $("edBack").addEventListener("click", () => {
+      clearHash(true); // «Вперед» in the browser opens this video again
       close();
       if (typeof resetStudioState === "function") resetStudioState();
       if (typeof loadRecentProjects === "function") loadRecentProjects();
@@ -1428,7 +1475,7 @@ const Editor = (() => {
     return { cur: st.cur, clipIndex: c?.clip_index, num: c?.num, start: c?.start_sec, end: c?.end_sec, words: st.words.length, time: video().currentTime, paused: video().paused };
   }
 
-  return { init, open, close, state, setMode };
+  return { init, open, close, state, setMode, go, isOpen: () => !$("editor").hidden && !!st.project, projectId: () => st.project?.id };
 })();
 
 document.addEventListener("DOMContentLoaded", () => Editor.init());

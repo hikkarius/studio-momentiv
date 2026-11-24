@@ -78,12 +78,12 @@ def test_reviewed_video_shows_progress(page, studio, project):
     page.goto(studio["url"] + "/")
     card = page.locator(".video-card", has_text="Тестовий подкаст")
     card.wait_for()
-    assert "В роботі" in card.locator(".vc-badge").inner_text()
+    assert "Розбираю" in card.locator(".vc-badge").inner_text()
     assert "2 вірусних · 1 в роботі" in card.locator(".video-card-meta").inner_text()
     for idx in (3, 4):
         db.update_clip_fields(PROJECT_ID, idx, review_status="drop")
     page.reload()
-    assert "Готово" in page.locator(".video-card", has_text="Тестовий подкаст").locator(".vc-badge").inner_text()
+    assert "Розібрано" in page.locator(".video-card", has_text="Тестовий подкаст").locator(".vc-badge").inner_text()
 
 
 def test_search_and_sort_with_many_videos(page, studio, extra_projects):
@@ -105,3 +105,53 @@ def test_search_and_sort_with_many_videos(page, studio, extra_projects):
     assert page.locator("#homeSort button[data-s='old']").get_attribute("aria-pressed") == "true"
     page.click("#homeSort button[data-s='new']")
     assert not page.errors
+
+
+def test_failed_video_says_why_and_offers_retry(page, studio, project):
+    """A failed video: a short reason and what to do, the full text under «Детальніше», «Ще раз» / «Видалити»."""
+    import ai_selector
+    db.create_project("e2e_failed", "Невдалий стрім", "/nonexistent/failed.mp4", 600)
+    db.update_project_status("e2e_failed", "failed")
+    db.create_job("e2e_failed_job", "e2e_failed", "analyze")
+    db.update_job("e2e_failed_job", status="failed", error=ai_selector.GEMINI_QUOTA_MESSAGE)
+    try:
+        page.goto(studio["url"] + "/")
+        card = page.locator(".video-card", has_text="Невдалий стрім")
+        card.wait_for()
+        meta = card.locator(".err-sum")
+        assert "Ліміт Gemini на зараз вичерпано" in meta.locator("b").inner_text()
+        assert "тихоокеанським" not in meta.inner_text()  # the long text waits under «Детальніше»
+        card.locator(".err-more summary").click()
+        assert "тихоокеанським" in meta.inner_text()
+        assert card.locator(".vc-acts button", has_text="Ще раз").is_visible()
+        # the card itself is not a button: no controls nested inside another control
+        assert card.locator(".history-item-left").get_attribute("role") is None
+        assert card.locator("[role=button] button, [role=button] summary").count() == 0
+
+        # «Видалити» asks in the studio's own window (no browser confirm); Escape keeps the video
+        card.locator(".vc-acts button", has_text="Видалити").click()
+        ask = page.locator(".ask-dialog")
+        ask.wait_for()
+        assert "Невдалий стрім" in ask.inner_text()
+        page.keyboard.press("Escape")
+        assert ask.count() == 0 and db.get_project("e2e_failed")
+        card.locator(".vc-acts button", has_text="Видалити").click()
+        page.locator(".ask-dialog button", has_text="Видалити").click()
+        card.wait_for(state="detached")
+        assert db.get_project("e2e_failed") is None
+        assert not page.errors
+    finally:
+        if db.get_project("e2e_failed"):
+            db.delete_project("e2e_failed")
+
+
+def test_video_count_includes_the_queue(page, studio, project):
+    for item in db.list_queue_items():
+        db.delete_queue_item(item["id"])
+    db.add_queue_item("e2e_q1", "https://www.youtube.com/watch?v=aaaaaaaaaaa", None, "Стендап", 0)
+    try:
+        page.goto(studio["url"] + "/")
+        page.wait_for_function("document.getElementById('historyCount').textContent.includes('у черзі 1')")
+        assert page.locator("#historyCount").text_content() == "1 · у черзі 1"
+    finally:
+        db.delete_queue_item("e2e_q1")

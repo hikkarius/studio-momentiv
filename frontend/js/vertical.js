@@ -477,7 +477,7 @@ const Vertical = (() => {
     $("vxDlClean").addEventListener("click", (e) => renderAndDownload(e.currentTarget, false));
     $("vxZip").addEventListener("click", startZip);
     $("vxZipClean").addEventListener("click", () => {
-      if (!ctx.keptCount()) { ctx.toast("Спершу познач кліпи «Беру».", true); return; }
+      if (!ctx.keptCount()) { ctx.toast("Спершу познач кліпи «В роботі».", true); return; }
       ctx.toast("Готуємо архів… Великі архіви можуть зайняти хвилину.");
       ctx.download(`/api/projects/${ctx.pid()}/export-zip`);
     });

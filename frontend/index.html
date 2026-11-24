@@ -59,7 +59,7 @@
         <button class="tab-btn active" id="tabUrlBtn" onclick="switchSourceTab('url')">Посилання</button>
       </div>
       <div class="hero-source" id="tabUrlContent">
-        <textarea id="urlInput" rows="1" placeholder="Встав посилання на YouTube чи TikTok" title="Можна вставити кілька посилань, кожне з нового рядка" class="input-text hero-input" aria-label="Посилання на відео"></textarea>
+        <textarea id="urlInput" rows="1" placeholder="Посилання на YouTube чи TikTok" title="Можна вставити кілька посилань, кожне з нового рядка" class="input-text hero-input" aria-label="Посилання на відео"></textarea>
         <button class="btn btn-secondary hero-file" type="button" onclick="document.getElementById('fileInput').click()">📁 Файл з комп’ютера</button>
         <button class="btn btn-primary hero-go" id="urlDownloadBtn" onclick="Queue.submitHero()">В чергу →</button>
       </div>
@@ -533,6 +533,7 @@
               <button type="button" class="btn btn-primary" id="welcomeSave" onclick="Welcome.saveKey()">Перевірити й зберегти</button>
             </div>
             <div class="welcome-msg" id="welcomeMsg" role="status" aria-live="polite"></div>
+            <button type="button" class="btn btn-secondary welcome-later" onclick="Welcome.close()">Пізніше: спершу подивлюсь студію</button>
           </li>
         </ol>
         <div class="welcome-gpu" id="welcomeGpu"></div>
@@ -544,8 +545,7 @@
         </details>
       </div>
       <footer class="settings-foot">
-        <button type="button" class="btn btn-secondary btn-sm" onclick="Welcome.close()">Пізніше</button>
-        <span id="welcomeVersion"></span>
+        <span id="welcomeVersion" hidden></span>
       </footer>
     </section>
   </div>
@@ -662,6 +662,12 @@
           </div>
         </section>
         <section class="ed-panel ed-vx" id="edVx" aria-label="Вертикальний кліп" hidden>
+          <div class="vx-empty" id="vxEmpty" hidden>
+            <div class="vx-empty-ic" aria-hidden="true">📱</div>
+            <h2>Поки жодного кліпу «В роботі»</h2>
+            <p>На кроці 1 натисни <b>«В роботі»</b> (або клавішу <kbd>Y</kbd>) на кліпах, які хочеш змонтувати. Тут будуть лише вони, готові до 9:16.</p>
+            <button type="button" class="vx-big vx-empty-go" id="vxEmptyBack">← До монтажного столу</button>
+          </div>
           <div class="vx-studio">
             <div class="vx-stage">
               <div class="vx-shead">
@@ -699,8 +705,8 @@
                   <div class="vx-more-pop" id="vxMorePop" role="menu" hidden>
                     <button class="vx-mi" id="vxDlClean" type="button" role="menuitem"><b>9:16 без субтитрів</b><small>свої титри в CapCut</small></button>
                     <button class="vx-mi" id="vxCopyPost" type="button" role="menuitem"><b>Копіювати текст допису</b><small>заголовок, опис, хештеги</small></button>
-                    <button class="vx-mi" id="vxZip" type="button" role="menuitem"><b>ZIP усіх обраних · 9:16</b><small id="vxZipInfo">із субтитрами, видно прогрес</small></button>
-                    <button class="vx-mi" id="vxZipClean" type="button" role="menuitem"><b>ZIP усіх обраних · чисті 16:9</b><small>для монтажу</small></button>
+                    <button class="vx-mi" id="vxZip" type="button" role="menuitem"><b>ZIP усіх «В роботі» · 9:16</b><small id="vxZipInfo">із субтитрами, видно прогрес</small></button>
+                    <button class="vx-mi" id="vxZipClean" type="button" role="menuitem"><b>ZIP усіх «В роботі» · чисті 16:9</b><small>для монтажу</small></button>
                   </div>
                 </div>
               </div>

@@ -477,7 +477,9 @@ def list_recent_projects(limit: int = 25, include_test: Optional[bool] = None) -
                SUM(CASE WHEN c.review_status = 'keep' THEN 1 ELSE 0 END) AS kept_count,
                SUM(CASE WHEN c.review_status = 'done' THEN 1 ELSE 0 END) AS done_count,
                SUM(CASE WHEN COALESCE(c.review_status, '') = '' AND c.reserve = 0 THEN 1 ELSE 0 END) AS new_count,
-               SUM(CASE WHEN COALESCE(c.review_status, '') = '' AND c.reserve = 1 THEN 1 ELSE 0 END) AS reserve_count
+               SUM(CASE WHEN COALESCE(c.review_status, '') = '' AND c.reserve = 1 THEN 1 ELSE 0 END) AS reserve_count,
+               (SELECT j.error FROM jobs j WHERE j.project_id = p.id AND j.status = 'failed'
+                ORDER BY j.updated_at DESC LIMIT 1) AS last_error
         FROM projects p
         LEFT JOIN candidate_clips c ON p.id = c.project_id
         GROUP BY p.id

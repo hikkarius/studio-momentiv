@@ -289,7 +289,7 @@ def test_vertical_plan_and_render_endpoints(tmp_path, monkeypatch):
     assert calls["detect"] == 1  # faces cached on disk
 
     r = client.post(f"/api/projects/{pid}/clips/{idx}/vertical?subs=true")
-    assert r.status_code == 200 and r.json()["filename"].endswith("_9x16_subs.mp4")
+    assert r.status_code == 200 and r.json()["filename"].endswith(" 9x16.mp4")
     d = client.get(f"/api/projects/{pid}/clips/{idx}/vertical?subs=true")
     assert d.status_code == 200 and d.headers["content-type"] == "video/mp4"
     assert calls["render"] == 1  # second request served from cache

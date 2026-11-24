@@ -25,6 +25,12 @@ def wait_for(page, fn, timeout=6000):
     return fn()
 
 
+def keep_first_clip():
+    """Takes the earliest clip «В роботі», so step 2 shows the phone (with none it explains what to do)."""
+    first = min(db.get_candidate_clips(PROJECT_ID), key=lambda c: c["start_sec"])
+    db.update_clip_fields(PROJECT_ID, first["clip_index"], review_status="keep")
+
+
 def open_editor(page, studio):
     page.goto(studio["url"] + "/")
     page.locator(".history-item-left", has_text="Тестовий подкаст").click()
@@ -89,7 +95,7 @@ def test_open_project_shows_editor_sorted_by_score(page, studio, project):
     assert page.locator("#edClipMeta, [data-nudge], #edPrev, #edNext, .ed-bar, #edZip, #hwBadge").count() == 0
     # step rail with both steps, download always on top of the side panel, «Чому» under the title
     assert page.locator("#edMode button[data-m='table'][aria-selected='true']").is_visible()
-    assert "переглянуто 0/4" in page.locator("#edStep1").inner_text()
+    assert "розібрано 0 з 4" in page.locator("#edStep1").inner_text()
     assert page.locator("#edMp4").is_visible()
     assert "Сильний хук" in page.locator("#edWhy").inner_text()
     # five status shelves are tabs of the «Кліпи» strip; it opens on «Вірусні»
@@ -176,8 +182,7 @@ def test_sort_best_or_in_order(page, studio, project):
     assert "Найкращий момент" in first()
     page.click("#edSort button[data-s='time']")
     assert "Перший момент" in first()
-    page.reload()
-    page.locator(".history-item-left", has_text="Тестовий подкаст").click()
+    page.reload()  # F5 opens the same video again
     page.locator("#editor").wait_for(state="visible")
     assert "Перший момент" in first()  # remembered
     page.click("#edSort button[data-s='score']")
@@ -428,6 +433,7 @@ def vx_more(page, item):
 
 
 def test_vertical_preview_settings_and_download(page, studio, project):
+    keep_first_clip()  # step 2 works on clips «В роботі»
     open_editor(page, studio)
     page.click("#edMode button[data-m='vx']")
     # The test video has no faces, so «Авто» shows the whole frame on a blurred background.
@@ -463,7 +469,7 @@ def test_vertical_preview_settings_and_download(page, studio, project):
 
     with page.expect_download(timeout=120000) as dl:
         page.click("#vxDlSubs")
-    assert dl.value.suggested_filename.endswith("_9x16_subs.mp4")
+    assert dl.value.suggested_filename.endswith(" 9x16.mp4")
     import subprocess
     info = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
                            "-of", "csv=p=0", dl.value.path()], capture_output=True, text=True).stdout.strip()
@@ -472,7 +478,7 @@ def test_vertical_preview_settings_and_download(page, studio, project):
     # The clean 16:9 clip is still one click away.
     with page.expect_download() as dl:
         page.click("#vxMp4")
-    assert not dl.value.suggested_filename.endswith("_9x16.mp4")
+    assert "9x16" not in dl.value.suggested_filename
     # Back to the table: Текст / Допис / Скачати are where they were.
     page.click("#edMode button[data-m='table']")
     assert page.locator("#edPlay").is_visible()
@@ -483,6 +489,7 @@ def test_vertical_preview_settings_and_download(page, studio, project):
 
 
 def test_vertical_title_size_colour_and_scrub(page, studio, project):
+    keep_first_clip()  # step 2 works on clips «В роботі»
     open_editor(page, studio)
     page.click("#edMode button[data-m='vx']")
     page.wait_for_function("Vertical.state().layout", timeout=20000)
@@ -531,7 +538,7 @@ def test_vertical_zip_of_kept_clips(page, studio, project):
     with page.expect_download(timeout=180000) as dl:
         vx_more(page, "#vxZip")
     names = zipfile.ZipFile(io.BytesIO(open(dl.value.path(), "rb").read())).namelist()
-    assert len(names) == 1 and names[0].endswith("_9x16_subs.mp4")
+    assert len(names) == 1 and names[0].endswith(" 9x16.mp4")
     assert not page.errors
 
 
@@ -563,8 +570,7 @@ def test_rail_folds_and_remembers(page, studio, project):
     assert page.evaluate("document.getElementById('editor').classList.contains('rail-mini')")
     assert not page.locator("#edMode button[data-m='table'] b").is_visible()
     assert page.locator("#edStep1").inner_text() == "0/4"
-    page.reload()
-    page.locator(".history-item-left", has_text="Тестовий подкаст").click()
+    page.reload()  # F5 opens the same video again
     page.locator("#editor").wait_for(state="visible")
     assert page.evaluate("document.getElementById('editor').classList.contains('rail-mini')")
     page.click("#edFold")
@@ -578,7 +584,7 @@ def test_reanalyze_visible_and_next_button(page, studio, project):
     assert "Шукати кліпи заново" in page.locator("#edReanalyze").inner_text()
     page.keyboard.press("y")
     assert wait_for(page, lambda: clip(2)["review_status"] == "keep")
-    assert "1/4" in page.locator("#edStep1").inner_text()
+    assert "1 з 4" in page.locator("#edStep1").inner_text()
     assert page.locator("#edCnt_keep").inner_text() == "1"
     page.wait_for_function("Editor.state().num === 4")  # the kept clip left «Вірусні»: the next one opened by itself
     page.click("#edGoNext")  # «Наступний»: on to the next clip in the strip
@@ -671,4 +677,79 @@ def test_vertical_tabs_more_menu_and_prev_next(page, studio, project):
     page.wait_for_function(f"Editor.state().clipIndex !== {first}")
     page.click(back)
     page.wait_for_function(f"Editor.state().clipIndex === {first}")
+    assert not page.errors
+
+
+def test_reload_and_back_keep_the_place(page, studio, project):
+    """F5 comes back to the same video, step and clip; the browser «Назад» goes to the videos, not out of the studio."""
+    open_editor(page, studio)
+    page.keyboard.press("ArrowDown")
+    page.wait_for_function("location.hash.includes('c=')")
+    page.click("#edMode button[data-m='vx']")
+    page.wait_for_function("location.hash.includes('s=2')")
+    before = page.evaluate("Editor.state().clipIndex")
+    assert f"c={before}" in page.evaluate("location.hash")
+
+    page.reload()
+    page.locator("#editor").wait_for(state="visible")
+    page.wait_for_function(f"Editor.state().clipIndex === {before}")
+    assert page.evaluate("document.getElementById('editor').classList.contains('is-vx')")
+
+    page.go_back()
+    page.locator("#editor").wait_for(state="hidden")
+    assert page.url.startswith(studio["url"]) and page.evaluate("location.hash") == ""
+    page.go_forward()
+    page.locator("#editor").wait_for(state="visible")
+    page.wait_for_function(f"Editor.state().clipIndex === {before}")
+
+    page.click("#edBack")
+    page.locator("#editor").wait_for(state="hidden")
+    assert page.evaluate("location.hash") == ""
+
+    # an address of a video that is gone: the home screen and a clear note, no error
+    page.goto(studio["url"] + "/#v=no_such_video&s=1")
+    page.wait_for_function("location.hash === ''")
+    assert "немає" in page.locator("#toast").text_content()
+    assert not page.locator("#editor").is_visible()
+
+
+def test_step2_without_clips_in_work_explains_what_to_do(page, studio, project):
+    """Nothing «В роботі» yet: step 2 shows an explanation and a way back, not a random clip."""
+    db.update_clip_fields(PROJECT_ID, 2, review_status="drop")
+    open_editor(page, studio)
+    page.click("#edMode button[data-m='vx']")
+    page.locator("#vxEmpty").wait_for(state="visible")
+    assert page.locator("#vxPhone").is_hidden()
+    assert page.locator("#edList .ed-row.dropped").count() == 0  # «Не беру» stays out of the strip
+    page.click("#vxEmptyBack")
+    page.wait_for_function("!document.getElementById('editor').classList.contains('is-vx')")
+
+    page.keyboard.press("y")  # take the open clip in work → step 2 shows the phone
+    assert wait_for(page, lambda: any(c["review_status"] == "keep" for c in db.get_candidate_clips(PROJECT_ID)))
+    page.click("#edMode button[data-m='vx']")
+    page.locator("#vxPhone").wait_for(state="visible")
+    assert page.locator("#vxEmpty").is_hidden()
+    assert not page.errors
+
+
+def test_keyboard_stays_in_the_open_window(page, studio, project):
+    """With the editor open, Tab never lands on the home page under it; closing gives the page back."""
+    open_editor(page, studio)
+    page.wait_for_function("document.querySelector('main.studio-container').inert")
+    for _ in range(12):
+        page.keyboard.press("Tab")
+        assert page.evaluate("document.getElementById('editor').contains(document.activeElement)")
+    page.click("#edBack")
+    page.locator("#editor").wait_for(state="hidden")
+    page.wait_for_function("!document.querySelector('main.studio-container').inert")
+    assert not page.errors
+
+
+def test_phone_editor_opens_at_the_top(page, studio, project):
+    """On a narrow screen the editor starts at the video, not scrolled down to the clip strip."""
+    page.set_viewport_size({"width": 390, "height": 844})
+    open_editor(page, studio)
+    page.wait_for_timeout(300)
+    top = page.evaluate("document.getElementById('edVideo').getBoundingClientRect().top")
+    assert 0 <= top < 844
     assert not page.errors

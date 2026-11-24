@@ -28,9 +28,9 @@ const Home = (() => {
     busy: ["⏳ Обробляється", ""],
     failed: ["Не вдалося", "bad"],
     empty: ["Без кліпів", ""],
-    new: ["● Нове", "new"],
-    work: ["✂ В роботі", ""],
-    done: ["✓ Готово", "done"],
+    new: ["● Нове відео", "new"],
+    work: ["✂ Розбираю", ""],
+    done: ["✓ Розібрано", "done"],
   };
 
   function metaOf(p, st) {
@@ -39,9 +39,9 @@ const Home = (() => {
     const kept = p.kept_count || 0;
     switch (st) {
       case "busy": return "Обробляється…";
-      case "failed": return "Клік, щоб спробувати ще раз";
+      case "failed": return errorSummaryHtml(p.last_error);
       case "empty": return "Клік, щоб знайти кліпи";
-      case "done": return `<b>${kept} в роботі</b> з ${total} · усі переглянуто`;
+      case "done": return `<b>${kept} в роботі</b> з ${total} · усі розібрано`;
       default: {
         // «Вірусні» first; weaker clips wait in «Запас» (older projects without the counts fall back to the total)
         if (p.new_count == null) return `<b>${total} кліпів</b>${kept ? ` · ${kept} в роботі` : ""}`;
@@ -85,7 +85,6 @@ const Home = (() => {
     list.innerHTML = "";
     shown.forEach((p) => list.appendChild(card(p)));
     $("homeNothing").hidden = !(q && !shown.length);
-    $("historyCount").textContent = projects.length;
     document.querySelectorAll("#homeSort button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.s === sort)));
     sync();
   }
@@ -100,7 +99,7 @@ const Home = (() => {
     el.className = `history-item video-card st-${st}`;
     if (typeof currentProject !== "undefined" && currentProject && currentProject.id === p.id) el.classList.add("active");
     el.innerHTML = `
-      <div class="history-item-left" role="button" tabindex="0" title="Відкрити">
+      <div class="history-item-left"${st === "failed" ? "" : ` role="button" tabindex="0" title="Відкрити"`}>
         <div class="history-thumb-wrap">
           <img src="/api/projects/${id}/thumbnail" class="history-thumb-img" alt="" loading="lazy">
           <span class="history-fallback-icon" style="display:none">🎬</span>
@@ -112,6 +111,10 @@ const Home = (() => {
           ${total ? `<span class="video-card-prog"><i style="width:${pct}%"></i></span>` : ""}
         </div>
       </div>
+      ${st === "failed" ? `<div class="q-actions vc-acts">
+        <button type="button" class="btn btn-primary btn-sm" data-act="retry">↻ Ще раз</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-act="delete">Видалити</button>
+      </div>` : ""}
       <span class="vc-badge ${badgeCls}">${badge}</span>
       <button type="button" class="vc-dots" aria-haspopup="true" aria-expanded="false" title="Дії з відео" aria-label="Дії з відео">⋯</button>
       <div class="vc-menu" role="menu" hidden>
@@ -124,8 +127,17 @@ const Home = (() => {
     const left = el.querySelector(".history-item-left");
     const go = () => openCard(p, st);
     left.addEventListener("click", go);
-    left.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+    // a failed card has its own «Ще раз / Видалити» buttons, so it is not a button itself (no nested controls)
+    if (st !== "failed") left.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
     el.querySelector(".vc-dots").addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(el); });
+    el.querySelector(".err-more")?.addEventListener("click", (e) => e.stopPropagation()); // «Детальніше» only opens the text
+    el.querySelector(".vc-acts")?.addEventListener("click", async (e) => {
+      const b = e.target.closest("button[data-act]");
+      if (!b) return;
+      if (b.dataset.act === "delete") { deleteProject(p.id, e); return; }
+      b.disabled = true;
+      try { await Queue.addProject(p.id); } catch (err) { showToast(err.message, "error"); b.disabled = false; }
+    });
     el.querySelector(".vc-menu").addEventListener("click", (e) => {
       const b = e.target.closest("button[data-act]");
       if (!b) return;
@@ -146,9 +158,9 @@ const Home = (() => {
   async function again(p) {
     const marked = p.reviewed_count || 0;
     const ask = p.clips_count
-      ? `Шукати кліпи в «${p.title}» заново?${marked ? ` Позначки «Беру» / «Не беру» (${marked}) зникнуть.` : ""}`
+      ? `Шукати кліпи в «${p.title}» заново?${marked ? ` Позначки статусів (${marked}) зникнуть.` : ""}`
       : `Поставити «${p.title}» в чергу на пошук моментів?`;
-    if (!confirm(ask)) return;
+    if (!(await askConfirm(ask, { ok: p.clips_count ? "Шукати заново" : "↻ Так, ще раз" }))) return;
     try { await Queue.addProject(p.id); } catch (err) { showToast(err.message, "error"); }
   }
 
@@ -172,6 +184,10 @@ const Home = (() => {
   function sync() {
     const queueCount = $("queueList") ? $("queueList").children.length : 0;
     const any = projects.length + queueCount > 0;
+    // «Твої відео 3 · у черзі 2»: every card in the grid is counted once
+    const hide = queuedIds();
+    const own = projects.filter((p) => !hide.has(p.id)).length;
+    $("historyCount").textContent = queueCount ? `${own} · у черзі ${queueCount}` : String(own);
     document.body.classList.toggle("home-empty", loaded && !any);
     $("historyCard").hidden = !any;
     const tools = projects.length > 6;
@@ -243,5 +259,6 @@ const Home = (() => {
   }
 
   document.addEventListener("DOMContentLoaded", init);
-  return { load, render, sync, setDefaults, renderOpts, toggleMenu, closeMenus };
+  const find = (id) => projects.find((p) => p.id === id) || null;
+  return { load, render, sync, setDefaults, renderOpts, toggleMenu, closeMenus, find };
 })();
