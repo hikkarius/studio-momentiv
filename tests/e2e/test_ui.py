@@ -176,8 +176,7 @@ def test_sort_best_or_in_order(page, studio, project):
     assert "Найкращий момент" in first()
     page.click("#edSort button[data-s='time']")
     assert "Перший момент" in first()
-    page.reload()
-    page.locator(".history-item-left", has_text="Тестовий подкаст").click()
+    page.reload()  # F5 opens the same video again
     page.locator("#editor").wait_for(state="visible")
     assert "Перший момент" in first()  # remembered
     page.click("#edSort button[data-s='score']")
@@ -463,7 +462,7 @@ def test_vertical_preview_settings_and_download(page, studio, project):
 
     with page.expect_download(timeout=120000) as dl:
         page.click("#vxDlSubs")
-    assert dl.value.suggested_filename.endswith("_9x16_subs.mp4")
+    assert dl.value.suggested_filename.endswith(" 9x16.mp4")
     import subprocess
     info = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
                            "-of", "csv=p=0", dl.value.path()], capture_output=True, text=True).stdout.strip()
@@ -472,7 +471,7 @@ def test_vertical_preview_settings_and_download(page, studio, project):
     # The clean 16:9 clip is still one click away.
     with page.expect_download() as dl:
         page.click("#vxMp4")
-    assert not dl.value.suggested_filename.endswith("_9x16.mp4")
+    assert "9x16" not in dl.value.suggested_filename
     # Back to the table: Текст / Допис / Скачати are where they were.
     page.click("#edMode button[data-m='table']")
     assert page.locator("#edPlay").is_visible()
@@ -531,7 +530,7 @@ def test_vertical_zip_of_kept_clips(page, studio, project):
     with page.expect_download(timeout=180000) as dl:
         vx_more(page, "#vxZip")
     names = zipfile.ZipFile(io.BytesIO(open(dl.value.path(), "rb").read())).namelist()
-    assert len(names) == 1 and names[0].endswith("_9x16_subs.mp4")
+    assert len(names) == 1 and names[0].endswith(" 9x16.mp4")
     assert not page.errors
 
 
@@ -563,8 +562,7 @@ def test_rail_folds_and_remembers(page, studio, project):
     assert page.evaluate("document.getElementById('editor').classList.contains('rail-mini')")
     assert not page.locator("#edMode button[data-m='table'] b").is_visible()
     assert page.locator("#edStep1").inner_text() == "0/4"
-    page.reload()
-    page.locator(".history-item-left", has_text="Тестовий подкаст").click()
+    page.reload()  # F5 opens the same video again
     page.locator("#editor").wait_for(state="visible")
     assert page.evaluate("document.getElementById('editor').classList.contains('rail-mini')")
     page.click("#edFold")
@@ -672,3 +670,36 @@ def test_vertical_tabs_more_menu_and_prev_next(page, studio, project):
     page.click(back)
     page.wait_for_function(f"Editor.state().clipIndex === {first}")
     assert not page.errors
+
+
+def test_reload_and_back_keep_the_place(page, studio, project):
+    """F5 comes back to the same video, step and clip; the browser «Назад» goes to the videos, not out of the studio."""
+    open_editor(page, studio)
+    page.keyboard.press("ArrowDown")
+    page.wait_for_function("location.hash.includes('c=')")
+    page.click("#edMode button[data-m='vx']")
+    page.wait_for_function("location.hash.includes('s=2')")
+    before = page.evaluate("Editor.state().clipIndex")
+    assert f"c={before}" in page.evaluate("location.hash")
+
+    page.reload()
+    page.locator("#editor").wait_for(state="visible")
+    page.wait_for_function(f"Editor.state().clipIndex === {before}")
+    assert page.evaluate("document.getElementById('editor').classList.contains('is-vx')")
+
+    page.go_back()
+    page.locator("#editor").wait_for(state="hidden")
+    assert page.url.startswith(studio["url"]) and page.evaluate("location.hash") == ""
+    page.go_forward()
+    page.locator("#editor").wait_for(state="visible")
+    page.wait_for_function(f"Editor.state().clipIndex === {before}")
+
+    page.click("#edBack")
+    page.locator("#editor").wait_for(state="hidden")
+    assert page.evaluate("location.hash") == ""
+
+    # an address of a video that is gone: the home screen and a clear note, no error
+    page.goto(studio["url"] + "/#v=no_such_video&s=1")
+    page.wait_for_function("location.hash === ''")
+    assert "немає" in page.locator("#toast").text_content()
+    assert not page.locator("#editor").is_visible()

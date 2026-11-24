@@ -236,6 +236,31 @@ const Editor = (() => {
     if (st.project) renderList();
   }
 
+  // ─── Address ───────────────────────────────────────────────────────────────
+  /** The address keeps the open video, step and clip (#v=…&s=2&c=5): F5 comes back to the same place. */
+  function writeHash(push = false) {
+    if (!st.project || $("editor").hidden) return;
+    const p = new URLSearchParams({ v: st.project.id, s: st.mode === "vx" ? "2" : "1" });
+    const c = clip();
+    if (c) p.set("c", String(c.clip_index));
+    const h = "#" + p.toString();
+    if (location.hash === h) return;
+    try { history[push ? "pushState" : "replaceState"](null, "", h); } catch (_) {}
+  }
+  /** Leaves the video's address (replace: no new step in the browser history). */
+  function clearHash(push = false) {
+    const v = new URLSearchParams(location.hash.slice(1)).get("v");
+    if (!v || (!push && st.project && v !== st.project.id)) return; // the address already points at another video
+    try { history[push ? "pushState" : "replaceState"](null, "", location.pathname + location.search); } catch (_) {}
+  }
+  /** Same video, another step or clip (browser «Назад» / «Вперед» inside one video). */
+  function go(route) {
+    if (!st.project) return;
+    if ((route.mode === "vx") !== (st.mode === "vx")) setMode(route.mode);
+    const i = route.clip == null ? -1 : st.clips.findIndex((c) => c.clip_index === route.clip);
+    if (i >= 0 && i !== st.cur) select(i);
+  }
+
   /** «✂ Монтажний стіл» or «📱 Вертикальні кліпи»: two screens over the same clip list and player. */
   function setMode(m) {
     st.mode = m === "vx" ? "vx" : "table";
@@ -254,6 +279,7 @@ const Editor = (() => {
       if (typeof Vertical !== "undefined") Vertical.onShow();
     }
     else if (st.project && clip()) { renderOverview(); renderTrack(); }
+    writeHash();
   }
 
   // ─── Trim track ────────────────────────────────────────────────────────────
@@ -532,6 +558,7 @@ const Editor = (() => {
   async function select(i, autoplay = false) {
     if (i < 0 || i >= st.clips.length) return;
     st.cur = i;
+    writeHash();
     st.zoomManual = false;
     st.restored = [];
     st.levels = null;
@@ -1196,7 +1223,7 @@ const Editor = (() => {
   }
 
   // ─── Open / close ──────────────────────────────────────────────────────────
-  function open(project, clips) {
+  function open(project, clips, route = null) {
     st.project = project;
     st.clips = clips.map((c) => ({ ...c, review_status: c.review_status || "" }));
     assignNumbers();
@@ -1211,9 +1238,12 @@ const Editor = (() => {
     v.load();
     $("editor").hidden = false;
     document.body.style.overflow = "hidden";
+    st.cur = 0; // a clip of this video (not of the previous one) until select() picks the right one
+    if (!route) writeHash(true); // a new step in the browser history: «Назад» returns to the videos
     renderTabs();
     let mode = "table";
     try { mode = localStorage.getItem("studio-mode") || "table"; } catch (_) {}
+    if (route) mode = route.mode;
     setMode(mode);
     let mini = false;
     try { mini = localStorage.getItem("studio-rail") === "mini"; } catch (_) {}
@@ -1221,7 +1251,9 @@ const Editor = (() => {
     let sort = "score";
     try { sort = localStorage.getItem("studio-sort") || "score"; } catch (_) {}
     setSort(sort);
-    select((st.mode === "vx" ? stripClips()[0] : visible()[0]) ?? ordered()[0] ?? 0);
+    const fromRoute = route && route.clip != null ? st.clips.findIndex((c) => c.clip_index === route.clip) : -1;
+    if (fromRoute >= 0 && st.mode !== "vx" && !matches(st.clips[fromRoute])) st.filter = shelfOf(st.clips[fromRoute]);
+    select(fromRoute >= 0 ? fromRoute : (st.mode === "vx" ? stripClips()[0] : visible()[0]) ?? ordered()[0] ?? 0);
   }
 
   function close() {
@@ -1232,6 +1264,7 @@ const Editor = (() => {
     closePop();
     hidePhraseCard(true);
     closeStatusMenu();
+    clearHash();
     $("editor").hidden = true;
     document.body.style.overflow = "";
   }
@@ -1412,6 +1445,7 @@ const Editor = (() => {
     $("vxPrev").addEventListener("click", () => step(-1));
     $("vxNext").addEventListener("click", () => step(1));
     $("edBack").addEventListener("click", () => {
+      clearHash(true); // «Вперед» in the browser opens this video again
       close();
       if (typeof resetStudioState === "function") resetStudioState();
       if (typeof loadRecentProjects === "function") loadRecentProjects();
@@ -1428,7 +1462,7 @@ const Editor = (() => {
     return { cur: st.cur, clipIndex: c?.clip_index, num: c?.num, start: c?.start_sec, end: c?.end_sec, words: st.words.length, time: video().currentTime, paused: video().paused };
   }
 
-  return { init, open, close, state, setMode };
+  return { init, open, close, state, setMode, go, isOpen: () => !$("editor").hidden && !!st.project, projectId: () => st.project?.id };
 })();
 
 document.addEventListener("DOMContentLoaded", () => Editor.init());
