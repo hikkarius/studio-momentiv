@@ -31,7 +31,7 @@ jobs:
         if: steps.v.outputs.exists == 'false'
         run: |
           mkdir -p dist/Studio-Momentiv
-          git ls-files -z | grep -zvE '^(tests/|\.github/|\.agents/|\.antigravity/|\.claude/|scripts/|CLAUDE\.md$|review_agent\.py$|pytest\.ini$|\.coveragerc$|\.dockerignore$|requirements-dev\.txt$)' \
+          git ls-files -z | grep -zvE '^(tests/|\.github/|\.agents/|\.antigravity/|\.claude/|scripts/|CLAUDE\.md$|\.mcp\.json$|review_agent\.py$|pytest\.ini$|\.coveragerc$|\.dockerignore$|requirements-dev\.txt$)' \
             | xargs -0 -I{} cp --parents {} dist/Studio-Momentiv/
           cd dist && python3 -c "import shutil; shutil.make_archive('Studio-Momentiv', 'zip', '.', 'Studio-Momentiv')"
 

@@ -28,6 +28,10 @@
 - `installer/install.ps1`, `installer/update.ps1` + `Встановити.bat`, `Запустити.bat`, `Оновити.bat` —
   інсталятор для друзів (uv + власний Python у `tools/`, ffmpeg у `tools/ffmpeg`, `.venv`).
 - `version.json` + `.github/workflows/release.yml` — реліз (див. скіл `release-for-friends`).
+- Gemini API: перед зміною коду з Gemini (`ai_selector.py`, `state.py`, `backend/app_update.py`) читати скіл
+  `gemini-api-dev` (`.claude/skills/gemini-api-dev`, копія від Google) і шукати актуальну документацію через
+  MCP `gemini-docs` (`.mcp.json`). Моделі й параметри змінюються швидше, ніж знання моделі.
+  Студія поки на `generate_content`; перехід на Interactions API — лише за окремим рішенням автора.
 - `.antigravity/`, `PROJECT_MEMORY.md`, `.agents/` — старі нотатки з Google Antigravity; можуть відставати
   від коду. Чеклист рев'ю звідти корисний: `.agents/rules/qa_guardian.md`.
 
