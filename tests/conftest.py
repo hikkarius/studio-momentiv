@@ -80,6 +80,9 @@ def isolate_test_database(tmp_path, monkeypatch):
     # Gemini's second round for unanswered windows waits 90 s in real life; not in tests
     import ai_selector
     monkeypatch.setattr(ai_selector, "_SECOND_ROUND_WAIT", 0.0)
+    # the remembered daily limits live in tmp_path; the per-minute limiter is off unless a test turns it on
+    monkeypatch.setattr(ai_selector, "QUOTA_STATE_PATH", isolated_root / "gemini_quota_state.json")
+    monkeypatch.setattr(config_loader.app_config.gemini, "max_rpm_per_model", 0)
 
     db.init_db()
     yield test_db

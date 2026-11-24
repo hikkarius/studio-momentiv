@@ -12,6 +12,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Optional
 
 from config_loader import CANDIDATE_MODELS, app_config, get_gemini_client
@@ -270,6 +271,104 @@ def _json_config(schema: dict, temperature: float, thinking_level: Optional[str]
     )
 
 
+# ─── Request budget: free-tier limits ───────────────────────────────────────
+# Free keys allow the Lite models ~15 requests per minute and ~500 per day. One window makes at
+# most MAX_ATTEMPTS_PER_WINDOW requests per round, each model gets at most
+# gemini.max_rpm_per_model requests in any 60 s, and a model that answered «daily limit» is
+# skipped until Google resets it (midnight Pacific time), remembered across restarts.
+MAX_ATTEMPTS_PER_WINDOW = 4
+QUOTA_STATE_PATH = Path(__file__).resolve().parent / "gemini_quota_state.json"
+_quota_state_lock = threading.Lock()
+
+
+def _attempt_plan(models: list[str]) -> list[str]:
+    return [models[i % len(models)] for i in range(MAX_ATTEMPTS_PER_WINDOW)]
+
+
+def _is_daily_quota(err_str: str) -> bool:
+    low = err_str.lower()
+    return "perday" in low or "per_day" in low or "per day" in low or "requestsperday" in low
+
+
+def _exhausted_today(now: Optional[float] = None) -> set[str]:
+    """Models whose daily limit is used up and not yet reset."""
+    now = time.time() if now is None else now
+    with _quota_state_lock:
+        try:
+            data = json.loads(QUOTA_STATE_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return set()
+    if not isinstance(data, dict):
+        return set()
+    return {m for m, until in data.items() if isinstance(until, (int, float)) and until > now}
+
+
+def mark_exhausted_today(model_name: str, now: Optional[float] = None) -> None:
+    """Remembers that the model's daily limit is used up, until Google resets it."""
+    from backend.queue_runner import next_daily_reset  # late import: the queue imports this module
+
+    now = time.time() if now is None else now
+    until = next_daily_reset(now) + 5 * 60
+    with _quota_state_lock:
+        try:
+            data = json.loads(QUOTA_STATE_PATH.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError):
+            data = {}
+        data = {m: u for m, u in data.items() if isinstance(u, (int, float)) and u > now}
+        data[model_name] = until
+        try:
+            tmp = QUOTA_STATE_PATH.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            tmp.replace(QUOTA_STATE_PATH)
+        except OSError as e:
+            log.warning(f"Could not save the Gemini daily-limit note: {e}")
+    log.warning(f"{model_name}: денний ліміт безкоштовного ключа вичерпано, не чіпаємо її до оновлення ліміту")
+
+
+def available_models() -> list[str]:
+    """The candidate models in order, without those whose daily limit is used up."""
+    gone = _exhausted_today()
+    return [m for m in CANDIDATE_MODELS if m not in gone]
+
+
+class _RateLimiter:
+    """At most `limit` requests per model in any 60 s, shared by all threads."""
+
+    def __init__(self, clock=None, sleep=None):
+        self._lock = threading.Lock()
+        self._sent: dict[str, list[float]] = {}
+        self._clock = clock or time.monotonic
+        self._sleep = sleep or (lambda s: time.sleep(s))
+
+    def acquire(self, model_name: str, limit: int) -> None:
+        if limit <= 0:
+            return
+        while True:
+            with self._lock:
+                now = self._clock()
+                recent = [t for t in self._sent.get(model_name, []) if now - t < 60.0]
+                if len(recent) < limit:
+                    recent.append(now)
+                    self._sent[model_name] = recent
+                    return
+                self._sent[model_name] = recent
+                wait = 60.0 - (now - recent[0]) + 0.05
+            log.info(f"{model_name}: {limit} запитів за хвилину вже надіслано, чекаємо {wait:.0f} с")
+            self._sleep(wait)
+
+
+_rate_limiter = _RateLimiter()
+
+
+def _max_rpm() -> int:
+    try:
+        return int(app_config.gemini.max_rpm_per_model or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 # Clip selection needs little reasoning: the default thinking of the bigger models made one window
 # take 75+ s (and run into 504). gemini.thinking_level ("" = the model's default) is sent to every
 # model; a model that rejects it is remembered and asked without it from then on.
@@ -289,6 +388,7 @@ def _generate(client, model_name: str, prompt: str, schema: dict, temperature: f
     """generate_content with schema JSON and the configured thinking level (dropped for a model
     that does not accept it)."""
     level = _thinking_level_for(model_name)
+    _rate_limiter.acquire(model_name, _max_rpm())
     try:
         return client.models.generate_content(
             model=model_name, contents=prompt, config=_json_config(schema, temperature, level))
@@ -386,56 +486,64 @@ def _call_gemini_single_window(
 [{{"start": 10.0, "end": 42.5, "title": "ГОЛОВНА ПОМИЛКА", "category": "content", "hook": 8, "emotion": 6, "standalone": 9, "value": 7, "reason": "Розповідає про фатальну помилку підприємців і чим вона закінчилась.", "hook_text": "Найбільша помилка, якої припускаються майже всі...", "caption": "Головна помилка, якої припускаються майже всі! Дивіться до кінця.", "hashtags": ["#shorts", "#помилки", "#інсайти", "#тренди"]}}]
 """
     last_err = ""
-    total_passes = len(_RETRY_PASS_DELAYS) + 1
     error_kinds: list[str] = []
     quota_errors: list[str] = []
 
-    for pass_idx in range(total_passes):
+    models = available_models()
+    if not models:
+        log.warning("Усі моделі Gemini вичерпали денний ліміт; чекаємо, поки Google його оновить")
+        raise quota_error_from(["per day limit (remembered)"])
+
+    # At most MAX_ATTEMPTS_PER_WINDOW requests: the models in turn, with a growing pause each time
+    # the list starts over (instead of 3 full passes over every model)
+    for attempt, model_name in enumerate(_attempt_plan(models)):
         if error_kinds and all(k == "bad_key" for k in error_kinds):
             break  # a wrong key will not start working after a pause
-        if pass_idx > 0:
-            delay = _RETRY_PASS_DELAYS[pass_idx - 1]
+        if attempt and attempt % len(models) == 0:
+            delay = _RETRY_PASS_DELAYS[min(attempt // len(models) - 1, len(_RETRY_PASS_DELAYS) - 1)]
             log.warning(
-                f"Жодна модель Gemini не відповіла (прохід {pass_idx}/{total_passes}). "
+                f"Жодна модель Gemini не відповіла (спроба {attempt}/{MAX_ATTEMPTS_PER_WINDOW}). "
                 f"Повтор через {delay:.0f} с..."
             )
             time.sleep(delay)
-
-        for model_name in CANDIDATE_MODELS:
-            try:
-                if gate is not None:
-                    gate.wait()
-                log.info(f"Trying Gemini model: {model_name} (pass {pass_idx + 1}/{total_passes})")
-                started = time.monotonic()
-                response = _generate(client, model_name, prompt, _CLIPS_SCHEMA, temperature=0.3)
-                log.info(f"Gemini {model_name} answered in {time.monotonic() - started:.1f} s")
-                raw_text = (response.text or "").strip() if response else ""
-                if not raw_text:
-                    last_err = f"{model_name}: порожня відповідь"
-                    log.warning(f"Model {model_name} returned an empty response, trying next model...")
-                    continue
-            except Exception as e:
-                last_err = f"{model_name}: {e}"
-                error_kinds.append(_gemini_error_kind(str(e)))
-                if error_kinds[-1] == "quota":
-                    quota_errors.append(str(e))
-                if _is_transient_error(str(e)):
-                    if gate is not None:
-                        gate.hit()
-                    log.info(f"⚡ Модель {model_name} тимчасово недоступна ({e}), перемикаємось на наступну...")
-                else:
-                    log.warning(f"Model {model_name} failed: {e}, trying next model...")
+        if model_name in _exhausted_today():
+            continue  # another window found its daily limit meanwhile
+        try:
+            if gate is not None:
+                gate.wait()
+            log.info(f"Trying Gemini model: {model_name} (attempt {attempt + 1}/{MAX_ATTEMPTS_PER_WINDOW})")
+            started = time.monotonic()
+            response = _generate(client, model_name, prompt, _CLIPS_SCHEMA, temperature=0.3)
+            log.info(f"Gemini {model_name} answered in {time.monotonic() - started:.1f} s")
+            raw_text = (response.text or "").strip() if response else ""
+            if not raw_text:
+                last_err = f"{model_name}: порожня відповідь"
+                log.warning(f"Model {model_name} returned an empty response, trying next model...")
                 continue
+        except Exception as e:
+            last_err = f"{model_name}: {e}"
+            error_kinds.append(_gemini_error_kind(str(e)))
+            if error_kinds[-1] == "quota":
+                quota_errors.append(str(e))
+                if _is_daily_quota(str(e)):
+                    mark_exhausted_today(model_name)
+            if _is_transient_error(str(e)):
+                if gate is not None:
+                    gate.hit()
+                log.info(f"⚡ Модель {model_name} тимчасово недоступна ({e}), перемикаємось на наступну...")
+            else:
+                log.warning(f"Model {model_name} failed: {e}, trying next model...")
+            continue
 
-            try:
-                clips = _parse_clips_json(raw_text)
-                log.info(f"Response successfully received and parsed from {model_name}")
-                return clips
-            except Exception as e:
-                last_err = f"{model_name}: {e}"
-                log.warning(f"Помилка парсингу відповіді {model_name}: {e}. Пробуємо наступну модель...")
+        try:
+            clips = _parse_clips_json(raw_text)
+            log.info(f"Response successfully received and parsed from {model_name}")
+            return clips
+        except Exception as e:
+            last_err = f"{model_name}: {e}"
+            log.warning(f"Помилка парсингу відповіді {model_name}: {e}. Пробуємо наступну модель...")
 
-    log.error(f"Усі моделі Gemini недоступні після {total_passes} проходів. Остання помилка: {last_err}")
+    log.error(f"Усі моделі Gemini недоступні після {MAX_ATTEMPTS_PER_WINDOW} спроб. Остання помилка: {last_err}")
     if error_kinds and all(k == "bad_key" for k in error_kinds):
         raise GeminiUnavailableError(GEMINI_BAD_KEY_MESSAGE)
     if error_kinds and all(k == "quota" for k in error_kinds):
@@ -721,7 +829,7 @@ def rerank_clips(
             'Поверни ВИКЛЮЧНО JSON масив: [{"n": 1, "score": 87}, ...] для всіх кліпів.'
         )
         last_err = ""
-        for model_name in CANDIDATE_MODELS:
+        for model_name in available_models():
             try:
                 response = _generate(client, model_name, prompt, _RERANK_SCHEMA, temperature=0.2)
                 data = json.loads(_strip_fences((response.text or "").strip()))
@@ -740,6 +848,8 @@ def rerank_clips(
                 return out
             except Exception as e:
                 last_err = f"{model_name}: {e}"
+                if _gemini_error_kind(str(e)) == "quota" and _is_daily_quota(str(e)):
+                    mark_exhausted_today(model_name)
                 continue
         log.warning(f"Re-ranking pass skipped, keeping rubric scores ({last_err})")
     except Exception as e:

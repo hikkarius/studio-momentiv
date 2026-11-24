@@ -97,10 +97,11 @@ def test_all_models_503_raises_gemini_unavailable_without_fake_clips(no_sleep):
             max_len=30,
         )
     assert "перевантажений" in str(exc.value)
-    # 3 full passes over every candidate model with two back-off pauses in between, then the same
-    # again in a second round (its 90 s wait is switched off in tests)
-    assert mock_client.models.generate_content.call_count == 2 * 3 * len(CANDIDATE_MODELS)
-    assert no_sleep == [5.0, 20.0, 5.0, 20.0]
+    # at most 4 requests per window (the models in turn, a pause when the list starts over), then the
+    # same again in a second round (its 90 s wait is switched off in tests)
+    from ai_selector import MAX_ATTEMPTS_PER_WINDOW
+    assert mock_client.models.generate_content.call_count == 2 * MAX_ATTEMPTS_PER_WINDOW
+    assert no_sleep == [5.0] * (2 * (MAX_ATTEMPTS_PER_WINDOW // len(CANDIDATE_MODELS) - 1))
 
 
 def test_recovers_on_second_pass(no_sleep):

@@ -41,13 +41,13 @@ class GeminiConfig(BaseModel):
         default_factory=lambda: [
             "gemini-3.1-flash-lite",
             "gemini-3.5-flash-lite",
-            "gemini-3.5-flash",
         ],
         min_length=1,
     )
     rerank: bool = True
     parallel_windows: int = Field(default=3, ge=1, le=8)
     thinking_level: str = Field(default="minimal", pattern=r"^(|minimal|low|medium|high)$")
+    max_rpm_per_model: int = Field(default=12, ge=0, le=1000)
 
 
 class CacheConfig(BaseModel):
