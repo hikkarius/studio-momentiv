@@ -1104,9 +1104,24 @@ def _clip_caption_words(proj: Dict[str, Any], clip: Dict[str, Any], opts: Dict[s
     return vertical_render.clip_words(words, clip["start_sec"], clip["end_sec"], opts.get("edits"), clip.get("title", ""))
 
 
+def _clip_vertical_opts(project_id: str, clip: Dict[str, Any]) -> Dict[str, Any]:
+    """The clip's settings; a clip nobody touched on a stream recording («Стрім» on for the video) gets «Стрім»."""
+    raw = clip.get("vertical_opts") or {}
+    opts = vertical_render.normalize_opts(raw)
+    if "frame" not in raw:
+        path = _stream_path(project_id)
+        if path.exists():
+            try:
+                if json.loads(path.read_text(encoding="utf-8")).get("use"):
+                    opts["frame"] = "stream"
+            except Exception:
+                pass
+    return opts
+
+
 def _ensure_vertical(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any], subs: bool) -> tuple[str, str]:
     """Renders (once, cached by settings) the vertical MP4 of a clip. Returns (path, filename)."""
-    opts = vertical_render.normalize_opts(clip.get("vertical_opts"))
+    opts = _clip_vertical_opts(project_id, clip)
     subs = subs and opts["style"] != "none"
     cuts = _clip_cuts(clip)
     cuts_rel = pauses.relative(cuts, float(clip["start_sec"]))
@@ -1212,7 +1227,7 @@ def _stream_info(project_id: str, proj: Dict[str, Any], redetect: bool = False) 
             log.warning(f"Webcam detection failed for {project_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Не вдалося знайти вебку: {e}")
         info = {"cam": found["cam"], "face": found["face"], "w": found["w"], "h": found["h"], "note": found["note"],
-                "auto": True, "look": _stream_look(old)}
+                "auto": True, "look": _stream_look(old), "use": old.get("use")}
         path.write_text(json.dumps(info), encoding="utf-8")
         return info
 
@@ -1241,14 +1256,18 @@ def _stream_key(info: Dict[str, Any]) -> str:
 class StreamCamRequest(BaseModel):
     cam: Optional[List[float]] = None
     keep_cam: bool = False  # only change the look
+    use: Optional[bool] = None  # «Стрім» on/off for this video (clips nobody touched follow it)
     look: Optional[Dict[str, Any]] = None  # partial: merged over the video's look
 
 
 @app.get("/api/projects/{project_id}/stream")
-def get_stream_info(project_id: str):
-    """Where the webcam is in this stream recording (found automatically the first time)."""
+def get_stream_info(project_id: str, detect: bool = True):
+    """Where the webcam is in this stream recording (found automatically the first time).
+    detect=false: only what is already known ({"known": false} if the video was never searched)."""
     proj = _get_project(project_id)
-    return _stream_public(_stream_info(project_id, proj))
+    if not detect and not _stream_path(project_id).exists():
+        return {"known": False}
+    return {**_stream_public(_stream_info(project_id, proj)), "known": True}
 
 
 @app.post("/api/projects/{project_id}/stream/redetect")
@@ -1280,6 +1299,8 @@ def set_stream_info(project_id: str, payload: StreamCamRequest):
                 info["face"] = None  # the face we found is not in the new frame: centre on the frame
     info["look"] = streamer.clean_look(payload.look or {}, _stream_look(info))
     info.pop("game_x", None)
+    if payload.use is not None:
+        info["use"] = payload.use
     _stream_path(project_id).write_text(json.dumps(info), encoding="utf-8")
     return info
 
@@ -1297,7 +1318,7 @@ def get_caption_styles():
 def get_vertical_plan(project_id: str, clip_index: int, frame: Optional[str] = None):
     """What the vertical clip will look like: crop plan + caption words (for the live preview)."""
     proj, clip = _get_project_and_clip(project_id, clip_index)
-    opts = vertical_render.normalize_opts(clip.get("vertical_opts"))
+    opts = _clip_vertical_opts(project_id, clip)
     if frame:
         opts["frame"] = frame if frame in vertical_render.FRAME_MODES else "auto"
     if opts["frame"] == "stream":

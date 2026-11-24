@@ -295,3 +295,37 @@ def test_stream_old_file_with_game_x_still_works(tmp_path):
 
 def test_stream_api_unknown_project():
     assert client.get("/api/projects/nope_123/stream").status_code == 404
+
+
+def test_webcam_search_after_analysis_switches_stream_on(tmp_path, monkeypatch):
+    from backend import job_runner
+    pid, idx = _project(tmp_path)
+    src = str(tmp_path / "stream.mp4")
+    monkeypatch.setattr(job_runner, "OUTPUT_DIR", str(server.OUTPUT_DIR))
+    monkeypatch.setattr(streamer, "detect_webcam", lambda s, **k: {"cam": CAM, "face": FACE, "w": 1920, "h": 1080, "note": ""})
+    job_runner._find_webcam_once(pid, src)
+    info = client.get(f"/api/projects/{pid}/stream?detect=false").json()
+    assert info["known"] and info["use"] is True and info["cam"] == CAM
+    # a clip nobody touched renders as «Стрім»; a clip with its own frame keeps it
+    plan = client.get(f"/api/projects/{pid}/clips/{idx}/vertical-plan").json()
+    assert plan["opts"]["frame"] == "stream" and plan["layout"]["kind"] == "stream"
+    client.patch(f"/api/projects/{pid}/clips/{idx}", json={"vertical_opts": {"frame": "blur"}})
+    monkeypatch.setattr(server, "_clip_faces", lambda *a, **k: {"w": 1920, "h": 1080, "faces": [], "duration": 5})
+    monkeypatch.setattr(vr, "plan_layout", lambda *a, **k: vr.Layout("blur"))
+    assert client.get(f"/api/projects/{pid}/clips/{idx}/vertical-plan").json()["opts"]["frame"] == "blur"
+    # switched off for the video: untouched clips are ordinary again; a second search does not run
+    client.patch(f"/api/projects/{pid}/clips/{idx}", json={"vertical_opts": {}})
+    client.put(f"/api/projects/{pid}/stream", json={"keep_cam": True, "use": False})
+    assert client.get(f"/api/projects/{pid}/clips/{idx}/vertical-plan").json()["opts"]["frame"] == "auto"
+    monkeypatch.setattr(streamer, "detect_webcam", lambda *a, **k: pytest.fail("searched twice"))
+    job_runner._find_webcam_once(pid, src)
+
+
+def test_webcam_search_after_analysis_never_fails_the_job(tmp_path, monkeypatch):
+    from backend import job_runner
+    pid, _ = _project(tmp_path)
+    monkeypatch.setattr(job_runner, "OUTPUT_DIR", str(server.OUTPUT_DIR))
+    monkeypatch.setattr(streamer, "detect_webcam", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("bad video")))
+    job_runner._find_webcam_once(pid, str(tmp_path / "stream.mp4"))
+    job_runner._find_webcam_once(pid, str(tmp_path / "missing.mp4"))
+    assert client.get(f"/api/projects/{pid}/stream?detect=false").json() == {"known": False}

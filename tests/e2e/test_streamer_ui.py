@@ -26,10 +26,10 @@ def test_stream_mode_card_layouts_and_dragging(page, studio, project, monkeypatc
     open_editor(page, studio)
     page.click("#edMode button[data-m='vx']")
     vx_tab(page, "frame")
-    assert page.locator("#vxStream").is_hidden() and page.locator("#vxView").is_hidden()
-
-    page.click("#vxFrame button[data-v='stream']")
+    # a stream recording: the webcam is found and «Стрім» switches on by itself
     page.wait_for_function("Vertical.state().layout === 'stream' && !!Vertical.state().cam", timeout=20000)
+    assert "запис стріму" in page.locator("#edToast").inner_text()
+    assert page.locator("#vxFrame button[data-v='stream']").get_attribute("aria-pressed") == "true"
     assert page.locator("#vxStream").is_visible()
     assert "Вебку знайдено" in page.locator("#vxCamSt").inner_text()
     assert page.evaluate("Vertical.state().stream.layout") == "top"
@@ -72,6 +72,12 @@ def test_stream_mode_card_layouts_and_dragging(page, studio, project, monkeypatc
     page.click("#vxFrame button[data-v='auto']")
     page.wait_for_function("Vertical.state().layout !== 'stream'", timeout=20000)
     assert page.locator("#vxStream").is_hidden() and page.locator("#vxPhone").is_visible()
+    page.wait_for_function("fetch('/api/projects/%s/stream?detect=false').then((r) => r.json()).then((s) => s.use === false)" % PROJECT_ID)
+    # opening the video again does not switch it back
+    open_editor(page, studio)
+    page.click("#edMode button[data-m='vx']")
+    page.wait_for_timeout(800)
+    assert page.evaluate("Vertical.state().opts.frame") != "stream"
     assert page.errors == []
 
 

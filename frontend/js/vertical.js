@@ -24,7 +24,7 @@ const Vertical = (() => {
   ];
   let ctx = null;
   const st = { opts: null, plan: null, planKey: "", words: [], loading: false, raf: 0, saveTimer: null, pending: null, selWord: null, zipJob: null, capKey: "",
-    stream: null, streamPid: "", view: "phone", drag: null, live: null, gesture: null, suppressClick: false, wheelTimer: null, spMemo: null };
+    stream: null, streamPid: "", autoPid: "", view: "phone", drag: null, live: null, gesture: null, suppressClick: false, wheelTimer: null, spMemo: null };
 
   // What each style tile shows: one short phrase drawn in that style
   const TILE = { none: "<i>без тексту</i>", hl: "ЦЕ <i>ВОНО</i>", kar: "<i>ЦЕ</i> ВОНО", one: "ВОНО", box: "<i>Це воно</i>", gold: "ЦЕ <i>ВОНО</i>", min: "це воно" };
@@ -52,6 +52,49 @@ const Vertical = (() => {
     if (on) list.push(pid);
     try { localStorage.setItem(STREAM_KEY, JSON.stringify(list.slice(-200))); } catch (_) {}
   }
+  /** «Стрім» on/off for the whole video, on the server too (the zip and clips nobody opened follow it). */
+  function setStreamUse(on) {
+    markStreamVideo(on);
+    ctx.api(`/api/projects/${ctx.pid()}/stream?detect=false`).then((s) => {
+      if (!on && !s.known) return;  // never searched: nothing to switch off
+      return ctx.api(`/api/projects/${ctx.pid()}/stream`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keep_cam: true, use: on }),
+      }).then((info) => { if (st.streamPid === ctx.pid() || !st.stream) { st.stream = info; st.streamPid = ctx.pid(); } });
+    }).catch(() => {});
+  }
+
+  /** A stream recording with a webcam switches clips nobody touched to «Стрім» by itself (once per video). */
+  async function autoStream() {
+    const pid = ctx.pid();
+    if (st.autoPid === pid) return;
+    st.autoPid = pid;
+    let info;
+    try {
+      info = await ctx.api(`/api/projects/${pid}/stream?detect=false`);
+      if (!info.known) info = await ctx.api(`/api/projects/${pid}/stream`);  // an older video: search now, in the background
+    } catch (_) { return; }
+    if (ctx.pid() !== pid || !info.cam || info.use === false || streamVideos().includes(pid)) return;
+    if (info.use !== true) {
+      try {
+        info = await ctx.api(`/api/projects/${pid}/stream`, {
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keep_cam: true, use: true }),
+        });
+      } catch (_) { return; }
+    }
+    markStreamVideo(true);
+    if (ctx.pid() !== pid) return;
+    st.stream = info;
+    st.streamPid = pid;
+    const c = ctx.clip();
+    if (c && !Object.keys(c.vertical_opts || {}).length && st.opts && st.opts.frame !== "stream") {
+      st.opts.frame = "stream";
+      if (!$("edVx").hidden) loadPlan(true);
+      renderControls();
+      renderNote();
+    }
+    ctx.toast("Це запис стріму: знайшла вебку й увімкнула «Стрім: вебка + гра». Повернути можна у вкладці «Кадр».");
+  }
+
   function writeTemplate(o) {
     const t = {};
     const old = readTemplate();
@@ -213,7 +256,7 @@ const Vertical = (() => {
 
   function setOpt(k, v) {
     st.opts[k] = v;
-    if (k === "frame") markStreamVideo(v === "stream");
+    if (k === "frame") setStreamUse(v === "stream");
     if (k === "frame") {
       if (k === "frame" && v !== "stream") st.view = "phone";
       loadPlan(true);
@@ -851,6 +894,7 @@ const Vertical = (() => {
     tick();
     const h = setInterval(tick, 1000);
     try {
+      if (!Object.keys(c.vertical_opts || {}).length) save();  // a clip nobody touched: render what the phone shows
       await flush();
       await ctx.api(`/api/projects/${ctx.pid()}/clips/${c.clip_index}/vertical?subs=${subs}`, { method: "POST" });
       ctx.download(`/api/projects/${ctx.pid()}/clips/${c.clip_index}/vertical?subs=${subs}`);
@@ -912,6 +956,7 @@ const Vertical = (() => {
     st.selWord = null;
     if (st.streamPid !== ctx.pid()) { st.stream = null; st.streamPid = ""; }
     st.live = null;
+    autoStream();
     $("vxWedit").hidden = true;
     renderControls();
     renderNote();

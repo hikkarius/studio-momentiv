@@ -258,11 +258,31 @@ def _run_analyze_worker_locked(
             "progress": 1.0,
             "message": f"Готово! Знайдено {len(valid_clips)} вірусних моментів.",
         })
+        _find_webcam_once(project_id, proj.get("source_path") or "")
 
     except Exception as e:
         log.exception(f"Analyze job {job_id} failed: {e}")
         db.update_project_status(project_id, "failed")
         broadcast_update(job_id, {"status": "failed", "progress": 1.0, "error": str(e), "message": f"Помилка: {e}"})
+
+
+def _find_webcam_once(project_id: str, source_path: str) -> None:
+    """After the clips are ready: is this a stream recording with a webcam? (~5-15 s, once per video.)
+    Step 2 then switches such videos to «Стрім: вебка + гра» by itself. Never fails the job."""
+    try:
+        path = os.path.join(OUTPUT_DIR, project_id, "stream.json")
+        if os.path.exists(path) or not source_path or not os.path.exists(source_path):
+            return
+        import streamer
+        found = streamer.detect_webcam(source_path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        info = {"cam": found["cam"], "face": found["face"], "w": found["w"], "h": found["h"], "note": found["note"],
+                "auto": True, "look": streamer.clean_look(None), "use": bool(found["cam"])}  # a webcam: «Стрім» on by itself
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(info, f)
+        log.info(f"Webcam search for {project_id}: {'found ' + str(found['cam']) if found['cam'] else 'none'}")
+    except Exception as e:  # OpenCV missing, odd video, ...: step 2 can still search on demand
+        log.warning(f"Webcam search after analysis failed for {project_id}: {e}")
 
 
 def enqueue_analyze_job(
