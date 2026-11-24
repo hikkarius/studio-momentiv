@@ -12,7 +12,7 @@ import threading
 import uuid
 from typing import Any, Dict, Optional
 
-from backend import db, job_runner
+from backend import db, job_runner, storage
 
 log = logging.getLogger("shorts_core")
 
@@ -111,6 +111,8 @@ def _download(item: Dict[str, Any]) -> Optional[str]:
 
     try:
         project, reused = server.ingest_url(item["source_url"], progress_cb=on_progress)
+    except storage.NotEnoughSpaceError:
+        raise
     except ValueError as e:
         raise RuntimeError(f"Некоректне посилання: {e}") from e
     except Exception as e:
@@ -129,6 +131,8 @@ def _download(item: Dict[str, Any]) -> Optional[str]:
 def _short_error(e: Exception) -> str:
     """yt-dlp errors carry the whole stderr; keep the line that says what went wrong."""
     stderr = getattr(e, "stderr", None) or ""
+    if storage.is_no_space_error(f"{stderr}\n{e}"):
+        return f"{storage.NO_SPACE_MARK}: він заповнився під час завантаження."
     for line in reversed(str(stderr).splitlines()):
         if "ERROR" in line:
             return line.split("ERROR:", 1)[-1].strip()[:300]
@@ -138,6 +142,7 @@ def _short_error(e: Exception) -> str:
 def public_item(item: Dict[str, Any]) -> Dict[str, Any]:
     """Queue item as the UI sees it: analysis progress comes live from its job."""
     out = dict(item)
+    out["no_space"] = item["status"] == "failed" and storage.is_no_space_error(item.get("error") or "")
     if item["status"] == "analyzing" and item.get("job_id"):
         job = db.get_job(item["job_id"])
         if job:

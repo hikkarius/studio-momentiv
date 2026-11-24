@@ -11,6 +11,7 @@ const Queue = (() => {
   let timer = null;
   let autoOpen = new Set();  // queue item ids to open as soon as they are done
   let lastStatus = {};       // id → status, to notice when something finishes
+  let disk = null;           // free space: {level: ok|low|full, free, free_text, drive, video_hours}
 
   const $ = (id) => document.getElementById(id);
 
@@ -84,9 +85,17 @@ const Queue = (() => {
     const files = Array.from(fileList || []);
     if (!files.length) return;
     const single = files.length === 1;
+    let room = await freeRoom();
     for (const file of files) {
       const up = { key: Math.random().toString(36).slice(2), name: file.name, pct: 0, error: "" };
       uploads.push(up);
+      if (room != null && file.size > room) { // do not send a file the disk cannot hold
+        up.error = `Не вистачає місця на диску. Треба близько ${gb(file.size + reserve)}, а вільно лише ${gb(room + reserve)}.`;
+        up.noSpace = true;
+        render();
+        continue;
+      }
+      if (room != null) room -= file.size;
       render();
       try {
         const data = await uploadOne(file, up);
@@ -101,12 +110,29 @@ const Queue = (() => {
         uploads = uploads.filter((u) => u !== up);
       } catch (err) {
         up.error = err.message;
+        up.noSpace = /Не вистачає місця/.test(err.message);
       }
       render();
     }
     $("fileInput").value = "";
     loadRecentProjects();
   }
+
+  let reserve = 0;
+  /** Bytes that can still be taken by new files (free space minus the reserve), or null if unknown. */
+  async function freeRoom() {
+    try {
+      const res = await fetch("/api/disk");
+      if (!res.ok) return null;
+      const d = await res.json();
+      if (d.free == null) return null;
+      reserve = d.reserve || 0;
+      return Math.max(0, d.free - reserve);
+    } catch (_) {
+      return null;
+    }
+  }
+  const gb = (n) => n < 1024 ** 3 ? `${Math.max(1, Math.round(n / 1024 ** 2))} МБ` : `${(n / 1024 ** 3).toFixed(1).replace(".", ",")} ГБ`;
 
   function uploadOne(file, up) {
     return new Promise((resolve, reject) => {
@@ -171,6 +197,8 @@ const Queue = (() => {
         const data = await res.json();
         items = data.items || [];
         active = data.active;
+        disk = data.disk || null;
+        renderDisk();
         onChanges();
         render();
       }
@@ -255,11 +283,11 @@ const Queue = (() => {
         <li class="q-item video-card ${u.error ? "failed" : "uploading"}">
           <div class="history-thumb-wrap q-thumb"><span class="q-ico">📁</span>
             ${u.error ? "" : `<div class="q-over"><b>Передаю файл у студію… ${pct}%</b><div class="q-bar"><i style="width:${pct}%"></i></div></div>`}</div>
-          <span class="vc-badge${u.error ? " bad" : ""}">${u.error ? "Не вдалося" : "📁 Файл"}</span>
+          <span class="vc-badge${u.error ? " bad" : ""}">${u.error ? (u.noSpace ? "Немає місця" : "Не вдалося") : "📁 Файл"}</span>
           <div class="history-details">
             <span class="history-item-title" title="${escapeHtml(u.name)}">${escapeHtml(u.name)}</span>
-            <span class="video-card-meta">${u.error ? escapeHtml(u.error) : "Не закривай вкладку, поки файл передається"}</span>
-            ${u.error ? `<div class="q-actions"><button type="button" class="btn btn-secondary btn-sm" data-dismiss="${u.key}">Прибрати</button></div>` : ""}
+            <span class="video-card-meta">${u.error ? (u.noSpace ? errorSummaryHtml(u.error) : escapeHtml(u.error)) : "Не закривай вкладку, поки файл передається"}</span>
+            ${u.error ? `<div class="q-actions">${u.noSpace ? FREE_BTN : ""}<button type="button" class="btn btn-secondary btn-sm" data-dismiss="${u.key}">Прибрати</button></div>` : ""}
           </div>
         </li>`);
     }
@@ -295,9 +323,10 @@ const Queue = (() => {
             <button type="button" role="menuitem" data-move="${it.id}:1" ${wIndex >= waiting.length - 1 ? "disabled" : ""}>↓ Пізніше в черзі</button>
             <button type="button" role="menuitem" data-remove="${it.id}" class="danger">✕ Прибрати з черги</button>
           </div>` : "";
+      if (it.no_space) badge = "Немає місця";
       const actions = it.status === "failed" ? `
-            <div class="q-actions">
-              <button type="button" class="btn btn-primary btn-sm" data-retry="${it.id}">↻ Ще раз</button>
+            <div class="q-actions">${it.no_space ? FREE_BTN : ""}
+              <button type="button" class="btn ${it.no_space ? "btn-secondary" : "btn-primary"} btn-sm" data-retry="${it.id}">↻ Ще раз</button>
               <button type="button" class="btn btn-secondary btn-sm" data-remove="${it.id}">Прибрати</button>
             </div>` : "";
       cards.push(`
@@ -315,6 +344,33 @@ const Queue = (() => {
       const ids = [...activeProjectIds()].sort().join(",");
       if (ids !== lastIds) { lastIds = ids; Home.render(); } else Home.sync();
     }
+  }
+
+  const FREE_BTN = `<button type="button" class="btn btn-primary btn-sm" data-free-space="1">Звільнити місце</button>`;
+
+  /** The notice under «Додай відео»: yellow when space runs low, red when new videos will not fit. */
+  function renderDisk() {
+    const box = $("diskNotice");
+    if (!box) return;
+    const level = disk && disk.level;
+    box.hidden = level !== "low" && level !== "full";
+    if (box.hidden) return;
+    const where = disk.drive ? `На диску ${disk.drive}` : "На диску";
+    const full = level === "full";
+    box.classList.toggle("full", full);
+    box.querySelector(".disk-notice-ic").textContent = full ? "⛔" : "💾";
+    $("diskNoticeHead").textContent = full ? `${where} лишилось ${disk.free_text}. Нові відео не влізуть.` : `${where} лишилось ${disk.free_text}.`;
+    const h = disk.video_hours;
+    $("diskNoticeSub").textContent = full
+      ? "Студія не почне качати нове відео, поки не звільниш місце."
+      : `Цього вистачить приблизно на ${hoursText(h)} відео з YouTube. Можна звільнити місце від відео, з якими ти закінчив.`;
+    $("diskNoticeBtn").className = `btn btn-sm ${full ? "btn-primary" : "btn-secondary"}`;
+  }
+  function hoursText(h) {
+    if (h < 1) return "пів години";
+    const n = Math.floor(h);
+    const word = n % 10 === 1 && n % 100 !== 11 ? "годину" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "години" : "годин";
+    return `${n} ${word}`;
   }
 
   function prettyUrl(u) {
@@ -353,6 +409,7 @@ const Queue = (() => {
       if (b.dataset.remove) remove(b.dataset.remove);
       else if (b.dataset.retry) retry(b.dataset.retry);
       else if (b.dataset.dismiss) dismissUpload(b.dataset.dismiss);
+      else if (b.dataset.freeSpace) Settings.open("disk");
       else if (b.dataset.open) loadProjectResults(b.dataset.open);
       else if (b.dataset.move) {
         const [id, dir] = b.dataset.move.split(":");

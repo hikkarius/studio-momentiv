@@ -98,6 +98,12 @@
         <span class="home-opts-note">Це для наступних відео. Довжину кліпів і мову за замовчуванням змінюй у <button type="button" class="linkish" onclick="Settings.open()">Налаштуваннях</button>.</span>
       </div>
 
+      <div class="disk-notice" id="diskNotice" role="status" hidden>
+        <span class="disk-notice-ic" aria-hidden="true"></span>
+        <div class="disk-notice-text"><b id="diskNoticeHead"></b><small id="diskNoticeSub"></small></div>
+        <button type="button" class="btn btn-sm" id="diskNoticeBtn" onclick="Settings.open('disk')">Звільнити місце</button>
+      </div>
+
       <ol class="home-how home-hero-only">
         <li><i>1</i><b>Додай відео</b>Посилання або файл, від 10 хвилин до 3 годин.</li>
         <li><i>2</i><b>Зачекай</b>Студія розпізнає мову і знайде моменти. Можна закрити вкладку, поки студія запущена.</li>

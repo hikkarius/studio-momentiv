@@ -24,6 +24,7 @@ const Settings = (() => {
   function close() {
     sheet().hidden = true;
     document.body.style.overflow = "";
+    if (typeof Queue !== "undefined") Queue.refresh(); // the home disk notice may have changed after a cleanup
   }
 
   function setTab(name) {

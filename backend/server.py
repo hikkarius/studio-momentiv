@@ -36,6 +36,7 @@ from transcription import load_transcript_cache
 from languages import is_supported, language_choices
 from utils import (
     download_from_url_with_title,
+    probe_download_size,
     extract_clip_slice,
     find_duplicate_video,
     generate_video_thumbnail,
@@ -254,10 +255,14 @@ def get_health():
 
 
 @app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(request: Request, file: UploadFile = File(...)):
     """Handles video file upload with extension/size validation, automatic deduplication, and safe persistence."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="Файл не вибрано.")
+    try:
+        storage.ensure_space(UPLOADS_DIR, int(request.headers.get("content-length") or 0))
+    except storage.NotEnoughSpaceError as e:
+        raise HTTPException(status_code=507, detail=str(e))
 
     raw_filename = os.path.basename(file.filename)
     safe_filename = re.sub(r'[\x00-\x1f\\/:*?"<>|]', '_', raw_filename).strip('. ')
@@ -359,6 +364,10 @@ def ingest_url(url: str, progress_cb=None) -> tuple[Dict[str, Any], bool]:
         raise ValueError("Некоректний URL.")
 
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    # Ask the site how big the video is and stop before downloading it onto a full disk
+    if progress_cb is not None:
+        progress_cb(0.0, "Дізнаюсь розмір відео…")
+    storage.ensure_space(UPLOADS_DIR, probe_download_size(url))
     staging_temp_id = uuid.uuid4().hex[:8]
     temp_dir = str(UPLOADS_DIR / f"temp_url_{staging_temp_id}")
     os.makedirs(temp_dir, exist_ok=True)
@@ -425,6 +434,8 @@ def upload_from_url(payload: UrlUploadRequest):
         raise HTTPException(status_code=400, detail="Некоректний URL.")
     try:
         project, reused = ingest_url(url)
+    except storage.NotEnoughSpaceError as e:
+        raise HTTPException(status_code=507, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Некоректне посилання: {e}")
     except Exception as e:
@@ -1363,7 +1374,13 @@ def trim_clip_silence(project_id: str, clip_index: int):
 def get_queue():
     items = [queue_runner.public_item(i) for i in db.list_queue_items()]
     active = any(i["status"] in db.QUEUE_ACTIVE or i["status"] == "waiting" for i in items)
-    return {"items": items, "active": active}
+    return {"items": items, "active": active, "disk": storage.disk_status(UPLOADS_DIR)}
+
+
+@app.get("/api/disk")
+def get_disk():
+    """Free space for the home page notice and the check before sending files."""
+    return {**storage.disk_status(UPLOADS_DIR), "reserve": storage.SPACE_RESERVE_BYTES}
 
 
 @app.post("/api/queue")

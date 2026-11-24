@@ -173,3 +173,21 @@ a.linkish { color: var(--orange-text); font-weight: 700; text-decoration: none; 
 .rm-t b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--fs-md); }
 .rm-t small { color: var(--text-muted); font-size: var(--fs-sm); }
 .rm-s { font-family: "JetBrains Mono", monospace; font-size: var(--fs-sm); }
+
+/* Free space notice under «Додай відео» (queue.js renderDisk): yellow = running low, red = new videos will not fit */
+.disk-notice {
+  display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 10px 14px;
+  border: 1px solid rgb(var(--warn-rgb) / .45); border-radius: var(--r-md); background: rgb(var(--warn-rgb) / .09);
+  color: var(--fg); font-size: var(--fs-md);
+}
+.disk-notice[hidden] { display: none; }
+.disk-notice.full { border-color: rgb(var(--danger-rgb) / .55); background: rgb(var(--danger-rgb) / .10); }
+.disk-notice-ic { font-size: var(--fs-xl); line-height: 1; }
+.disk-notice-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.disk-notice-text b { font-weight: 700; }
+.disk-notice-text small { color: var(--muted); font-size: var(--fs-sm); }
+.disk-notice .btn { margin-left: auto; white-space: nowrap; }
+@media (max-width: 600px) {
+  .disk-notice { flex-wrap: wrap; }
+  .disk-notice .btn { margin-left: 0; }
+}

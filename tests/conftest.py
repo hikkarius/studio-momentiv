@@ -59,6 +59,8 @@ def isolate_test_database(tmp_path, monkeypatch):
 
     monkeypatch.setattr(transcription, "transcript_cache_dir", _test_cache_dir)
     monkeypatch.setattr(storage, "_RENDER_TMP", isolated_root / "render_tmp")
+    # Never ask a real site for the video size from tests (no network); tests that need a size patch it
+    monkeypatch.setattr(server, "probe_download_size", lambda url, **kw: None)
 
     db.init_db()
     yield test_db
