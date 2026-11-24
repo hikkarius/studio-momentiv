@@ -1483,3 +1483,21 @@ body:not(.home-empty) .home-how { display: none !important; }
   body.home-empty #step1Card.home-add { padding: 32px 18px; }
   .home-search { width: 100%; order: 3; }
 }
+
+/* The studio's own question window (askConfirm in app.js) instead of the browser's confirm() */
+.btn-danger { background: var(--danger-soft); color: var(--danger-text); border: 1px solid rgb(var(--danger-rgb) / 0.5); }
+.btn-danger:hover { background: rgb(var(--danger-rgb) / 0.22); }
+.ask-dialog .modal-card { width: 100%; max-width: 440px; }
+.ask-dialog .modal-body { gap: 8px; }
+.ask-text { margin: 0; font-size: var(--fs-lg); line-height: 1.5; color: var(--text-main); }
+
+/* A failed video: short reason + what to do, the full text under «Детальніше» (errorSummaryHtml in app.js) */
+.err-sum { display: flex; flex-direction: column; gap: 3px; font-family: var(--font-sans, inherit); line-height: 1.45; }
+.err-sum > b { color: var(--danger-text); font-size: var(--fs-md); }
+.err-sum > span { color: var(--text-main); font-size: var(--fs-sm); }
+.err-more { font-size: var(--fs-sm); color: var(--text-muted); }
+.err-more summary { cursor: pointer; width: max-content; text-decoration: underline; text-underline-offset: 2px; }
+.err-more summary:focus-visible { outline: 2px solid var(--accent-orange); outline-offset: 2px; border-radius: 2px; }
+.err-more span { display: block; margin-top: 4px; overflow-wrap: anywhere; }
+.q-item.failed .video-card-meta { color: inherit; }
+.video-card .vc-acts { padding: 0 14px 14px; margin-top: -4px; }

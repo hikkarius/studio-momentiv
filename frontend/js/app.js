@@ -73,18 +73,19 @@ async function openProject(projectId) {
 
 async function deleteProject(projectId, event) {
   if (event) event.stopPropagation();
-  if (!confirm("Видалити цю сесію з історії?")) return;
+  const p = (typeof Home !== "undefined" && Home.find) ? Home.find(projectId) : null;
+  if (!(await askConfirm(`Видалити «${p ? p.title : "це відео"}» зі студії? Зникнуть відео, кліпи й позначки.`, { ok: "Видалити", danger: true }))) return;
 
   try {
     const res = await fetch(`/api/projects/${projectId}`, { method: "DELETE" });
     if (!res.ok) throw new Error(await res.text());
-    showToast("Сесію видалено.");
+    showToast("Відео видалено.");
     if (currentProject && currentProject.id === projectId) {
       resetStudioState();
     }
     await loadRecentProjects();
   } catch (err) {
-    alert("Помилка видалення: " + err.message);
+    showToast("Помилка видалення: " + err.message, "error");
   }
 }
 
@@ -236,7 +237,7 @@ async function uploadFile(file) {
     }
     await loadRecentProjects();
   } catch (err) {
-    alert("Помилка завантаження файлу: " + err.message);
+    showToast("Помилка завантаження файлу: " + err.message, "error");
     videoInfoBox.style.display = "none";
   }
 }
@@ -245,7 +246,7 @@ async function submitUrl() {
   const urlInput = document.getElementById("urlInput");
   const url = urlInput.value.trim();
   if (!url) {
-    alert("Введіть посилання на відео.");
+    showToast("Введіть посилання на відео.", "error");
     return;
   }
 
@@ -306,7 +307,7 @@ async function submitUrl() {
     }
     await loadRecentProjects();
   } catch (err) {
-    alert("Не вдалося завантажити за посиланням: " + err.message);
+    showToast("Не вдалося завантажити за посиланням: " + err.message, "error");
   } finally {
     downloadBtn.disabled = false;
     downloadBtn.textContent = "⬇️ Завантажити";
@@ -327,7 +328,7 @@ function syncClipsCount(val) {
 
 async function startAnalysis() {
   if (!currentProject) {
-    alert("Спочатку завантажте відео.");
+    showToast("Спочатку завантажте відео.", "error");
     return;
   }
   // Everything goes through the processing queue now (one video at a time on the GPU)
@@ -419,7 +420,7 @@ async function startAnalysis() {
     };
   } catch (err) {
     btnAnalyze.disabled = false;
-    alert("Не вдалося запустити аналіз: " + err.message);
+    showToast("Не вдалося запустити аналіз: " + err.message, "error");
   }
 }
 
@@ -478,7 +479,7 @@ async function loadProjectResults(projectId, route = null) {
     step2Card.style.display = "block";
     step2Card.scrollIntoView({ behavior: "smooth" });
   } catch (err) {
-    alert("Помилка завантаження результатів: " + err.message);
+    showToast("Помилка завантаження результатів: " + err.message, "error");
   }
 }
 
@@ -492,7 +493,7 @@ async function retryAnalysisForCurrentProject() {
   if (!currentProject) return;
   const project = currentProject;
   const marked = currentClips.filter((c) => c.review_status).length;
-  if (marked && !confirm(`Шукати кліпи заново? Позначки «Беру» / «Не беру» (${marked}) для цього відео зникнуть.`)) {
+  if (marked && !(await askConfirm(`Шукати кліпи заново? Позначки статусів (${marked}) для цього відео зникнуть.`, { ok: "Шукати заново" }))) {
     if (typeof Editor !== "undefined") Editor.open(project, currentClips);
     return;
   }
@@ -701,7 +702,7 @@ async function downloadClipSrt(btn, projectId, clipIndex) {
 
 async function exportAllSubtitles() {
   if (!currentProject) {
-    alert("Спочатку оберіть або завантажте відео.");
+    showToast("Спочатку оберіть або завантажте відео.", "error");
     return;
   }
   showToast("📦 Пакування всіх субтитрів у ZIP...", "info");
@@ -860,15 +861,15 @@ async function saveTrimChanges() {
   const endSec = parseFloat(document.getElementById("trimEndInput").value);
 
   if (isNaN(startSec) || isNaN(endSec)) {
-    alert("Будь ласка, введіть коректні числові значення секунд.");
+    showToast("Будь ласка, введіть коректні числові значення секунд.", "error");
     return;
   }
   if (startSec >= endSec) {
-    alert("Початок має бути меншим за кінець.");
+    showToast("Початок має бути меншим за кінець.", "error");
     return;
   }
   if (endSec - startSec < 5.0) {
-    alert("Мінімальна тривалість кліпу становить 5 секунд.");
+    showToast("Мінімальна тривалість кліпу становить 5 секунд.", "error");
     return;
   }
 
@@ -909,7 +910,7 @@ async function saveTrimChanges() {
     closeTrimModal();
     showToast("✅ Межі моменту успішно оновлено!", "success");
   } catch (err) {
-    alert("Не вдалося зберегти зміни: " + err.message);
+    showToast("Не вдалося зберегти зміни: " + err.message, "error");
   } finally {
     btnSave.disabled = false;
     btnSave.textContent = "💾 Зберегти нові межі";
@@ -978,7 +979,7 @@ function fallbackCopyText(text, successMsg) {
     document.body.removeChild(textArea);
     showToast(successMsg);
   } catch (err) {
-    alert("Не вдалося скопіювати текст у буфер: " + err);
+    showToast("Не вдалося скопіювати текст у буфер: " + err, "error");
   }
 }
 
@@ -990,6 +991,79 @@ function exportTxt() {
 function exportJson() {
   if (!currentProject) return;
   window.open(`/api/projects/${currentProject.id}/export-json`, "_blank");
+}
+
+/**
+ * A failed video in two short lines: what happened and what to do. The full text hides under «Детальніше».
+ * Gemini's own messages (ai_selector.py) get their short form; anything else shows its first sentence.
+ */
+const ERROR_SHORT = [
+  ["Ліміт безкоштовного ключа", "Ліміт Gemini на зараз вичерпано", "Транскрипцію збережено. Спробуй за годину, а якщо скінчився денний ліміт, то після 10:00."],
+  ["не приймає ключ", "Google не приймає ключ Gemini", "Встав ключ ще раз: «Налаштування → Ключ і розпізнавання»."],
+  ["перевантажений", "Gemini зараз перевантажений", "Транскрипцію збережено. Спробуй за кілька хвилин."],
+  ["перезапуском студії", "Перервано: студію перезапустили", "Натисни «Ще раз», і пошук піде знову."],
+];
+function errorSummaryHtml(text) {
+  const full = String(text || "").trim();
+  const known = ERROR_SHORT.find(([mark]) => full.includes(mark));
+  let head = "Не вдалося знайти кліпи";
+  let tip = "Натисни «Ще раз».";
+  if (known) [, head, tip] = known;
+  else if (full) {
+    const first = (full.match(/^.+?[.!?](\s|$)/) || [full])[0].trim();
+    tip = first.length > 140 ? first.slice(0, 137) + "…" : first;
+  }
+  const more = full && full !== tip ? `<details class="err-more"><summary>Детальніше</summary><span>${escapeHtml(full)}</span></details>` : "";
+  return `<span class="err-sum"><b>${escapeHtml(head)}</b><span>${escapeHtml(tip)}</span>${more}</span>`;
+}
+
+/**
+ * A question in the studio's own window instead of the browser's grey confirm().
+ * Resolves true on the main button (or Enter), false on «Скасувати», Esc or a click outside.
+ */
+function askConfirm(text, { ok = "Так", cancel = "Скасувати", danger = false, title = "" } = {}) {
+  return new Promise((resolve) => {
+    const back = document.createElement("div");
+    back.className = "modal-backdrop ask-dialog";
+    back.setAttribute("role", "alertdialog");
+    back.setAttribute("aria-modal", "true");
+    back.innerHTML = `
+      <div class="modal-card">
+        <div class="modal-body">
+          ${title ? `<h3 class="modal-title" id="askTitle">${escapeHtml(title)}</h3>` : ""}
+          <p class="ask-text" id="askText">${escapeHtml(text)}</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-a="no">${escapeHtml(cancel)}</button>
+          <button type="button" class="btn ${danger ? "btn-danger" : "btn-primary"}" data-a="yes">${escapeHtml(ok)}</button>
+        </div>
+      </div>`;
+    back.setAttribute("aria-labelledby", title ? "askTitle" : "askText");
+    const before = document.activeElement;
+    const done = (v) => {
+      document.removeEventListener("keydown", onKey, true);
+      back.remove();
+      if (before && before.focus) try { before.focus(); } catch (_) {}
+      resolve(v);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(false); }
+      else if (e.key === "Tab") { // keep the focus inside the window
+        const bs = [...back.querySelectorAll("button")];
+        const i = bs.indexOf(document.activeElement);
+        e.preventDefault();
+        bs[(i + (e.shiftKey ? -1 : 1) + bs.length) % bs.length].focus();
+      } else if (!["Enter", " "].includes(e.key)) e.stopPropagation(); // the editor's hotkeys stay quiet
+    };
+    back.addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-a]");
+      if (b) done(b.dataset.a === "yes");
+      else if (e.target === back) done(false);
+    });
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(back);
+    back.querySelector('[data-a="yes"]').focus();
+  });
 }
 
 function showToast(msg, type = "success") {

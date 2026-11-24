@@ -25,6 +25,12 @@ def wait_for(page, fn, timeout=6000):
     return fn()
 
 
+def keep_first_clip():
+    """Takes the earliest clip «В роботі», so step 2 shows the phone (with none it explains what to do)."""
+    first = min(db.get_candidate_clips(PROJECT_ID), key=lambda c: c["start_sec"])
+    db.update_clip_fields(PROJECT_ID, first["clip_index"], review_status="keep")
+
+
 def open_editor(page, studio):
     page.goto(studio["url"] + "/")
     page.locator(".history-item-left", has_text="Тестовий подкаст").click()
@@ -427,6 +433,7 @@ def vx_more(page, item):
 
 
 def test_vertical_preview_settings_and_download(page, studio, project):
+    keep_first_clip()  # step 2 works on clips «В роботі»
     open_editor(page, studio)
     page.click("#edMode button[data-m='vx']")
     # The test video has no faces, so «Авто» shows the whole frame on a blurred background.
@@ -482,6 +489,7 @@ def test_vertical_preview_settings_and_download(page, studio, project):
 
 
 def test_vertical_title_size_colour_and_scrub(page, studio, project):
+    keep_first_clip()  # step 2 works on clips «В роботі»
     open_editor(page, studio)
     page.click("#edMode button[data-m='vx']")
     page.wait_for_function("Vertical.state().layout", timeout=20000)
@@ -703,3 +711,22 @@ def test_reload_and_back_keep_the_place(page, studio, project):
     page.wait_for_function("location.hash === ''")
     assert "немає" in page.locator("#toast").text_content()
     assert not page.locator("#editor").is_visible()
+
+
+def test_step2_without_clips_in_work_explains_what_to_do(page, studio, project):
+    """Nothing «В роботі» yet: step 2 shows an explanation and a way back, not a random clip."""
+    db.update_clip_fields(PROJECT_ID, 2, review_status="drop")
+    open_editor(page, studio)
+    page.click("#edMode button[data-m='vx']")
+    page.locator("#vxEmpty").wait_for(state="visible")
+    assert page.locator("#vxPhone").is_hidden()
+    assert page.locator("#edList .ed-row.dropped").count() == 0  # «Не беру» stays out of the strip
+    page.click("#vxEmptyBack")
+    page.wait_for_function("!document.getElementById('editor').classList.contains('is-vx')")
+
+    page.keyboard.press("y")  # take the open clip in work → step 2 shows the phone
+    assert wait_for(page, lambda: any(c["review_status"] == "keep" for c in db.get_candidate_clips(PROJECT_ID)))
+    page.click("#edMode button[data-m='vx']")
+    page.locator("#vxPhone").wait_for(state="visible")
+    assert page.locator("#vxEmpty").is_hidden()
+    assert not page.errors
