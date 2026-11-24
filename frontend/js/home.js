@@ -99,7 +99,7 @@ const Home = (() => {
     el.className = `history-item video-card st-${st}`;
     if (typeof currentProject !== "undefined" && currentProject && currentProject.id === p.id) el.classList.add("active");
     el.innerHTML = `
-      <div class="history-item-left" role="button" tabindex="0" title="Відкрити">
+      <div class="history-item-left"${st === "failed" ? "" : ` role="button" tabindex="0" title="Відкрити"`}>
         <div class="history-thumb-wrap">
           <img src="/api/projects/${id}/thumbnail" class="history-thumb-img" alt="" loading="lazy">
           <span class="history-fallback-icon" style="display:none">🎬</span>
@@ -127,7 +127,8 @@ const Home = (() => {
     const left = el.querySelector(".history-item-left");
     const go = () => openCard(p, st);
     left.addEventListener("click", go);
-    left.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+    // a failed card has its own «Ще раз / Видалити» buttons, so it is not a button itself (no nested controls)
+    if (st !== "failed") left.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
     el.querySelector(".vc-dots").addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(el); });
     el.querySelector(".err-more")?.addEventListener("click", (e) => e.stopPropagation()); // «Детальніше» only opens the text
     el.querySelector(".vc-acts")?.addEventListener("click", async (e) => {
