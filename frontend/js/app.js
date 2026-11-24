@@ -9,7 +9,35 @@ let activeEventSource = null;
 
 document.addEventListener("DOMContentLoaded", () => {
   loadRecentProjects();
+  if (readRoute()) applyRoute(); // F5 on a clip: open the same video, step and clip again
 });
+window.addEventListener("popstate", () => applyRoute()); // browser «Назад» / «Вперед»
+
+// ─── Address: #v=<video>&s=1|2&c=<clip> (written by the editor) ─────────────
+function readRoute() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  const v = p.get("v");
+  if (!v) return null;
+  const c = p.get("c");
+  return { v, mode: p.get("s") === "2" ? "vx" : "table", clip: c !== null && /^\d+$/.test(c) ? Number(c) : null };
+}
+
+async function applyRoute() {
+  const r = readRoute();
+  const ed = typeof Editor !== "undefined" ? Editor : null;
+  const open = !!(ed && ed.isOpen());
+  if (!r) {
+    if (open) {
+      ed.close();
+      resetStudioState();
+      loadRecentProjects();
+    }
+    return;
+  }
+  if (open && ed.projectId() === r.v) { ed.go(r); return; }
+  if (open) ed.close();
+  await loadProjectResults(r.v, r);
+}
 
 // ─── Recent Sessions / History ───────────────────────────────────────────────
 
@@ -397,9 +425,15 @@ async function startAnalysis() {
 
 // ─── Load Results & Render Moments ───────────────────────────────────────────
 
-async function loadProjectResults(projectId) {
+async function loadProjectResults(projectId, route = null) {
   try {
-    const res = await fetch(`/api/projects/${projectId}`);
+    const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`);
+    if (!res.ok && route) {
+      // an old address: the video was removed from the studio
+      try { history.replaceState(null, "", location.pathname + location.search); } catch (_) {}
+      showToast("Цього відео вже немає в студії.", "error");
+      return;
+    }
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
 
@@ -408,7 +442,12 @@ async function loadProjectResults(projectId) {
 
     // Clips found → open the «Монтажний стіл» review screen instead of the old list
     if (currentClips.length > 0 && typeof Editor !== "undefined") {
-      Editor.open(currentProject, currentClips);
+      Editor.open(currentProject, currentClips, route);
+      return;
+    }
+    if (route) { // the address points at a video without clips (e.g. searched again): stay on the home screen
+      try { history.replaceState(null, "", location.pathname + location.search); } catch (_) {}
+      resetStudioState();
       return;
     }
 

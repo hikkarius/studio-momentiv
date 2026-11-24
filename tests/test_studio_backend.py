@@ -923,9 +923,9 @@ def test_export_zip_of_kept_clips(tmp_path, monkeypatch):
     assert sum(n.endswith(".mp4") for n in names) == 2
     assert sum(n.endswith(".srt") for n in names) == 2
     posts = zf.read("posts.txt").decode("utf-8")
-    # Sorted by score: «Другий» (95) comes first
-    assert posts.index("01. Другий") < posts.index("02. Перший")
-    assert any(n.startswith("01_") for n in names)
+    # Sorted by score: «Другий» (95) comes first; numbers are the studio's №N (by start time)
+    assert posts.index("№2. Другий") < posts.index("№1. Перший")
+    assert sorted(n for n in names if n.endswith(".mp4")) == ["01 Перший.mp4", "02 Другий.mp4"]
 
     # Explicit list overrides marks; bad list is rejected
     one = zipfile.ZipFile(io.BytesIO(client.get(f"/api/projects/{pid}/export-zip?clips=1").content))
@@ -994,3 +994,35 @@ def test_trim_silence_endpoint(tmp_path, monkeypatch):
     monkeypatch.setattr("backend.server.load_transcript_cache", lambda p, **kw: None)
     assert client.post(f"/api/projects/{pid}/clips/1/trim-silence").status_code == 409
     assert client.post(f"/api/projects/{pid}/clips/99/trim-silence").status_code == 404
+
+
+def test_download_names_use_the_studio_clip_number(tmp_path, monkeypatch):
+    """Files are named «06 Title.mp4» with the same №N the studio shows (place by start time), not the DB index."""
+    from urllib.parse import unquote
+    pid = f"test_names_{uuid.uuid4().hex[:8]}"
+    src = tmp_path / "source.mp4"
+    src.write_bytes(b"dummy")
+    db.create_project(pid, "names.mp4", str(src), 300.0)
+    db.save_candidate_clips(pid, [
+        {"start": 200.0, "end": 230.0, "title": "Пізній: кліп?", "score": 95},
+        {"start": 10.0, "end": 40.0, "title": "Ранній кліп", "score": 70},
+        {"start": 100.0, "end": 130.0, "title": "Середній", "score": 80},
+    ])
+
+    def fake_slice(source_path, start_sec, end_sec, output_path):
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        Path(output_path).write_bytes(b"x")
+        return output_path
+
+    monkeypatch.setattr("backend.server.extract_clip_slice", fake_slice)
+    late = next(c for c in db.get_candidate_clips(pid) if c["start_sec"] == 200.0)
+
+    def name(res):
+        cd = res.headers["content-disposition"]
+        return unquote(cd.split("filename*=utf-8''")[1]) if "filename*=" in cd else cd.split('filename="')[1].rstrip('"')
+
+    res = client.get(f"/api/projects/{pid}/clips/{late['clip_index']}/download")
+    assert res.status_code == 200
+    assert name(res) == "03 Пізній кліп.mp4"  # third by time; characters Windows forbids are dropped
+    srt = client.get(f"/api/projects/{pid}/clips/{late['clip_index']}/export-srt")
+    assert name(srt) == "03 Пізній кліп.srt"
