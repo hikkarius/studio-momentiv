@@ -90,7 +90,7 @@ const Editor = (() => {
       li.setAttribute("aria-current", String(i === st.cur));
       li.title = c.title || "";
       li.innerHTML = `<div class="ed-th"><img src="/api/projects/${pid()}/clips/${c.clip_index}/thumbnail?s=${Math.round(c.start_sec * 10)}" alt="" draggable="false" loading="lazy" onerror="this.remove()">
-          <span class="ed-num">№${c.num}</span><span class="ed-dur">${Math.round(len(c))} с</span>${TIER[c.tier] || ""}${r === "keep" ? '<span class="ed-ok" title="Беру">✓</span>' : ""}</div>
+          <span class="ed-num">№${c.num}</span><span class="ed-dur">${Math.round(len(c))} с</span>${TIER[c.tier] || ""}${r === "keep" ? '<span class="ed-ok" title="В роботі">✓</span>' : ""}</div>
         <div class="ed-rb"><div class="ed-rt">${esc(c.title)}</div>
         <div class="ed-rm"><span>${fmtS(c.start_sec)}${r === "drop" ? " · не беру" : ""}</span><span class="s" title="Місце серед кліпів цього відео (ШІ дав ${esc(c.virality_score)})">★ ${esc(scoreOf(c))}</span></div></div>`;
       // step 2 with nothing in work: a clip opens on step 1, where it can be taken «В роботі»
@@ -131,7 +131,7 @@ const Editor = (() => {
     const allSeen = seen === st.clips.length && st.clips.length > 0;
     const b1 = document.querySelector('#edMode [data-m="table"]');
     b1.classList.toggle("done", allSeen && st.mode === "vx");
-    $("edStep1").textContent = allSeen && st.mode === "vx" ? (mini ? `✓ ${kept}` : `✓ в роботі ${kept}`) : (mini ? `${seen}/${st.clips.length}` : `переглянуто ${seen}/${st.clips.length}`);
+    $("edStep1").textContent = allSeen && st.mode === "vx" ? (mini ? `✓ ${kept}` : `✓ в роботі ${kept}`) : (mini ? `${seen}/${st.clips.length}` : `розібрано ${seen} з ${st.clips.length}`);
     $("edStep2").textContent = mini ? String(kept) : `в роботі ${kept}`;
   }
 

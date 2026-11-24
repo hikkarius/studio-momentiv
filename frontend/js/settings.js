@@ -441,9 +441,9 @@ const Settings = (() => {
 
   /** Shelf summary next to a video's title: «✓ закінчено», or what is still left to watch. */
   function chipOf(p) {
-    if (p.finished) return '<span class="dp-chip done" title="У «Нових» і «В роботі» нічого не лишилось">✓ закінчено</span>';
+    if (p.finished) return '<span class="dp-chip done" title="У «Вірусних» і «В роботі» нічого не лишилось">✓ закінчено</span>';
     if (!p.clips_count) return "";
-    return `<span class="dp-chip left">нових ${p.new_count} · в роботі ${p.kept_count}</span>`;
+    return `<span class="dp-chip left">вірусних ${p.new_count} · в роботі ${p.kept_count}</span>`;
   }
 
   // ─── «Видалити відео, з якими закінчив»: a dialog with a checkbox per video ───

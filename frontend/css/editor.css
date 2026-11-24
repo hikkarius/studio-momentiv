@@ -177,7 +177,7 @@
 .ed-toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: var(--ed-fg); color: var(--ed-bg); padding: 9px 14px; border-radius: var(--r-md);
   font-weight: 700; font-size: var(--fs-md); opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 80; max-width: calc(100vw - 32px); }
 .ed-toast.on { opacity: 1; }
-.ed-toast.err { background: var(--ed-drop); color: var(--white); }
+.ed-toast.err { background: var(--danger-solid); color: var(--white); }
 
 @media (prefers-reduced-motion: reduce) { .ed-toast, .ed-bigplay { transition: none; } }
 
@@ -444,7 +444,10 @@
 .ed-rt { font-size: var(--fs-sm); line-height: 1.25; }
 .ed-rm { font: var(--fs-xs) var(--ed-sans); color: var(--ed-faint); display: flex; justify-content: space-between; margin: 0; }
 .ed-rm .s { color: var(--ed-accent-text); font-weight: 800; }
-.ed-row.dropped { opacity: .55; }
+/* «Не беру» looks put aside, but its text stays readable (no opacity on the whole card) */
+.ed-row.dropped .ed-th img { filter: grayscale(1) brightness(.55); }
+.ed-row.dropped .ed-rt { color: var(--ed-muted); }
+.ed-row.dropped .ed-th .ed-tier { background: var(--ed-sunk); color: var(--ed-muted); border: 1px solid var(--ed-line); }
 .ed-empty { padding: 18px 4px; color: var(--ed-muted); font-size: var(--fs-md); }
 .ed-scroll { position: absolute; top: 50%; transform: translateY(-50%); z-index: 3; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--ed-line); background: var(--ed-panel); box-shadow: var(--ed-pop-shadow); cursor: pointer; font-size: var(--fs-md); }
 .ed-scroll.prev { left: -6px; } .ed-scroll.next { right: -6px; }

@@ -64,7 +64,7 @@ function toggleHistoryCollapse() {
 async function openProject(projectId) {
   if (currentProject && currentProject.id === projectId) {
     resetStudioState();
-    showToast("Вибір сесії знято.");
+    showToast("Відео закрито.");
     return;
   }
   await loadProjectResults(projectId);
@@ -992,6 +992,60 @@ function exportJson() {
   if (!currentProject) return;
   window.open(`/api/projects/${currentProject.id}/export-json`, "_blank");
 }
+
+/**
+ * Keyboard stays in the top window. While the editor, settings, the first-run screen or a dialog is open,
+ * everything under it is inert (Tab does not wander behind it), the focus moves into it and comes back
+ * to where it was when it closes. Works by watching those layers, so no open/close code has to call it.
+ */
+const Layers = (() => {
+  const isLayer = (el) => el.id === "editor" || el.classList.contains("settings-backdrop") || el.classList.contains("modal-backdrop");
+  const isOpen = (el) => !el.hidden && getComputedStyle(el).display !== "none";
+  const zOf = (el) => parseInt(getComputedStyle(el).zIndex, 10) || 0;
+  const back = new Map(); // layer → the element that had the focus before it opened
+  let top = null;
+  let watched = new Set();
+  let queued = false;
+  const attrs = new MutationObserver(() => schedule());
+
+  function schedule() {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; sync(); });
+  }
+
+  function sync() {
+    const layers = [...document.body.children].filter(isLayer);
+    layers.forEach((el) => { if (!watched.has(el)) { attrs.observe(el, { attributes: true, attributeFilter: ["hidden", "style", "class"] }); watched.add(el); } });
+    watched = new Set([...watched].filter((el) => el.isConnected));
+    const open = layers.filter(isOpen);
+    const next = open.reduce((a, b) => (!a || zOf(b) >= zOf(a) ? b : a), null);
+    for (const el of document.body.children) {
+      if (el.tagName === "SCRIPT" || el.classList.contains("toast")) continue;
+      el.inert = !!next && el !== next;
+    }
+    if (next === top) return;
+    const prev = top;
+    top = next;
+    if (next && !next.contains(document.activeElement)) {
+      if (!back.has(next)) back.set(next, prev && !prev.contains(document.activeElement) ? null : document.activeElement);
+      if (!next.hasAttribute("tabindex")) next.tabIndex = -1;
+      next.focus({ preventScroll: true });
+    }
+    // a layer that closed gives the focus back to where it was
+    for (const [layer, el] of [...back]) {
+      if (layer.isConnected && isOpen(layer)) continue;
+      back.delete(layer);
+      if (el && el.isConnected && !el.closest("[inert]") && (!next || next.contains(el))) el.focus({ preventScroll: true });
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    new MutationObserver(schedule).observe(document.body, { childList: true });
+    sync();
+  });
+  return { sync };
+})();
 
 /**
  * A failed video in two short lines: what happened and what to do. The full text hides under «Детальніше».

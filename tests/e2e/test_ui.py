@@ -95,7 +95,7 @@ def test_open_project_shows_editor_sorted_by_score(page, studio, project):
     assert page.locator("#edClipMeta, [data-nudge], #edPrev, #edNext, .ed-bar, #edZip, #hwBadge").count() == 0
     # step rail with both steps, download always on top of the side panel, «Чому» under the title
     assert page.locator("#edMode button[data-m='table'][aria-selected='true']").is_visible()
-    assert "переглянуто 0/4" in page.locator("#edStep1").inner_text()
+    assert "розібрано 0 з 4" in page.locator("#edStep1").inner_text()
     assert page.locator("#edMp4").is_visible()
     assert "Сильний хук" in page.locator("#edWhy").inner_text()
     # five status shelves are tabs of the «Кліпи» strip; it opens on «Вірусні»
@@ -584,7 +584,7 @@ def test_reanalyze_visible_and_next_button(page, studio, project):
     assert "Шукати кліпи заново" in page.locator("#edReanalyze").inner_text()
     page.keyboard.press("y")
     assert wait_for(page, lambda: clip(2)["review_status"] == "keep")
-    assert "1/4" in page.locator("#edStep1").inner_text()
+    assert "1 з 4" in page.locator("#edStep1").inner_text()
     assert page.locator("#edCnt_keep").inner_text() == "1"
     page.wait_for_function("Editor.state().num === 4")  # the kept clip left «Вірусні»: the next one opened by itself
     page.click("#edGoNext")  # «Наступний»: on to the next clip in the strip
@@ -729,4 +729,17 @@ def test_step2_without_clips_in_work_explains_what_to_do(page, studio, project):
     page.click("#edMode button[data-m='vx']")
     page.locator("#vxPhone").wait_for(state="visible")
     assert page.locator("#vxEmpty").is_hidden()
+    assert not page.errors
+
+
+def test_keyboard_stays_in_the_open_window(page, studio, project):
+    """With the editor open, Tab never lands on the home page under it; closing gives the page back."""
+    open_editor(page, studio)
+    page.wait_for_function("document.querySelector('main.studio-container').inert")
+    for _ in range(12):
+        page.keyboard.press("Tab")
+        assert page.evaluate("document.getElementById('editor').contains(document.activeElement)")
+    page.click("#edBack")
+    page.locator("#editor").wait_for(state="hidden")
+    page.wait_for_function("!document.querySelector('main.studio-container').inert")
     assert not page.errors
