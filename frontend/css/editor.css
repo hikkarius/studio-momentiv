@@ -627,7 +627,7 @@
 .ed-rawdl { width: 100%; justify-content: center; font-size: var(--fs-sm); }
 /* toast with «↶ Повернути» */
 .ed-toast.act { pointer-events: auto; display: flex; align-items: center; gap: 12px; }
-.ed-toast-undo { border: 0; background: none; color: inherit; font: 800 var(--fs-md) var(--ed-sans); text-decoration: underline; cursor: pointer; padding: 0; }
+.ed-toast-undo { border: 0; background: none; color: inherit; font: 800 var(--fs-md) var(--ed-sans); text-decoration: underline; cursor: pointer; padding: 8px 10px; margin: -8px -10px -8px 0; min-height: 36px; border-radius: var(--r-sm); }
 @media (max-width: 1439px) { .ed-shelf { padding: 6px 9px; } }
 .ed-decide .ed-gonext { padding: 8px 14px; border-radius: var(--r-pill); font-size: var(--fs-md); }
 

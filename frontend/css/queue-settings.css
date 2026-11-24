@@ -162,7 +162,7 @@ a.linkish { color: var(--orange-text); font-weight: 700; text-decoration: none; 
 .disk-done small { color: var(--text-muted); font-size: var(--fs-sm); }
 .dp-chip { align-self: flex-start; font-size: var(--fs-xs); font-weight: 700; border-radius: var(--r-pill); padding: 1px 8px; margin-top: 2px; }
 .dp-chip.done { color: var(--accent-emerald); background: rgb(var(--ok-rgb) / .12); }
-.dp-chip.left { color: var(--accent-amber); background: rgb(var(--accent-rgb) / .12); }
+.dp-chip.left { color: var(--accent-amber); background: rgb(var(--accent-rgb) / .08); }
 .rm-dialog .modal-card { max-width: 560px; }
 .rm-lead { margin: 0; color: var(--text-muted); }
 .rm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow: auto; }

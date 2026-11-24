@@ -124,6 +124,9 @@ def test_failed_video_says_why_and_offers_retry(page, studio, project):
         card.locator(".err-more summary").click()
         assert "тихоокеанським" in meta.inner_text()
         assert card.locator(".vc-acts button", has_text="Ще раз").is_visible()
+        # the card itself is not a button: no controls nested inside another control
+        assert card.locator(".history-item-left").get_attribute("role") is None
+        assert card.locator("[role=button] button, [role=button] summary").count() == 0
 
         # «Видалити» asks in the studio's own window (no browser confirm); Escape keeps the video
         card.locator(".vc-acts button", has_text="Видалити").click()
