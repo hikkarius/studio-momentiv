@@ -717,13 +717,13 @@
 .vx-sel.game { border-color: var(--ed-accent); }
 .vx-sel[hidden] { display: none; }
 .vx-sel i { position: absolute; width: 14px; height: 14px; border-radius: 3px; background: var(--white); border: 2px solid var(--black); }
-.vx-sel i[data-h="nw"] { left: -8px; top: -8px; } .vx-sel i[data-h="ne"] { right: -8px; top: -8px; }
-.vx-sel i[data-h="sw"] { left: -8px; bottom: -8px; } .vx-sel i[data-h="se"] { right: -8px; bottom: -8px; }
+/* where each handle sits is set from vertical.js: at the phone's edge they move in, past its rounded corners */
 .vx-selchip { position: absolute; left: 50%; top: 6px; transform: translateX(-50%); display: flex; align-items: center; gap: 7px; white-space: nowrap;
   padding: 3px 4px 3px 10px; border-radius: var(--r-pill); background: rgb(var(--scrim-rgb) / .82); color: var(--white); font-size: var(--fs-xs); pointer-events: auto; }
 .vx-selchip b { color: var(--accent-text); }
 .vx-selchip button { border: 0; border-radius: var(--r-pill); background: rgb(255 255 255 / .16); color: var(--white); width: 24px; height: 24px; cursor: pointer; font-size: var(--fs-md); }
 .vx-sel.low .vx-selchip { top: auto; bottom: 6px; }
+.vx-sel.attop:not(.low) .vx-selchip { top: 30px; }
 /* nick styles (tiles show what the render draws) */
 .vx-nicks { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
 .vx-nicks button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0; border: 0; background: none; cursor: pointer;

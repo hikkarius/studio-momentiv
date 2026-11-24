@@ -453,3 +453,41 @@ def test_save_info_is_whole(tmp_path):
     streamer.save_info(str(p), {"cam": CAM})
     streamer.save_info(str(p), {"cam": None})
     assert json.loads(p.read_text(encoding="utf-8")) == {"cam": None} and [f.name for f in p.parent.iterdir()] == ["stream.json"]
+
+
+def test_game_window_in_pip_layout():
+    """«Гра на весь екран»: the game can be a 16:9 window too; untouched it still fills the phone."""
+    full = streamer.plan(CAM, FACE, 1920, 1080, {"layout": "pip"})
+    g = full["parts"][0]
+    assert g["dst"] == [0, 0, 1080, 1920] and not full["bg"] and g["win"][3] == 1920.0 and g["win"][2] > 3000
+    # the whole game at the phone's width, in the middle: the rest is blurred game
+    sp = streamer.plan(CAM, FACE, 1920, 1080, {"layout": "pip", "game_w": 1.0, "game_cy": 0.5})
+    g = sp["parts"][0]
+    assert sp["bg"] and g["src"] == [0.0, 0.0, 1.0, 1.0] and g["dst"] == [0, 656, 1080, 607]
+    # sticking out of the phone: only the seen piece of the game, never less than 120 px left on the phone
+    sp = streamer.plan(CAM, FACE, 1920, 1080, {"layout": "pip", "game_w": 0.6, "game_cx": 5, "game_cy": -3})
+    g = sp["parts"][0]
+    assert g["dst"][0] == 1080 - 120 and g["dst"][2] == 120 and g["dst"][1] == 0
+    assert abs(g["src"][2] - 120 / 648) < 0.002 and g["src"][0] == 0.0
+    # zoom inside the window
+    sp = streamer.plan(CAM, FACE, 1920, 1080, {"layout": "pip", "game_w": 1.0, "game_zoom": 2, "game_x": 0.75, "game_y": 0.25})
+    assert sp["parts"][0]["src"] == [0.5, 0.0, 0.5, 0.5]
+    # a window bigger than the phone covers it: no background needed
+    sp = streamer.plan(CAM, FACE, 1920, 1080, {"layout": "pip", "game_w": 3.5})
+    assert not sp["bg"] and sp["parts"][0]["dst"] == [0, 0, 1080, 1920]
+    assert streamer.clean_look({"game_w": 9, "game_cx": "x"})["game_w"] == 4.0
+    assert streamer.clean_look({"game_w": None})["game_w"] is None
+
+
+def test_render_game_window_real(tmp_path):
+    src = tmp_path / "src.mp4"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=25:d=2",
+                    "-c:v", "libx264", "-preset", "ultrafast", str(src)], check=True, timeout=60)
+    for lk in ({"layout": "pip", "game_w": 0.8, "game_cx": 0.4, "game_cy": 0.6, "game_zoom": 1.3},
+               {"layout": "pip", "game_w": 0.5, "game_cx": 1.2, "game_cy": 0.95}):
+        sp = streamer.plan(CAM, FACE, 640, 360, lk)
+        out = tmp_path / "v.mp4"
+        vr.render_vertical(str(src), 0, 2, str(out), vr.Layout("stream", stream=sp), streamer.nick_ass(None, sp))
+        info = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                               "-of", "csv=p=0", str(out)], capture_output=True, text=True, timeout=30).stdout.strip()
+        assert info == "1080,1920"

@@ -40,6 +40,8 @@ LOOK_DEFAULT: Dict[str, Any] = {
     "cam_fx": None, "cam_fy": None,                           # centre of the webcam crop inside its frame (None = face)
     "game_x": 0.5, "game_y": 0.5,                             # centre of the game crop
     "pip_x": 0.04, "pip_y": 0.035, "pip_w": 0.48,             # «Гра на весь екран»: the window, fractions of the phone
+    "game_w": None, "game_cx": 0.5, "game_cy": 0.5,           # «Гра на весь екран»: the game as a window too (None = whole
+                                                              # phone); its width and centre in phone widths/heights
     "round": False, "frame": "white", "divider": False,
     "nick": "", "nick_style": "twitch", "nick_x": None, "nick_y": None,  # nick_x/y: top-left on the phone (None = auto)
 }
@@ -268,6 +270,9 @@ def clean_look(raw: Any, base: Optional[Dict[str, Any]] = None) -> Dict[str, Any
     num("game_x", 0.0, 1.0)
     num("game_y", 0.0, 1.0)
     num("pip_w", 0.25, 1.0)
+    num("game_w", 0.2, 4.0, True)
+    num("game_cx", -1.0, 2.0)
+    num("game_cy", -1.0, 2.0)
     num("nick_x", 0.0, 1.0, True)
     num("nick_y", 0.0, 1.0, True)
     if raw.get("nick_style") in NICK_STYLES:
@@ -372,7 +377,8 @@ def plan(cam: Optional[Sequence[float]], face: Optional[Sequence[float]], src_w:
         ow, oh = pw + 2 * b, ph + 2 * b
         px = int(_clamp(lk["pip_x"] * OUT_W, 0, OUT_W - ow))
         py = int(_clamp(lk["pip_y"] * OUT_H, 0, OUT_H - oh))
-        parts.append(part("game", _fit(OUT_W / OUT_H, frame, game_focus, lk["game_zoom"], 0.5), (0, 0, OUT_W, OUT_H)))
+        game, bg = _game_window(lk, frame, game_focus)
+        parts.append({**part("game", game["src"], game["dst"]), "win": game["win"]})
         parts.append(part("cam", _fit(cb[2] / cb[3], cb, f, lk["cam_zoom"]), (px, py, ow, oh), b,
                           PIP_RADIUS if lk["round"] else 0))
         if py < OUT_H * 0.3:
@@ -395,6 +401,33 @@ def plan(cam: Optional[Sequence[float]], face: Optional[Sequence[float]], src_w:
                 "x": int(_clamp(x, 0, OUT_W - nw)), "y": int(_clamp(y, 0, OUT_H - nh))}
     return {"layout": layout, "bg": bg, "parts": parts, "blur": blur, "pos": pos, "hook_pos": hook_pos,
             "divider": divider, "divider_color": color or "FFFFFF", "nick": nick, "look": lk}
+
+
+WIN_KEEP = 120  # px of the game window that always stay on the phone
+
+
+def _game_window(lk: Dict[str, Any], frame: Box, focus: Tuple[float, float]) -> Tuple[Dict[str, Any], bool]:
+    """«Гра на весь екран»: the game is a 16:9 window on the phone (CapCut-like). Returns
+    ({"src": visible piece of the source (px), "dst": where it lands, "win": the whole window, may stick out}, needs bg).
+    game_w None: the game fills the phone, as before (win = the same picture as a window)."""
+    W, H = frame[2], frame[3]
+    shown = _fit(W / H, frame, focus, lk["game_zoom"], 0.5)  # the window shows this (the whole game at zoom 1)
+    if lk["game_w"] is None:
+        r = _fit(OUT_W / OUT_H, frame, focus, lk["game_zoom"], 0.5)
+        k = OUT_H / r[3]
+        win = [(shown[0] - r[0]) * k, (shown[1] - r[1]) * k, shown[2] * k, shown[3] * k]
+        return {"src": r, "dst": (0, 0, OUT_W, OUT_H), "win": [round(v, 1) for v in win]}, False
+    ww = lk["game_w"] * OUT_W
+    wh = ww * shown[3] / shown[2]
+    cx = _clamp(lk["game_cx"] * OUT_W, WIN_KEEP - ww / 2, OUT_W - WIN_KEEP + ww / 2)
+    cy = _clamp(lk["game_cy"] * OUT_H, WIN_KEEP - wh / 2, OUT_H - WIN_KEEP + wh / 2)
+    wx, wy = cx - ww / 2, cy - wh / 2
+    x0, y0, x1, y1 = max(0.0, wx), max(0.0, wy), min(float(OUT_W), wx + ww), min(float(OUT_H), wy + wh)
+    src = (shown[0] + (x0 - wx) / ww * shown[2], shown[1] + (y0 - wy) / wh * shown[3],
+           (x1 - x0) / ww * shown[2], (y1 - y0) / wh * shown[3])
+    covers = x0 <= 0 and y0 <= 0 and x1 >= OUT_W and y1 >= OUT_H
+    dst = (0, 0, OUT_W, OUT_H) if covers else (x0, y0, x1 - x0, y1 - y0)
+    return {"src": src, "dst": dst, "win": [round(v, 1) for v in (wx, wy, ww, wh)]}, not covers
 
 
 def _nick_text(text: str, style: str) -> str:

@@ -152,7 +152,8 @@ def test_stream_sizes_zoom_phone_drag_and_styling(page, studio, project, monkeyp
     assert page.evaluate("document.getElementById('vxPhone').classList.contains('playing')") is False
     # pulling a corner away from the middle zooms the webcam in
     ch = page.evaluate("Vertical.state().stream.parts[0].dst[3]")
-    page.mouse.move(*at(1076, ch - 4))
+    hb = page.locator("#vxSel i[data-h='se']").bounding_box()
+    page.mouse.move(hb["x"] + 7, hb["y"] + 7)
     page.mouse.down()
     page.mouse.move(*at(1076 + 200, ch + 200), steps=6)
     page.mouse.up()
@@ -187,7 +188,9 @@ def test_stream_sizes_zoom_phone_drag_and_styling(page, studio, project, monkeyp
     for lk in ({"layout": "top", "divider": True, "frame": "gold", "nick": "lebiga", "cam_zoom": 1.7, "cam_fx": 0.2, "cam_fy": 0.3},
                {"layout": "full", "share": 0.3, "game_zoom": 1.3, "game_x": 0.8, "nick": "lebiga", "nick_style": "tape"},
                {"layout": "pip", "pip_w": 1.0, "pip_x": 1, "pip_y": 0.4, "round": True, "frame": "none"},
-               {"layout": "pip", "pip_w": 0.6, "pip_x": 1, "pip_y": 1, "nick": "lebiga", "nick_style": "neon"}):
+               {"layout": "pip", "pip_w": 0.6, "pip_x": 1, "pip_y": 1, "nick": "lebiga", "nick_style": "neon"},
+               {"layout": "pip", "game_w": 0.8, "game_cx": 0.3, "game_cy": 0.7, "game_zoom": 1.4, "game_x": 0.7},
+               {"layout": "pip", "game_w": 1.7, "game_cx": 1.6, "game_cy": -0.2}):
         full = {**streamer.LOOK_DEFAULT, **lk}
         js = page.evaluate("(lk) => Vertical.twin(lk)", full)
         _same_plan(js, streamer.plan(CAM, [0.17, 0.78], 320, 180, full))
@@ -210,6 +213,32 @@ def test_stream_sizes_zoom_phone_drag_and_styling(page, studio, project, monkeyp
     page.mouse.up()
     page.wait_for_function("Vertical.state().stream.parts[1].dst[2] >= 1070")
     assert "ширини" in page.locator("#vxSelPct").inner_text()
+
+    # the game is a window too: select it, pull a corner in (blurred game behind), drag it up
+    page.evaluate("document.getElementById('edVideo').pause()")
+    page.mouse.click(*at(540, 150))
+    page.wait_for_function("!document.getElementById('vxSel').hidden && document.getElementById('vxSelName').textContent === 'Гра'")
+    assert page.locator("#vxSelPct").inner_text().startswith("на весь екран")
+    h = page.locator("#vxSel i[data-h='ne']").bounding_box()
+    page.mouse.move(h["x"] + h["width"] / 2, h["y"] + h["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(*at(600, 800), steps=6)
+    page.mouse.up()
+    page.wait_for_timeout(400)
+    page.wait_for_function("Vertical.state().look.game_w !== null && Vertical.state().stream.bg")
+    g = page.evaluate("Vertical.state().stream.parts[0]")
+    assert g["dst"][1] > 600 and int(page.locator("#vxSelPct").inner_text().split("%")[0]) < 200
+    cy = page.evaluate("Vertical.state().look.game_cy")
+    cam_d = page.evaluate("Vertical.state().stream.parts[1].dst")
+    mid = (g["dst"][0] + g["dst"][2] / 2, max(g["dst"][1] + 80, cam_d[1] + cam_d[3] + 60))  # on the game, under the webcam
+    assert mid[1] < g["dst"][1] + g["dst"][3] - 20
+    page.mouse.move(*at(*mid))
+    page.mouse.down()
+    page.mouse.move(*at(mid[0], mid[1] - 300), steps=5)
+    page.mouse.up()
+    page.wait_for_function(f"Vertical.state().look.game_cy < {cy - 0.1}")
+    page.click("#vxSelReset")
+    page.wait_for_function("Vertical.state().look.game_w === null && !Vertical.state().stream.bg")
 
     # styling and the nick: pick a style, drag the nick
     page.click("#vxCamRound button[data-v='1']")

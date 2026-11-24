@@ -500,9 +500,9 @@ const Vertical = (() => {
   // ─── «Стрім: вебка + гра» ──────────────────────────────────────────────────
   const OW = 1080, OH = 1920;
   const LOOK_DEFAULT = { layout: "top", share: 0.34, cam_zoom: 1, game_zoom: 1, cam_fx: null, cam_fy: null, game_x: 0.5, game_y: 0.5,
-    pip_x: 0.04, pip_y: 0.035, pip_w: 0.48, round: false, frame: "white", divider: false,
+    pip_x: 0.04, pip_y: 0.035, pip_w: 0.48, game_w: null, game_cx: 0.5, game_cy: 0.5, round: false, frame: "white", divider: false,
     nick: "", nick_style: "twitch", nick_x: null, nick_y: null };
-  const SIZE_KEYS = ["share", "cam_zoom", "game_zoom", "cam_fx", "cam_fy", "game_x", "game_y", "pip_x", "pip_y", "pip_w"];
+  const SIZE_KEYS = ["share", "cam_zoom", "game_zoom", "cam_fx", "cam_fy", "game_x", "game_y", "pip_x", "pip_y", "pip_w", "game_w", "game_cx", "game_cy"];
   const FRAME_COLORS = { none: null, white: "FFFFFF", cam: "9146FF", gold: "E6C068" };
   const PIP_BORDER = 6, PIP_RADIUS = 28, NICK_TOP = [36, 48];
   // streamer.NICK_STYLES: canvas font, size, uppercase, padding x, padding y, icon width
@@ -531,6 +531,7 @@ const Vertical = (() => {
     num("share", 0.22, 0.6); num("cam_zoom", 1, 3); num("game_zoom", 1, 3);
     num("cam_fx", 0, 1, true); num("cam_fy", 0, 1, true); num("game_x", 0, 1); num("game_y", 0, 1);
     num("pip_w", 0.25, 1); num("pip_x", 0, 1); num("pip_y", 0, 1); num("nick_x", 0, 1, true); num("nick_y", 0, 1, true);
+    num("game_w", 0.2, 4, true); num("game_cx", -1, 2); num("game_cy", -1, 2);
     if (!(o.nick_style in NICK_STYLES)) o.nick_style = "twitch";
     if (!(o.frame in FRAME_COLORS)) o.frame = "white";
     o.round = !!o.round; o.divider = !!o.divider;
@@ -544,6 +545,25 @@ const Vertical = (() => {
     if (bw / bh > aspect) { w = bh * aspect; h = bh; } else { w = bw; h = bw / aspect; }
     w /= zoom; h /= zoom;
     return [clampN(focus[0] - w / 2, bx, bx + bw - w), clampN(focus[1] - h * bias, by, by + bh - h), w, h];
+  }
+
+  const WIN_KEEP = 120;  // px of the game window that always stay on the phone
+  /** Twin of streamer._game_window(): «Гра на весь екран», the game as a 16:9 window (game_w null = the whole phone). */
+  function gameWindow(lk, frame, focus) {
+    const W = frame[2], H = frame[3];
+    const shown = fit(W / H, frame, focus, lk.game_zoom, 0.5);
+    const r1 = (v) => Math.round(v * 10) / 10;
+    if (lk.game_w === null) {
+      const r = fit(OW / OH, frame, focus, lk.game_zoom, 0.5), k = OH / r[3];
+      return { src: r, dst: [0, 0, OW, OH], win: [(shown[0] - r[0]) * k, (shown[1] - r[1]) * k, shown[2] * k, shown[3] * k].map(r1), bg: false };
+    }
+    const ww = lk.game_w * OW, wh = ww * shown[3] / shown[2];
+    const cx = clampN(lk.game_cx * OW, WIN_KEEP - ww / 2, OW - WIN_KEEP + ww / 2), cy = clampN(lk.game_cy * OH, WIN_KEEP - wh / 2, OH - WIN_KEEP + wh / 2);
+    const wx = cx - ww / 2, wy = cy - wh / 2;
+    const x0 = Math.max(0, wx), y0 = Math.max(0, wy), x1 = Math.min(OW, wx + ww), y1 = Math.min(OH, wy + wh);
+    const src = [shown[0] + (x0 - wx) / ww * shown[2], shown[1] + (y0 - wy) / wh * shown[3], (x1 - x0) / ww * shown[2], (y1 - y0) / wh * shown[3]];
+    const covers = x0 <= 0 && y0 <= 0 && x1 >= OW && y1 >= OH;
+    return { src, dst: covers ? [0, 0, OW, OH] : [x0, y0, x1 - x0, y1 - y0], win: [wx, wy, ww, wh].map(r1), bg: !covers };
   }
 
   /** Twin of streamer.plan(): the same parts for the live preview (the render uses the Python one). */
@@ -595,7 +615,9 @@ const Vertical = (() => {
       const pw = Math.min(even(OW * lk.pip_w), OW - 2 * b), ph = even(pw * cb[3] / cb[2]);
       const ow = pw + 2 * b, oh = ph + 2 * b;
       const px = Math.trunc(clampN(lk.pip_x * OW, 0, OW - ow)), py = Math.trunc(clampN(lk.pip_y * OH, 0, OH - oh));
-      parts.push(part("game", fit(OW / OH, frame, gf, lk.game_zoom, 0.5), [0, 0, OW, OH]));
+      const gw = gameWindow(lk, frame, gf);
+      bg = gw.bg;
+      parts.push({ ...part("game", gw.src, gw.dst), win: gw.win });
       parts.push(part("cam", fit(cb[2] / cb[3], cb, f, lk.cam_zoom), [px, py, ow, oh], b, lk.round ? PIP_RADIUS : 0));
       if (py < OH * 0.3) hookPos = Math.round(10 * Math.min(80, 100 * (py + oh + 40) / OH)) / 10;
       const nh = nickSize(lk.nick || "x", lk.nick_style)[1];
@@ -761,6 +783,13 @@ const Vertical = (() => {
     renderSel();
   }
 
+  /** Corner handles of a box on the phone; at the phone's edge they move in, past its rounded corners. */
+  const HANDLE_IN = 52;
+  function handlePoints([px, py, pw, ph]) {
+    const cx = (v) => clampN(v, HANDLE_IN, OW - HANDLE_IN), cy = (v) => clampN(v, HANDLE_IN, OH - HANDLE_IN);
+    return [["nw", cx(px), cy(py)], ["ne", cx(px + pw), cy(py)], ["sw", cx(px), cy(py + ph)], ["se", cx(px + pw), cy(py + ph)]];
+  }
+
   /** The box with handles over the selected picture on the phone (click the webcam or the game). */
   function renderSel() {
     const el = $("vxSel");
@@ -771,17 +800,28 @@ const Vertical = (() => {
     const [x, y, w, h] = part.dst;
     Object.assign(el.style, { left: `${(x / OW) * 100}%`, top: `${(y / OH) * 100}%`, width: `${(w / OW) * 100}%`, height: `${(h / OH) * 100}%` });
     el.classList.toggle("game", part.role === "game");
+    el.classList.toggle("attop", y <= 0);  // the chip goes under the top handles, never over them
+    for (const [name, hx, hy] of handlePoints(part.dst)) {
+      const i = el.querySelector(`i[data-h="${name}"]`);
+      i.style.left = `calc(${((hx - x) / Math.max(1, w)) * 100}% - 8px)`;
+      i.style.top = `calc(${((hy - y) / Math.max(1, h)) * 100}% - 8px)`;
+    }
     const lk = look();
     $("vxSelName").textContent = part.role === "cam" ? (sp.layout === "pip" ? "Вікно з вебкою" : "Вебка") : "Гра";
-    $("vxSelPct").textContent = part.role === "cam" && sp.layout === "pip" ? `${Math.round((w / OW) * 100)}% ширини`
-      : `${Math.round((part.role === "cam" ? lk.cam_zoom : lk.game_zoom) * 100)}%`;
+    let pct = `${Math.round((part.role === "cam" ? lk.cam_zoom : lk.game_zoom) * 100)}%`;
+    if (part.role === "cam" && sp.layout === "pip") pct = `${Math.round((w / OW) * 100)}% ширини`;
+    else if (part.role === "game" && sp.layout === "pip") {
+      // the window's width against the phone's; the zoom inside it, if any
+      pct = (lk.game_w === null ? "на весь екран" : `${Math.round((part.win[2] / OW) * 100)}% ширини`) + (lk.game_zoom > 1 ? ` · наближення ${Math.round(lk.game_zoom * 100)}%` : "");
+    }
+    $("vxSelPct").textContent = pct;
   }
 
   /** «↺» on the box: the selected picture as at first (styling and the other picture stay). */
   function resetSel() {
     const d = LOOK_DEFAULT;
     if (st.sel === "cam") commitLook({ cam_zoom: 1, cam_fx: null, cam_fy: null, share: d.share, pip_x: d.pip_x, pip_y: d.pip_y, pip_w: d.pip_w });
-    else if (st.sel === "game") commitLook({ game_zoom: 1, game_x: 0.5, game_y: 0.5 });
+    else if (st.sel === "game") commitLook({ game_zoom: 1, game_x: 0.5, game_y: 0.5, game_w: null, game_cx: 0.5, game_cy: 0.5 });
   }
 
   /** While dragging a slider or a picture: preview only. */
@@ -942,17 +982,17 @@ const Vertical = (() => {
     const sel = st.sel && sp.parts.find((p) => p.role === st.sel);
     if (sel) {
       const [px, py, pw, ph] = sel.dst;
-      for (const [h, hx, hy] of [["nw", px, py], ["ne", px + pw, py], ["sw", px, py + ph], ["se", px + pw, py + ph]]) {
+      for (const [h, hx, hy] of handlePoints(sel.dst)) {
         if (Math.abs(x - hx) < HANDLE && Math.abs(y - hy) < HANDLE) return { mode: "corner", h, part: sel };
       }
     }
     if (cam && sp.layout !== "pip" && Math.abs(y - cam.dst[3]) < 30) return { mode: "seam", part: cam };
     if (cam && sp.layout === "pip" && inside(cam.dst)) return { mode: "pipmove", part: cam };
     if (inside(cam && cam.dst)) return { mode: "cam", part: cam };
-    if (inside(game && game.dst)) return { mode: "game", part: game };
+    if (inside(game && game.dst)) return { mode: sp.layout === "pip" ? "gamemove" : "game", part: game };
     return null;
   }
-  const CURSOR = { seam: "ns-resize", corner: "nwse-resize", pipmove: "move", cam: "grab", game: "grab", nick: "move" };
+  const CURSOR = { seam: "ns-resize", corner: "nwse-resize", pipmove: "move", gamemove: "move", cam: "grab", game: "grab", nick: "move" };
   function phoneXY(e) {
     const r = $("vxCanvas").getBoundingClientRect();
     return [((e.clientX - r.left) / r.width) * OW, ((e.clientY - r.top) / r.height) * OH];
@@ -997,6 +1037,16 @@ const Vertical = (() => {
       } else if (hit.mode === "game") {
         const [, , sw, sh] = start.src;
         liveLook({ game_x: clampN(start.gx - (dx / pw) * sw, 0, 1), game_y: clampN(start.gy - (dy / phh) * sh, 0, 1) });
+      } else if (hit.mode === "gamemove") {
+        const [wx, wy, ww, wh] = p.win;
+        liveLook({ game_w: ww / OW, game_cx: (wx + dx + ww / 2) / OW, game_cy: (wy + dy + wh / 2) / OH });
+      } else if (hit.mode === "corner" && p.role === "game" && sp.layout === "pip") {
+        // the game window grows or shrinks around the opposite corner of what is seen of it
+        const [wx, wy, ww, wh] = p.win;
+        const ax = hit.h.includes("e") ? px : px + pw, ay = hit.h.includes("s") ? py : py + phh;
+        const k = clampN(Math.hypot(x - ax, y - ay) / Math.max(1, Math.hypot(x0 - ax, y0 - ay)), (0.2 * OW) / ww, (4 * OW) / ww);
+        const nx = ax + (wx - ax) * k, ny = ay + (wy - ay) * k;
+        liveLook({ game_w: (ww * k) / OW, game_cx: (nx + ww * k / 2) / OW, game_cy: (ny + wh * k / 2) / OH });
       } else if (hit.mode === "pipmove") liveLook({ pip_x: clampN(px + dx, 0, OW - pw) / OW, pip_y: clampN(py + dy, 0, OH - phh) / OH });
       else if (hit.mode === "corner" && p.role === "cam" && sp.layout === "pip") {
         const b = (p.border || 0) * 2, east = hit.h.includes("e"), south = hit.h.includes("s");
@@ -1036,7 +1086,7 @@ const Vertical = (() => {
     const hit = streamOn() && e.buttons === 0 ? phoneHit(...phoneXY(e)) : null;
     let c = hit ? CURSOR[hit.mode] : "";
     if (hit && hit.mode === "corner") c = hit.h === "nw" || hit.h === "se" ? "nwse-resize" : "nesw-resize";
-    if (hit && (hit.mode === "cam" || hit.mode === "game") && hit.part.role !== st.sel) c = "pointer";
+    if (hit && (hit.mode === "cam" || hit.mode === "game" || hit.mode === "gamemove") && hit.part.role !== st.sel) c = "pointer";
     ph.style.cursor = c;
   }
 
