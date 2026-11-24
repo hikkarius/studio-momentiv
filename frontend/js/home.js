@@ -156,11 +156,13 @@ const Home = (() => {
   }
 
   async function again(p) {
-    const marked = p.reviewed_count || 0;
-    const ask = p.clips_count
-      ? `Шукати кліпи в «${p.title}» заново?${marked ? ` Позначки статусів (${marked}) зникнуть.` : ""}`
-      : `Поставити «${p.title}» в чергу на пошук моментів?`;
-    if (!(await askConfirm(ask, { ok: p.clips_count ? "Шукати заново" : "↻ Так, ще раз" }))) return;
+    if (p.clips_count) {
+      const mode = await askSearchAgain(p, p.reviewed_count || 0);
+      if (!mode) return;
+      try { await Queue.addProject(p.id, { search_mode: mode }); } catch (err) { showToast(err.message, "error"); }
+      return;
+    }
+    if (!(await askConfirm(`Поставити «${p.title}» в чергу на пошук моментів?`, { ok: "↻ Так, ще раз" }))) return;
     try { await Queue.addProject(p.id); } catch (err) { showToast(err.message, "error"); }
   }
 
@@ -211,7 +213,9 @@ const Home = (() => {
     const count = c.value === "0" ? "кількість: авто" : `кліпів: ${c.value}`;
     const l = $("heroLang");
     const lang = (l && l.options[l.selectedIndex]?.text.toLowerCase()) || defaults.lang;
-    const chips = [filter, `кліпи ${defaults.min}–${defaults.max} с`, count, `мова: ${lang}`];
+    const s = $("heroSearch");
+    const search = s && s.value === "experimental" ? "🧪 експериментальний пошук" : "📼 класичний пошук";
+    const chips = [filter, search, `кліпи ${defaults.min}–${defaults.max} с`, count, `мова: ${lang}`];
     $("heroHint").innerHTML = chips.map((t) => `<span class="home-chip">${escapeHtml(t)}</span>`).join("");
   }
 
@@ -244,7 +248,7 @@ const Home = (() => {
   function init() {
     initDrop();
     renderOpts();
-    ["heroFilter", "heroClips", "heroLang"].forEach((id) => $(id).addEventListener("change", renderOpts));
+    ["heroFilter", "heroClips", "heroLang", "heroSearch"].forEach((id) => $(id)?.addEventListener("change", renderOpts));
     $("homeOptsEdit").addEventListener("click", () => {
       const panel = $("homeOptsPanel");
       panel.hidden = !panel.hidden;

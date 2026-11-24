@@ -26,6 +26,22 @@ log = logging.getLogger("shorts_core")
 # ~100,000 characters corresponds to ~20,000-25,000 spoken words (~2 hours of speech).
 _MAX_TRANSCRIPT_CHARS: int = 100_000
 
+# «Експериментальний» search: the whole transcript goes into one prompt (current Gemini models take
+# ~1M tokens, ~400k characters is about 4 hours of speech). Longer videos use overlapping windows.
+EXPERIMENTAL_MAX_CHARS: int = 400_000
+EXPERIMENTAL_OVERLAP_SEC: float = 120.0
+# More clips than this in one answer makes the model output long and unreliable
+EXPERIMENTAL_MAX_CLIPS: int = 40
+
+SEARCH_CLASSIC = "classic"
+SEARCH_EXPERIMENTAL = "experimental"
+SEARCH_MODES = (SEARCH_CLASSIC, SEARCH_EXPERIMENTAL)
+
+
+def resolve_search_mode(value: Optional[str]) -> str:
+    v = (value or "").strip().lower()
+    return v if v in SEARCH_MODES else SEARCH_CLASSIC
+
 
 def validate_clips(
     clips: list[dict],
@@ -413,6 +429,8 @@ def _call_gemini_single_window(
     detected_lang: str,
     target_len: Optional[float] = None,
     gate: Optional["_SharedBackoff"] = None,
+    experimental: bool = False,
+    max_chars: int = _MAX_TRANSCRIPT_CHARS,
 ) -> list[dict]:
     """Sends a single chunk of transcript segments to Gemini and returns parsed clips.
     gate: shared with the other parallel windows (a 503/429 here makes all of them hold off)."""
@@ -420,12 +438,12 @@ def _call_gemini_single_window(
     transcript_text = "\n".join(transcript_lines)
 
     # Safe guard: if a single chunk still exceeds limit, truncate with notice
-    if len(transcript_text) > _MAX_TRANSCRIPT_CHARS:
+    if len(transcript_text) > max_chars:
         log.warning(
-            f"Transcript chunk length ({len(transcript_text)} chars) exceeds {_MAX_TRANSCRIPT_CHARS}. "
+            f"Transcript chunk length ({len(transcript_text)} chars) exceeds {max_chars}. "
             "Applying safe boundary truncation."
         )
-        transcript_text = transcript_text[:_MAX_TRANSCRIPT_CHARS] + "\n... [транскрипцію скорочено для безпеки контексту]"
+        transcript_text = transcript_text[:max_chars] + "\n... [транскрипцію скорочено для безпеки контексту]"
 
     if target_len:
         length_hint = (
@@ -456,14 +474,32 @@ def _call_gemini_single_window(
             "першими й бери, якщо там справді є момент, з підводкою за кілька секунд до реакції. "
             "Не копіюй позначки в 'hook_text' і не обирай кліп лише через позначку.\n"
         )
+    if experimental:
+        scope = "УСЬОГО відео" if max_chars >= EXPERIMENTAL_MAX_CHARS else "фрагмента відео"
+        count_rule = (
+            f"- Кількість фрагментів: ДО {count}. Бери лише справді сильні моменти: краще менше, ніж слабкі.\n"
+            "- НЕ розподіляй кліпи рівномірно по відео. Якщо найцікавіше зібрано в одному місці, бери кілька кліпів звідти; "
+            "нудні частини пропускай повністю.\n"
+            "- Упорядкуй масив від найсильнішого моменту до найслабшого."
+        )
+        hook_rule = (
+            "\nХУК: 'start' — секунда, де звучить перша сильна фраза, що чіпляє глядача за 1-2 секунди "
+            "(питання, суперечливе твердження, несподіваний факт, початок жарту). НЕ починай з розгону: "
+            "«ну», «отже», «так от», «як я казав», повторів, звертань до чату чи пауз. Якщо для розуміння "
+            "потрібна підводка, вона має бути короткою. 'hook_text' — ДОСЛІВНО перші 5-8 слів кліпу з транскрипції.\n"
+        )
+    else:
+        scope = "фрагмента відео"
+        count_rule = f"- Кількість фрагментів: рівно {count}"
+        hook_rule = ""
 
     prompt = f"""\
 Ти — топ-продюсер вертикального контенту (Shorts/Reels/TikTok).
-Ось транскрипція фрагмента відео (мова: {lang}) з таймкодами:
+Ось транскрипція {scope} (мова: {lang}) з таймкодами:
 {transcript_text}
 {reaction_hint}
 Параметри завдання:
-- Кількість фрагментів: рівно {count}
+{count_rule}
 - Тривалість кожного кліпу: СТРОГО від {min_len} до {max_len} секунд (end - start).
 {length_hint}
 - Стиль вибору: {filter_hint}
@@ -474,7 +510,7 @@ def _call_gemini_single_window(
 (не обривай речення). Кліпи НЕ повинні перетинатися між собою.
 НЕ обирай вступ і привітання, прощання, заклики підписатися та рекламні інтеграції;
 якщо такий фрагмент усе ж потрапив у список, познач його відповідною категорією.
-
+{hook_rule}
 Вимоги до кожного знайденого кліпу:
 1. 'start' і 'end' — точні секунди (числа) з таймкодів транскрипції.
 2. 'title' — короткий чіпкий заголовок КАПСЛОКОМ мовою відео, що розкриває головну тему моменту (до 5 слів).
@@ -802,6 +838,81 @@ def analyze_and_find_clips(
     # Re-order chronologically by start time for consistent viewing
     selected.sort(key=lambda c: c["start"])
     return selected
+
+
+def _overlapping_windows(segments: list[dict], max_chars: int, overlap_sec: float) -> list[list[dict]]:
+    """Splits segments into windows of at most ~max_chars; each next window repeats the last overlap_sec."""
+    sizes = [len(s.get("text", "")) + 25 for s in segments]
+    if sum(sizes) <= max_chars:
+        return [segments]
+    windows: list[list[dict]] = []
+    i = 0
+    while i < len(segments):
+        total, j = 0, i
+        while j < len(segments) and (total + sizes[j] <= max_chars or j == i):
+            total += sizes[j]
+            j += 1
+        windows.append(segments[i:j])
+        if j >= len(segments):
+            break
+        # next window starts overlap_sec before this one ends, but always moves forward
+        back_to = float(segments[j - 1].get("end", 0)) - overlap_sec
+        k = j
+        while k - 1 > i and float(segments[k - 1].get("start", 0)) >= back_to:
+            k -= 1
+        i = max(i + 1, k)
+    return windows
+
+
+def find_clips_experimental(
+    client=None,
+    segments: Optional[list[dict]] = None,
+    count: int = 10,
+    min_len: int = 15,
+    max_len: int = 60,
+    filter_mode: str = FilterMode.VIRAL_HOOKS,
+    detected_lang: str = "uk",
+    target_len: Optional[float] = None,
+) -> list[dict]:
+    """
+    «Експериментальний» search: Gemini reads the whole video at once and picks only the strongest
+    moments (up to `count`, fewer is fine), clustered where the video is interesting, each starting
+    on its hook. Videos longer than one prompt use windows that overlap by 2 minutes, so a moment on
+    a window edge is not cut; duplicates from the overlap are removed by score later (clip_refiner).
+    """
+    if client is None:
+        client = get_gemini_client()
+    segments = segments or []
+    if not segments:
+        return []
+    count = max(1, min(int(count), EXPERIMENTAL_MAX_CLIPS))
+    windows = _overlapping_windows(segments, EXPERIMENTAL_MAX_CHARS, EXPERIMENTAL_OVERLAP_SEC)
+    per_window = count if len(windows) == 1 else min(EXPERIMENTAL_MAX_CLIPS, math.ceil(count * 1.5 / len(windows)))
+    log.info(f"Experimental search: {len(windows)} window(s), up to {per_window} clips each (target {count}).")
+
+    found: list[dict] = []
+    gemini_error: Optional[GeminiUnavailableError] = None
+    for i, win in enumerate(windows):
+        try:
+            found.extend(_call_gemini_single_window(
+                client=client, segments=win, count=per_window, min_len=min_len, max_len=max_len,
+                filter_mode=filter_mode, detected_lang=detected_lang, target_len=target_len,
+                experimental=True, max_chars=EXPERIMENTAL_MAX_CHARS,
+            ))
+        except GeminiUnavailableError as e:
+            gemini_error = e
+            log.warning(f"Experimental window {i + 1} failed: Gemini unavailable")
+        except Exception as e:
+            log.warning(f"Experimental window {i + 1} failed: {e}")
+    if not found:
+        if gemini_error is not None:
+            raise gemini_error
+        raise RuntimeError("Не вдалося знайти жодного кліпу.")
+    for c in found:
+        r = rubric_score(c)
+        if r is not None:
+            c["score"] = r
+    return found
 
 
 # ─── Second pass: comparative re-ranking ────────────────────────────────────

@@ -68,6 +68,7 @@ textarea.hero-input { resize: none; line-height: 1.45; min-height: 46px; max-hei
 .set-cards button b { font-size: var(--fs-md); color: var(--text-strong); }
 .set-cards button small { font-size: var(--fs-sm); color: var(--text-muted); line-height: 1.4; }
 .set-cards button[aria-pressed="true"] { border-color: var(--accent-orange); background: rgb(var(--accent-rgb) / .10); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / .12); }
+.ask-search { margin: 12px 0 4px; }
 .set-tag { font-weight: 800; font-size: var(--fs-xs); letter-spacing: .04em; text-transform: uppercase; padding: 2px 7px; border-radius: var(--r-pill); background: var(--accent-orange); color: var(--accent-ink); margin-bottom: 4px; }
 
 /* Two thumbs on one track: both inputs lie on top of each other, only the thumbs catch the pointer */

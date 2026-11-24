@@ -188,7 +188,7 @@ def test_overload_pauses_the_queue_item_with_an_honest_message(monkeypatch):
     r = client.post("/api/queue", json={"project_ids": [proj["id"]]})
     assert r.status_code == 200
 
-    def run(job_id, project_id, clips_count, filter_mode, engine="whisper_local", language=None):
+    def run(job_id, project_id, clips_count, filter_mode, engine="whisper_local", language=None, search_mode=None):
         with job_runner._quota_lock:
             job_runner._quota_hits[job_id] = GeminiIncompleteError(
                 "x", {"a": [], "b": []}, 5, GeminiUnavailableError("503"))
@@ -296,7 +296,7 @@ def test_new_queue_item_warms_whisper_but_a_resumed_one_does_not(monkeypatch):
     monkeypatch.setattr(app_state, "_whisper", None)
     monkeypatch.setattr(app_state, "preload_whisper_async", lambda: warmed.append(1))
 
-    def ok(job_id, project_id, clips_count, filter_mode, engine="whisper_local", language=None):
+    def ok(job_id, project_id, clips_count, filter_mode, engine="whisper_local", language=None, search_mode=None):
         job_runner.broadcast_update(job_id, {"status": "completed", "progress": 1.0, "message": "Готово"})
 
     monkeypatch.setattr(job_runner, "_run_analyze_worker", ok)

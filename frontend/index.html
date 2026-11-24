@@ -80,6 +80,12 @@
             <option value="Storytelling">🎭 Емоційні історії</option>
           </select>
         </label>
+        <label class="hero-opt" title="Класичний: рівномірно нарізає все відео, багато кліпів. Експериментальний: ШІ читає все відео разом і бере лише сильні місця, кліп починається з хука.">Як шукати
+          <select id="heroSearch" class="input-select">
+            <option value="classic">📼 Класичний</option>
+            <option value="experimental">🧪 Експериментальний</option>
+          </select>
+        </label>
         <label class="hero-opt">Скільки кліпів
           <select id="heroClips" class="input-select">
             <option value="0">Авто (за довжиною)</option>
@@ -393,6 +399,13 @@
             </div>
           </div>
           <div class="set-grp">
+            <h4>Як ШІ шукає моменти</h4>
+            <div class="set-cards" data-key="studio.default_search" role="group" aria-label="Як ШІ шукає моменти">
+              <button type="button" data-v="classic"><b>📼 Класичний</b><small>Рівномірно нарізає все відео: багато кліпів, зокрема середніх. Перевірений спосіб.</small></button>
+              <button type="button" data-v="experimental"><b>🧪 Експериментальний</b><small>ШІ читає все відео разом і бере лише сильні місця, кліп починається з хука. Кліпів менше (до 40), зате кращі.</small></button>
+            </div>
+          </div>
+          <div class="set-grp">
             <h4>Скільки кліпів шукати</h4>
             <div class="set-box">
               <div class="set-line">
@@ -617,7 +630,8 @@
           <div class="ed-stat keep ed-stat-vx"><span>В роботі</span><b id="edCntPick">0</b></div>
         </div>
         <span class="ed-spacer"></span>
-        <button class="ed-reanalyze" id="edReanalyze" type="button" title="Gemini ще раз перегляне розмову і запропонує нові кліпи. Транскрипція береться з кешу, тож це швидко.">
+        <span class="ed-search-mode" id="edSearchMode" hidden></span>
+        <button class="ed-reanalyze" id="edReanalyze" type="button" title="Gemini ще раз перегляне розмову і запропонує нові кліпи (можна вибрати інший спосіб пошуку). Транскрипція береться з кешу, тож це швидко.">
           <span class="ed-re-ic" aria-hidden="true">↻</span><span><b>Шукати кліпи заново</b><small>інший набір моментів</small></span>
         </button>
       </header>

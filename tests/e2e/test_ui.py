@@ -814,3 +814,22 @@ def test_phone_editor_opens_at_the_top(page, studio, project):
     top = page.evaluate("document.getElementById('edVideo').getBoundingClientRect().top")
     assert 0 <= top < 844
     assert not page.errors
+
+
+def test_search_again_offers_the_other_search_mode_and_keeps_marks(page, studio, project):
+    db.set_project_search_mode(PROJECT_ID, "classic")
+    open_editor(page, studio)
+    assert "Класичний" in page.locator("#edSearchMode").inner_text()
+    page.keyboard.press("y")
+    assert wait_for(page, lambda: clip(2)["review_status"] == "keep")
+    sent = []
+    page.on("request", lambda r: sent.append(r.post_data_json) if r.url.endswith("/api/queue") and r.method == "POST" else None)
+    page.click("#edReanalyze")
+    dlg = page.locator(".ask-search")
+    dlg.wait_for(state="visible")
+    assert page.locator(".ask-search [data-v='experimental']").get_attribute("aria-checked") == "true"
+    assert "Позначені кліпи (1) залишаться" in page.locator(".ask-dialog").inner_text()
+    page.click(".ask-dialog [data-a='yes']")
+    assert wait_for(page, lambda: sent)
+    assert sent[0]["search_mode"] == "experimental" and sent[0]["project_ids"] == [PROJECT_ID]
+    assert not page.errors

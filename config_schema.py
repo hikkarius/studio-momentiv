@@ -65,6 +65,7 @@ class StudioConfig(BaseModel):
     """Studio defaults changed from the «Налаштування» screen."""
     default_clips: int = Field(default=0, ge=0, le=100)         # 0 = auto (by video length)
     default_filter: str = Field(default="Viral Hooks")
+    default_search: str = Field(default="classic", pattern=r"^(classic|experimental)$")  # how AI looks for moments
     cleanup_days: int = Field(default=0, ge=0, le=3650)         # delete re-creatable clip files older than N days; 0 = never
     daily_backup: bool = True       # copy the database and transcripts to backups/ once a day, keep 7
     keep_awake: bool = True         # Windows: do not let the laptop sleep while the queue has work

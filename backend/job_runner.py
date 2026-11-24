@@ -24,7 +24,10 @@ from core import (
     transcribe_video,
     validate_clips,
 )
-from ai_selector import GeminiIncompleteError, GeminiQuotaError, rerank_clips
+from ai_selector import (
+    SEARCH_EXPERIMENTAL, EXPERIMENTAL_MAX_CLIPS, GeminiIncompleteError, GeminiQuotaError,
+    find_clips_experimental, rerank_clips, resolve_search_mode,
+)
 from clip_refiner import refine_clips
 from languages import language_label
 
@@ -166,12 +169,13 @@ def _run_analyze_worker(
     filter_mode: str,
     engine: str = "whisper_local",
     language: Optional[str] = None,
+    search_mode: Optional[str] = None,
 ):
     if not _analyze_lock.acquire(blocking=False):
         broadcast_update(job_id, {"status": "queued", "progress": 0.0, "message": "Чекає, поки закінчиться обробка іншого відео..."})
         _analyze_lock.acquire()
     try:
-        _run_analyze_worker_locked(job_id, project_id, clips_count, filter_mode, engine, language)
+        _run_analyze_worker_locked(job_id, project_id, clips_count, filter_mode, engine, language, search_mode)
     finally:
         _analyze_lock.release()
 
@@ -188,6 +192,7 @@ def _run_analyze_worker_locked(
     filter_mode: str,
     engine: str = "whisper_local",
     language: Optional[str] = None,
+    search_mode: Optional[str] = None,
 ):
     try:
         broadcast_update(job_id, {"status": "running", "progress": 0.05, "message": "Ініціалізація аналізу відео..."})
@@ -216,40 +221,63 @@ def _run_analyze_worker_locked(
         if not segments:
             raise RuntimeError("У відео не виявлено мовлення або транскрипція порожня.")
 
-        # A stream recording (webcam found or a chat replay saved): reactions become hints for the AI
+        mode = resolve_search_mode(search_mode or app_config.studio.default_search)
+        experimental = mode == SEARCH_EXPERIMENTAL
+
+        # A stream recording (webcam found or a chat replay saved): reactions become hints for the AI.
+        # The experimental search uses the loud moments (laughter, applause, shouts) of every video.
         ai_segments = segments
         broadcast_update(job_id, {"status": "running", "progress": 0.57, "message": "Перевіряю, чи це запис стріму..."})
         if _find_webcam_once(project_id, video_path) or os.path.exists(_chat_path(project_id)):
             broadcast_update(job_id, {"status": "running", "progress": 0.58, "message": "Стрім: шукаю реакції (крик, сміх, чат)..."})
             ai_segments = _reaction_segments(project_id, video_path, segments)
+        elif experimental:
+            broadcast_update(job_id, {"status": "running", "progress": 0.58, "message": "Шукаю сміх, оплески й гучні реакції..."})
+            ai_segments = _reaction_segments(project_id, video_path, segments)
 
-        broadcast_update(job_id, {"status": "running", "progress": 0.60, "message": "ШІ-пошук вірусних моментів (Google Gemini)..."})
+        broadcast_update(job_id, {"status": "running", "progress": 0.60, "message": (
+            "ШІ читає все відео й шукає найсильніші моменти (експериментальний пошук)..." if experimental
+            else "ШІ-пошук вірусних моментів (Google Gemini)..."
+        )})
 
         # Gemini Virality Selection (raises GeminiUnavailableError with a user-facing message)
         min_len = app_config.clips.default_min_len
         max_len = app_config.clips.default_max_len
-        # Ask for ~50% more candidates than needed: some get dropped as intros/ads, overlaps or too short
-        request_count = min(app_config.clips.max_count, math.ceil(clips_count * 1.5))
-        # Clips must not overlap, so the requested count limits their length: aim for ~80% coverage
-        target_len = max(min_len + 3, min(45.0, proj["duration"] * 0.8 / max(1, clips_count)))
-        done_windows = load_done_windows(project_id)
-        try:
-            raw_candidates = analyze_and_find_clips(
+        if experimental:
+            # The model returns up to N strongest moments from the whole video (fewer is fine)
+            clips_count = min(clips_count, EXPERIMENTAL_MAX_CLIPS)
+            raw_candidates = find_clips_experimental(
                 client=None,
                 segments=ai_segments,
-                count=request_count,
+                count=clips_count,
                 min_len=min_len,
                 max_len=max_len,
                 filter_mode=canonical_filter,
                 detected_lang=detected_lang,
-                target_len=target_len,
-                done_windows=done_windows,
             )
-        except GeminiIncompleteError as e:
-            if e.done:
-                save_done_windows(project_id, {**done_windows, **e.done})
-            raise
-        clear_done_windows(project_id)
+        else:
+            # Ask for ~50% more candidates than needed: some get dropped as intros/ads, overlaps or too short
+            request_count = min(app_config.clips.max_count, math.ceil(clips_count * 1.5))
+            # Clips must not overlap, so the requested count limits their length: aim for ~80% coverage
+            target_len = max(min_len + 3, min(45.0, proj["duration"] * 0.8 / max(1, clips_count)))
+            done_windows = load_done_windows(project_id)
+            try:
+                raw_candidates = analyze_and_find_clips(
+                    client=None,
+                    segments=ai_segments,
+                    count=request_count,
+                    min_len=min_len,
+                    max_len=max_len,
+                    filter_mode=canonical_filter,
+                    detected_lang=detected_lang,
+                    target_len=target_len,
+                    done_windows=done_windows,
+                )
+            except GeminiIncompleteError as e:
+                if e.done:
+                    save_done_windows(project_id, {**done_windows, **e.done})
+                raise
+            clear_done_windows(project_id)
 
         broadcast_update(job_id, {"status": "running", "progress": 0.85, "message": "Підганяємо межі кліпів під речення..."})
         for c in raw_candidates:  # the reaction marks are for the AI only
@@ -267,6 +295,7 @@ def _run_analyze_worker_locked(
             max_len=max_len,
             max_overlap=app_config.clips.max_overlap_sec,
             segments=segments,
+            hook_first=experimental,
         )
         if not valid_clips:
             raise RuntimeError(
@@ -322,7 +351,8 @@ def _run_analyze_worker_locked(
                 tf.write("\n")
 
         # 4. Save to DB
-        db.save_candidate_clips(project_id, valid_clips)
+        db.save_candidate_clips(project_id, valid_clips, keep_reviewed=True)
+        db.set_project_search_mode(project_id, mode)
         db.update_project_status(project_id, "ready")
 
         broadcast_update(job_id, {
@@ -389,9 +419,10 @@ def enqueue_analyze_job(
     filter_mode: str = "Viral Hooks",
     engine: str = "whisper_local",
     language: Optional[str] = None,
+    search_mode: Optional[str] = None,
 ) -> str:
     """Enqueues an analyze job for a project and returns the job ID."""
     job_id = _new_job_id(project_id)
     db.create_job(job_id, project_id, "analyze")
-    _executor.submit(_run_analyze_worker, job_id, project_id, clips_count, filter_mode, engine, language)
+    _executor.submit(_run_analyze_worker, job_id, project_id, clips_count, filter_mode, engine, language, search_mode)
     return job_id

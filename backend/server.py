@@ -189,6 +189,7 @@ class AnalyzeRequest(BaseModel):
     filter_mode: str = "Viral Hooks"
     engine: str = "whisper_local"
     language: str = ""   # '' = the language from the settings
+    search_mode: str = Field(default="", pattern=r"^(|classic|experimental)$")
 
     @field_validator("language")
     @classmethod
@@ -216,6 +217,7 @@ class QueueAddRequest(BaseModel):
     clips_count: int = Field(default=0, ge=0, le=100)   # 0 = auto by video length
     filter_mode: str = "Viral Hooks"
     language: str = ""   # '' = the language from the settings
+    search_mode: str = Field(default="", pattern=r"^(|classic|experimental)$")  # '' = the default from the settings
 
     @field_validator("language")
     @classmethod
@@ -486,6 +488,7 @@ def start_analyze(project_id: str, payload: AnalyzeRequest):
         filter_mode=payload.filter_mode,
         engine=payload.engine,
         language=payload.language or None,
+        search_mode=payload.search_mode or None,
     )
     return {"job_id": job_id, "project_id": project_id, "status": "queued"}
 
@@ -1765,7 +1768,7 @@ def add_to_queue(payload: QueueAddRequest):
     for url in dict.fromkeys(urls):
         added.append(db.add_queue_item(queue_runner.new_item_id(), source_url=url, title=url,
                                        clips_count=payload.clips_count, filter_mode=payload.filter_mode,
-                                       language=payload.language))
+                                       language=payload.language, search_mode=payload.search_mode))
     for pid in dict.fromkeys(payload.project_ids):
         _validate_project_id(pid)
         proj = db.get_project(pid)
@@ -1775,7 +1778,7 @@ def add_to_queue(payload: QueueAddRequest):
             continue
         added.append(db.add_queue_item(queue_runner.new_item_id(), project_id=pid, title=proj.get("title") or pid,
                                        clips_count=payload.clips_count, filter_mode=payload.filter_mode,
-                                       language=payload.language))
+                                       language=payload.language, search_mode=payload.search_mode))
     queue_runner.notify()
     return {"added": added}
 
@@ -1801,7 +1804,7 @@ def retry_queue_item(item_id: str):
     db.delete_queue_item(item_id)
     new = db.add_queue_item(queue_runner.new_item_id(), source_url=item["source_url"], project_id=item["project_id"],
                             title=item["title"], clips_count=item["clips_count"], filter_mode=item["filter_mode"],
-                            language=item.get("language") or "")
+                            language=item.get("language") or "", search_mode=item.get("search_mode") or "")
     queue_runner.notify()
     return {"item": new}
 
@@ -1841,12 +1844,19 @@ FILTER_CHOICES = [
     {"value": "Actionable Advice", "label": "💡 Експертні поради"},
     {"value": "Storytelling", "label": "🎭 Емоційні історії"},
 ]
+SEARCH_CHOICES = [
+    {"value": "classic", "label": "📼 Класичний",
+     "hint": "Рівномірно нарізає все відео. Багато кліпів, зокрема середніх. Перевірений спосіб."},
+    {"value": "experimental", "label": "🧪 Експериментальний",
+     "hint": "ШІ читає все відео разом і бере лише сильні місця, кліп починається з хука. Кліпів менше (до 40), зате кращі."},
+]
 # Only these settings can be changed from the browser
 _EDITABLE_SETTINGS = {
     "whisper": {"model", "language"},
     "clips": {"default_min_len", "default_max_len", "max_overlap_sec"},
     "gemini": {"rerank"},
-    "studio": {"default_clips", "default_filter", "cleanup_days", "daily_backup", "keep_awake", "wait_for_limit"},
+    "studio": {"default_clips", "default_filter", "default_search", "cleanup_days", "daily_backup", "keep_awake",
+               "wait_for_limit"},
 }
 
 
@@ -1858,7 +1868,7 @@ def _settings_view() -> Dict[str, Any]:
     return {
         "values": {sec: {k: cfg[sec][k] for k in keys} for sec, keys in _EDITABLE_SETTINGS.items()},
         "gemini_key": {"set": bool(key), "hint": ("…" + key[-4:]) if len(key) >= 8 else ""},
-        "choices": {"whisper_model": WHISPER_MODEL_CHOICES, "language": LANGUAGE_CHOICES, "filter": FILTER_CHOICES},
+        "choices": {"whisper_model": WHISPER_MODEL_CHOICES, "language": LANGUAGE_CHOICES, "filter": FILTER_CHOICES, "search": SEARCH_CHOICES},
     }
 
 
@@ -1886,6 +1896,9 @@ def update_settings(payload: Dict[str, Any]):
     if "studio" in patch and "default_filter" in patch["studio"]:
         if patch["studio"]["default_filter"] not in {c["value"] for c in FILTER_CHOICES}:
             raise HTTPException(status_code=400, detail="Невідомий стиль пошуку.")
+    if "studio" in patch and "default_search" in patch["studio"]:
+        if patch["studio"]["default_search"] not in {c["value"] for c in SEARCH_CHOICES}:
+            raise HTTPException(status_code=400, detail="Невідомий спосіб пошуку.")
     if "whisper" in patch and "language" in patch["whisper"]:
         if not is_supported(str(patch["whisper"]["language"])):
             raise HTTPException(status_code=400, detail="Невідома мова відео.")

@@ -317,6 +317,9 @@
 .ed-reanalyze:hover { color: var(--ed-fg); border-color: var(--ed-accent); background: var(--ed-accent-soft); }
 .ed-reanalyze b { display: block; font-size: var(--fs-md); font-weight: 600; }
 .ed-reanalyze small { display: none; }
+.ed-search-mode { flex: none; font-size: var(--fs-sm); color: var(--ed-muted); padding: 3px 10px; border: 1px solid var(--ed-line); border-radius: var(--r-pill); white-space: nowrap; }
+.ed-search-mode[hidden] { display: none; }
+@media (max-width: 1279px) { .ed-search-mode { display: none; } }
 .ed-re-ic { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: var(--fs-md); font-weight: 800; border: 1px solid var(--ed-line); color: var(--ed-muted); flex: none; }
 
 .ed-cols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 372px; gap: 14px; }

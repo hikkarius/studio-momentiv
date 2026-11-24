@@ -163,6 +163,14 @@ def init_db():
             text TEXT NOT NULL,
             created_at REAL NOT NULL
         );""")
+        if "search_mode" not in queue_columns:
+            # '' = the default from the settings, else classic / experimental
+            conn.execute("ALTER TABLE queue_items ADD COLUMN search_mode TEXT NOT NULL DEFAULT '';")
+
+        project_columns = [row["name"] for row in conn.execute("PRAGMA table_info(projects);").fetchall()]
+        if "search_mode" not in project_columns:
+            # how the current clips were found: classic / experimental ('' = before the switch existed)
+            conn.execute("ALTER TABLE projects ADD COLUMN search_mode TEXT NOT NULL DEFAULT '';")
 
 
 def new_shelf_size(duration_sec: float) -> int:
@@ -252,13 +260,44 @@ def update_project_status(project_id: str, status: str):
         )
 
 
-def save_candidate_clips(project_id: str, clips: List[Dict[str, Any]]):
+def set_project_search_mode(project_id: str, mode: str) -> None:
     with get_db() as conn:
-        conn.execute("DELETE FROM candidate_clips WHERE project_id = ?", (project_id,))
-        for idx, c in enumerate(clips, 1):
-            clip_id = f"{project_id}_clip_{idx}"
+        conn.execute("UPDATE projects SET search_mode = ? WHERE id = ?", (mode or "", project_id))
+
+
+def save_candidate_clips(project_id: str, clips: List[Dict[str, Any]], keep_reviewed: bool = False):
+    """
+    Replaces the project's clips with `clips`.
+    keep_reviewed (a repeated search): clips the user already marked («В роботі», «Виконані», «Не беру»)
+    stay as they are, and a new clip that mostly repeats one of them is skipped.
+    """
+    with get_db() as conn:
+        kept: list = []
+        if keep_reviewed:
+            kept = conn.execute(
+                "SELECT clip_index, start_sec, end_sec FROM candidate_clips WHERE project_id = ? AND review_status != ''",
+                (project_id,),
+            ).fetchall()
+            conn.execute("DELETE FROM candidate_clips WHERE project_id = ? AND review_status = ''", (project_id,))
+        else:
+            conn.execute("DELETE FROM candidate_clips WHERE project_id = ?", (project_id,))
+
+        def repeats_kept(start: float, end: float) -> bool:
+            for k in kept:
+                inter = min(end, k["end_sec"]) - max(start, k["start_sec"])
+                shorter = max(0.1, min(end - start, k["end_sec"] - k["start_sec"]))
+                if inter / shorter > 0.5:
+                    return True
+            return False
+
+        idx = max([k["clip_index"] for k in kept] + [0])
+        for c in clips:
             start = float(c.get("start", 0.0))
             end = float(c.get("end", 0.0))
+            if kept and repeats_kept(start, end):
+                continue
+            idx += 1
+            clip_id = f"{project_id}_clip_{idx}"
             dur = max(0.0, end - start)
             raw_score = c.get("score") if c.get("score") is not None else c.get("virality_score")
             score = _parse_score(raw_score, default=85)
@@ -276,7 +315,7 @@ def save_candidate_clips(project_id: str, clips: List[Dict[str, Any]]):
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
                 (clip_id, project_id, idx, start, end, dur, score, title, hook, reason, caption, tags_json),
             )
-        _mark_reserve(conn, project_id)
+        _mark_reserve(conn, project_id, only_new=keep_reviewed)
 
 
 def _clip_row(row: Any) -> Dict[str, Any]:
@@ -646,16 +685,18 @@ def add_queue_item(
     clips_count: int = 0,
     filter_mode: str = "Viral Hooks",
     language: str = "",
+    search_mode: str = "",
 ) -> Dict[str, Any]:
     now = time.time()
     with get_db() as conn:
         row = conn.execute("SELECT MAX(position) AS p FROM queue_items").fetchone()
         position = (row["p"] or 0) + 1
         conn.execute(
-            "INSERT INTO queue_items (id, source_url, project_id, title, clips_count, filter_mode, language, status, "
-            "progress, message, position, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', 0.0, 'Чекає своєї черги', ?, ?, ?)",
-            (item_id, source_url, project_id, title, int(clips_count), filter_mode, language or "", position, now, now),
+            "INSERT INTO queue_items (id, source_url, project_id, title, clips_count, filter_mode, language, search_mode, "
+            "status, progress, message, position, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'waiting', 0.0, 'Чекає своєї черги', ?, ?, ?)",
+            (item_id, source_url, project_id, title, int(clips_count), filter_mode, language or "", search_mode or "",
+             position, now, now),
         )
     return get_queue_item(item_id)
 

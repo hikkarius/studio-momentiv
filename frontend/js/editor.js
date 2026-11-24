@@ -1267,6 +1267,13 @@ const Editor = (() => {
     st.tab = "text";
     $("edProjTitle").textContent = project.title || "Відео";
     $("edProjMeta").textContent = `${fmtS(project.duration || 0)} · ${clips.length} кліпів`;
+    const sm = $("edSearchMode");
+    if (sm) {
+      const label = typeof searchModeLabel === "function" ? searchModeLabel(project.search_mode) : "";
+      sm.hidden = !label;
+      sm.textContent = label ? `Знайдено: ${label}` : "";
+      sm.title = "Яким способом ШІ знайшов ці кліпи. Інший спосіб: «Шукати кліпи заново»";
+    }
     const v = video();
     v.src = `/api/media?path=${encodeURIComponent(project.source_path)}`;
     v.load();

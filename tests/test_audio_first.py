@@ -122,7 +122,7 @@ def test_queue_item_uses_the_audio_first_path(monkeypatch, fake_audio):
     analysed = []
     from backend import job_runner
 
-    def fake_analyze(job_id, project_id, clips_count, filter_mode, language=None):
+    def fake_analyze(job_id, project_id, clips_count, filter_mode, language=None, search_mode=None):
         analysed.append(transcription.load_transcript_cache_for(db.get_project(project_id)["source_path"], "uk"))
         db.update_job(job_id, status="completed", progress=1.0, message="Готово")
 

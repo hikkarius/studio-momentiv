@@ -145,7 +145,7 @@ def test_queue_passes_language_to_analysis_and_keeps_it_on_retry():
 
     seen = []
 
-    def fake(job_id, project_id, clips_count, filter_mode, engine="whisper_local", language=None):
+    def fake(job_id, project_id, clips_count, filter_mode, engine="whisper_local", language=None, search_mode=None):
         seen.append(language)
         job_runner.broadcast_update(job_id, {"status": "failed", "progress": 1.0, "error": "x", "message": "x"})
 

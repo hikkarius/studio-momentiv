@@ -491,15 +491,25 @@ function showSourceCard() {
 // Goes through the queue, so it never runs at the same time as another video.
 async function retryAnalysisForCurrentProject() {
   if (!currentProject) return;
-  const project = currentProject;
+  let project = currentProject;
+  // the editor changes statuses on its own: read them fresh so the count in the question is right
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(project.id)}`);
+    if (res.ok) {
+      const data = await res.json();
+      project = currentProject = data.project;
+      currentClips = data.clips || [];
+    }
+  } catch (_) { /* keep what we have */ }
   const marked = currentClips.filter((c) => c.review_status).length;
-  if (marked && !(await askConfirm(`Шукати кліпи заново? Позначки статусів (${marked}) для цього відео зникнуть.`, { ok: "Шукати заново" }))) {
+  const mode = await askSearchAgain(project, marked);
+  if (!mode) {
     if (typeof Editor !== "undefined") Editor.open(project, currentClips);
     return;
   }
   resetStudioState();
   try {
-    await Queue.addProject(project.id);
+    await Queue.addProject(project.id, { search_mode: mode });
   } catch (err) {
     showToast(err.message, "error");
   }
@@ -1122,6 +1132,80 @@ function errorSummaryHtml(text) {
  * A question in the studio's own window instead of the browser's grey confirm().
  * Resolves true on the main button (or Enter), false on «Скасувати», Esc or a click outside.
  */
+const SEARCH_MODES = [
+  { value: "classic", label: "📼 Класичний", hint: "Рівномірно нарізає все відео: багато кліпів, зокрема середніх." },
+  { value: "experimental", label: "🧪 Експериментальний", hint: "ШІ читає все відео разом і бере лише сильні місця, кліп починається з хука." },
+];
+
+function searchModeLabel(mode) {
+  return (SEARCH_MODES.find((m) => m.value === mode) || {}).label || "";
+}
+
+/**
+ * «Шукати кліпи заново»: asks which way to search. The other way is preselected, so trying it is one click.
+ * Resolves to "classic" / "experimental", or null when cancelled.
+ */
+function askSearchAgain(project, marked) {
+  return new Promise((resolve) => {
+    const used = project.search_mode || "classic";
+    let pick = used === "classic" ? "experimental" : "classic";
+    const back = document.createElement("div");
+    back.className = "modal-backdrop ask-dialog";
+    back.setAttribute("role", "dialog");
+    back.setAttribute("aria-modal", "true");
+    back.setAttribute("aria-labelledby", "askSearchTitle");
+    const keepNote = marked
+      ? `Позначені кліпи (${marked}) залишаться на своїх полицях, решта зміниться.`
+      : "Нові кліпи замінять ті, що є зараз.";
+    back.innerHTML = `
+      <div class="modal-card">
+        <div class="modal-body">
+          <h3 class="modal-title" id="askSearchTitle">Шукати кліпи в «${escapeHtml(project.title || "Відео")}» заново</h3>
+          <div class="set-cards ask-search" role="radiogroup" aria-label="Як шукати">
+            ${SEARCH_MODES.map((m) => `
+              <button type="button" role="radio" data-v="${m.value}" aria-checked="${m.value === pick}" aria-pressed="${m.value === pick}">
+                <b>${escapeHtml(m.label)}${m.value === used && project.search_mode ? " · зараз" : ""}</b><small>${escapeHtml(m.hint)}</small>
+              </button>`).join("")}
+          </div>
+          <p class="ask-text">${escapeHtml(keepNote)} Транскрипція вже є, тож це швидко.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-a="no">Скасувати</button>
+          <button type="button" class="btn btn-primary" data-a="yes">↻ Шукати заново</button>
+        </div>
+      </div>`;
+    const before = document.activeElement;
+    const done = (v) => {
+      document.removeEventListener("keydown", onKey, true);
+      back.remove();
+      if (before && before.focus) try { before.focus(); } catch (_) {}
+      resolve(v);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(null); }
+      else if (!["Enter", " ", "Tab"].includes(e.key)) e.stopPropagation(); // the editor's hotkeys stay quiet
+    };
+    back.addEventListener("click", (e) => {
+      const opt = e.target.closest("[data-v]");
+      if (opt) {
+        pick = opt.dataset.v;
+        back.querySelectorAll("[data-v]").forEach((b) => {
+          const on = b.dataset.v === pick;
+          b.setAttribute("aria-checked", String(on));
+          b.setAttribute("aria-pressed", String(on));
+        });
+        return;
+      }
+      const b = e.target.closest("button[data-a]");
+      if (b) done(b.dataset.a === "yes" ? pick : null);
+      else if (e.target === back) done(null);
+    });
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(back);
+    back.querySelector('[data-a="yes"]').focus();
+  });
+}
+
 function askConfirm(text, { ok = "Так", cancel = "Скасувати", danger = false, title = "" } = {}) {
   return new Promise((resolve) => {
     const back = document.createElement("div");
