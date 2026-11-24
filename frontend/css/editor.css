@@ -704,3 +704,11 @@
 .vx-camb i[data-h="sw"] { left: -10px; bottom: -10px; cursor: nesw-resize; }
 .vx-camb i[data-h="se"] { right: -10px; bottom: -10px; cursor: nwse-resize; }
 .vx-camb.low span { top: auto; bottom: -27px; border-radius: 0 6px 6px 6px; }
+/* «Стрім»: size, zoom and styling of the webcam and the game */
+.vx-look { display: flex; flex-direction: column; gap: 10px; }
+.vx-look[hidden], .vx-look .vx-row[hidden], .vx-look label[hidden], .vx-look .vx-range[hidden] { display: none; }
+.vx-look input[type="text"] { font: inherit; font-size: var(--fs-md); color: var(--ed-fg); background: var(--ed-panel); border: 1px solid var(--ed-line); border-radius: var(--r-md); padding: 8px 11px; width: 100%; box-sizing: border-box; }
+.vx-corner button { min-width: 44px; font-size: var(--fs-lg); }
+.vx-hint { margin: 0; font-size: var(--fs-sm); line-height: 1.4; color: var(--ed-muted); }
+.vx-lookfoot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid var(--ed-line2); }
+.vx-lookfoot .ed-btn { background: var(--ed-panel); }

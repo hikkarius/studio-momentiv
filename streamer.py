@@ -9,7 +9,7 @@ A stream recording is a game (or screen) with the streamer's webcam pasted into 
      on the 1080×1920 phone. The browser preview (vertical.js) and the renderer draw the same parts.
   3. video_filter(): the ffmpeg filter_complex for those parts.
 
-Layouts:
+Layouts (the «look», see LOOK_DEFAULT: size, zoom and position of both pictures, window, styling):
   top  — webcam on top (share of the height), game below, cropped around game_x;
   full — webcam on top, the whole 16:9 game under it, blurred game behind;
   pip  — game on the whole phone, webcam as a small window in the corner;
@@ -18,15 +18,27 @@ In every layout the webcam inside the game picture is blurred, so the face is no
 """
 from __future__ import annotations
 
+import re
 import subprocess
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 OUT_W, OUT_H = 1080, 1920
 LAYOUTS = ("top", "full", "pip")
 DEFAULT_LAYOUT = "top"
-SHARE_MIN, SHARE_MAX, DEFAULT_SHARE = 0.22, 0.5, 0.34
-PIP_MARGIN, PIP_BORDER = 40, 6
+SHARE_MIN, SHARE_MAX, DEFAULT_SHARE = 0.22, 0.6, 0.34
+PIP_BORDER, PIP_RADIUS = 6, 28
+FRAME_COLORS = {"none": None, "white": "FFFFFF", "cam": "9146FF", "gold": "E6C068"}
+# How the stream looks on the phone. Kept per video (stream.json «look»); one clip may have its own (opts «stream_look»).
+LOOK_DEFAULT: Dict[str, Any] = {
+    "layout": DEFAULT_LAYOUT, "share": DEFAULT_SHARE,        # webcam's share of the phone height (top / full)
+    "cam_zoom": 1.0, "game_zoom": 1.0,                        # 1 = the whole webcam / the most of the game
+    "cam_fx": None, "cam_fy": None,                           # centre of the webcam crop inside its frame (None = face)
+    "game_x": 0.5, "game_y": 0.5,                             # centre of the game crop
+    "pip_x": 0.04, "pip_y": 0.035, "pip_w": 0.48,             # «Гра на весь екран»: the window, fractions of the phone
+    "round": False, "frame": "white", "divider": False, "nick": "",
+}
 SAMPLES = 20
+NICK_TOP = (36, 48, 7)  # x, y, ASS alignment (7 = top-left, 1 = bottom-left)
 
 Box = Tuple[float, float, float, float]  # x, y, w, h
 
@@ -194,74 +206,162 @@ def clean_cam(cam: Any) -> Optional[List[float]]:
 
 # ─── 2. Layout plan ───────────────────────────────────────────────────────────
 
-def _fit(aspect: float, box: Box, focus: Tuple[float, float]) -> Box:
-    """The biggest piece of `box` with this aspect (w/h), centred on focus (in px)."""
+def clean_look(raw: Any, base: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """User-sent look (may be partial) over `base` (default LOOK_DEFAULT) → every key, in range."""
+    o = dict(LOOK_DEFAULT)
+    if base:
+        o.update({k: v for k, v in base.items() if k in LOOK_DEFAULT})
+    raw = raw if isinstance(raw, dict) else {}
+
+    def num(k: str, lo: float, hi: float, nullable: bool = False) -> None:
+        if k not in raw:
+            return
+        v = raw[k]
+        if v is None or v == "":
+            if nullable:
+                o[k] = None
+            return
+        try:
+            o[k] = round(_clamp(float(v), lo, hi), 4)
+        except (TypeError, ValueError):
+            pass
+    if raw.get("layout") in LAYOUTS:
+        o["layout"] = raw["layout"]
+    num("share", SHARE_MIN, SHARE_MAX)
+    num("cam_zoom", 1.0, 3.0)
+    num("game_zoom", 1.0, 3.0)
+    num("cam_fx", 0.0, 1.0, True)
+    num("cam_fy", 0.0, 1.0, True)
+    num("game_x", 0.0, 1.0)
+    num("game_y", 0.0, 1.0)
+    num("pip_w", 0.25, 0.8)
+    num("pip_x", 0.0, 1.0)
+    num("pip_y", 0.0, 1.0)
+    if "round" in raw:
+        o["round"] = bool(raw["round"])
+    if raw.get("frame") in FRAME_COLORS:
+        o["frame"] = raw["frame"]
+    if "divider" in raw:
+        o["divider"] = bool(raw["divider"])
+    if "nick" in raw:
+        o["nick"] = re.sub(r"[{}\\\n\r]", "", str(raw.get("nick") or "")).strip()[:30]
+    if o["layout"] not in LAYOUTS:
+        o["layout"] = DEFAULT_LAYOUT
+    return o
+
+
+def _fit(aspect: float, box: Box, focus: Tuple[float, float], zoom: float = 1.0, bias: float = 0.45) -> Box:
+    """The biggest piece of `box` with this aspect (w/h), made `zoom` times smaller, around focus (px)."""
     bx, by, bw, bh = box
     if bw / bh > aspect:
         w, h = bh * aspect, bh
-        x = _clamp(focus[0] - w / 2, bx, bx + bw - w)
-        return (x, by, w, h)
-    w, h = bw, bw / aspect
-    y = _clamp(focus[1] - h * 0.45, by, by + bh - h)
-    return (bx, y, w, h)
+    else:
+        w, h = bw, bw / aspect
+    w, h = w / zoom, h / zoom
+    x = _clamp(focus[0] - w / 2, bx, bx + bw - w)
+    y = _clamp(focus[1] - h * bias, by, by + bh - h)
+    return (x, y, w, h)
 
 
 def plan(cam: Optional[Sequence[float]], face: Optional[Sequence[float]], src_w: int, src_h: int,
-         layout: str = DEFAULT_LAYOUT, share: Optional[float] = None, game_x: float = 0.5) -> Dict[str, Any]:
+         look: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Pure function. Returns {"layout", "bg", "parts": [{"role", "src": [x,y,w,h] fractions, "dst": [x,y,w,h] px,
-    "border"}], "blur": [x,y,w,h] fractions | None, "pos": subtitle height in %}. Parts are listed in drawing order.
+    Pure function (vertical.js streamPlan() is its twin for the live preview). Returns
+    {"layout", "bg", "parts": [{"role", "src": [x,y,w,h] fractions, "dst": [x,y,w,h] px, "border", "radius", "color"}],
+     "blur": [x,y,w,h] fractions | None, "pos": subtitle height in % | None, "hook_pos", "divider", "nick", "look"}.
+    Parts are listed in drawing order.
     """
+    lk = clean_look(look)
     W, H = float(src_w), float(src_h)
-    layout = layout if layout in LAYOUTS else DEFAULT_LAYOUT
-    share = _clamp(float(share if share is not None else DEFAULT_SHARE), SHARE_MIN, SHARE_MAX)
-    game_focus = (_clamp(float(game_x), 0, 1) * W, H / 2)
+    layout = lk["layout"] if cam else "game"
+    share = lk["share"]
+    game_focus = (lk["game_x"] * W, lk["game_y"] * H)
     frame = (0.0, 0.0, W, H)
-    if not cam:
-        layout = "game"
-    else:
+    m = 0.0
+    if cam:
         cb = (cam[0] * W, cam[1] * H, cam[2] * W, cam[3] * H)
         m = 0.004 * W  # leave out the overlay's own border line
         if cb[2] > 8 * m and cb[3] > 8 * m:
             cb = (cb[0] + m, cb[1] + m, cb[2] - 2 * m, cb[3] - 2 * m)
-        f = (face[0] * W, face[1] * H) if face else (cb[0] + cb[2] / 2, cb[1] + cb[3] / 2)
+        if lk["cam_fx"] is not None and lk["cam_fy"] is not None:
+            f = (cb[0] + lk["cam_fx"] * cb[2], cb[1] + lk["cam_fy"] * cb[3])
+        elif face:
+            f = (face[0] * W, face[1] * H)
+        else:
+            f = (cb[0] + cb[2] / 2, cb[1] + cb[3] / 2)
         f = (_clamp(f[0], cb[0], cb[0] + cb[2]), _clamp(f[1], cb[1], cb[1] + cb[3]))
+    color = FRAME_COLORS.get(lk["frame"])
 
     def frac(b: Box) -> List[float]:
         return [round(b[0] / W, 5), round(b[1] / H, 5), round(b[2] / W, 5), round(b[3] / H, 5)]
 
-    def part(role: str, src: Box, dst: Tuple[int, int, int, int], border: int = 0) -> Dict[str, Any]:
-        return {"role": role, "src": frac(src), "dst": list(dst), "border": border}
+    def part(role: str, src: Box, dst: Tuple[int, int, int, int], border: int = 0, radius: int = 0) -> Dict[str, Any]:
+        return {"role": role, "src": frac(src), "dst": [int(v) for v in dst], "border": border, "radius": radius,
+                "color": color if border else None}
 
     parts: List[Dict[str, Any]] = []
-    bg, pos, hook_pos = False, None, None
+    bg, pos, hook_pos, divider, nick_at = False, None, None, None, None
     if layout == "game":
-        parts.append(part("game", _fit(OUT_W / OUT_H, frame, game_focus), (0, 0, OUT_W, OUT_H)))
-    elif layout == "top":
+        parts.append(part("game", _fit(OUT_W / OUT_H, frame, game_focus, lk["game_zoom"], 0.5), (0, 0, OUT_W, OUT_H)))
+        nick_at = NICK_TOP
+    elif layout in ("top", "full"):
         ch = _even(OUT_H * share)
-        gh = OUT_H - ch
-        parts.append(part("cam", _fit(OUT_W / ch, cb, f), (0, 0, OUT_W, ch)))
-        parts.append(part("game", _fit(OUT_W / gh, frame, game_focus), (0, ch, OUT_W, gh)))
-        pos = round(100 * ch / OUT_H, 1)
-    elif layout == "full":
-        ch = _even(OUT_H * share)
-        gh = _even(OUT_W * H / W)
-        bg = True
-        parts.append(part("cam", _fit(OUT_W / ch, cb, f), (0, 0, OUT_W, ch)))
-        parts.append(part("game", frame, (0, ch, OUT_W, gh)))
-        pos = round(min(85.0, 100 * (ch + gh + 150) / OUT_H), 1)
+        parts.append(part("cam", _fit(OUT_W / ch, cb, f, lk["cam_zoom"]), (0, 0, OUT_W, ch)))
+        if layout == "top":
+            gh = OUT_H - ch
+            parts.append(part("game", _fit(OUT_W / gh, frame, game_focus, lk["game_zoom"], 0.5), (0, ch, OUT_W, gh)))
+            pos = round(100 * ch / OUT_H, 1)
+            if lk["divider"]:
+                divider = [0, ch - 3, OUT_W, 6]
+        else:
+            gh = _even(OUT_W * H / W)
+            bg = True
+            parts.append(part("game", _fit(W / H, frame, game_focus, lk["game_zoom"], 0.5), (0, ch, OUT_W, gh)))
+            pos = round(min(85.0, 100 * (ch + gh + 150) / OUT_H), 1)
+            if lk["divider"]:
+                divider = [0, ch - 3, OUT_W, 6]
+        nick_at = NICK_TOP  # top-left of the webcam: the subtitles sit on the seam
     else:  # pip
-        pw = _even(OUT_W * min(0.7, share * 1.4))
+        b = PIP_BORDER if color else 0
+        pw = _even(OUT_W * lk["pip_w"])
         ph = _even(pw * cb[3] / cb[2])
-        parts.append(part("game", _fit(OUT_W / OUT_H, frame, game_focus), (0, 0, OUT_W, OUT_H)))
-        parts.append(part("cam", cb, (PIP_MARGIN, PIP_MARGIN + 24, pw + 2 * PIP_BORDER, ph + 2 * PIP_BORDER), PIP_BORDER))
-        hook_pos = round(100 * (PIP_MARGIN + 24 + ph + 2 * PIP_BORDER + 40) / OUT_H, 1)  # the title goes under the window
+        ow, oh = pw + 2 * b, ph + 2 * b
+        px = int(_clamp(lk["pip_x"] * OUT_W, 0, OUT_W - ow))
+        py = int(_clamp(lk["pip_y"] * OUT_H, 0, OUT_H - oh))
+        parts.append(part("game", _fit(OUT_W / OUT_H, frame, game_focus, lk["game_zoom"], 0.5), (0, 0, OUT_W, OUT_H)))
+        parts.append(part("cam", _fit(cb[2] / cb[3], cb, f, lk["cam_zoom"]), (px, py, ow, oh), b,
+                          PIP_RADIUS if lk["round"] else 0))
+        if py < OUT_H * 0.3:
+            hook_pos = round(min(80.0, 100 * (py + oh + 40) / OUT_H), 1)  # the title goes under the window
+        # under the window, or above it when the window is at the bottom
+        nick_at = (px + 8, py + oh + 14, 7) if py + oh + 90 < OUT_H else (px + 8, py - 14, 1)
     blur = None
     if cam:
-        m += 4.0  # a few px around, so the overlay border goes too
-        bx, by = max(0.0, cb[0] - m), max(0.0, cb[1] - m)
-        blur = frac((bx, by, min(W, cb[0] + cb[2] + m) - bx, min(H, cb[1] + cb[3] + m) - by))
-    return {"layout": layout, "bg": bg, "parts": parts, "blur": blur, "pos": pos, "hook_pos": hook_pos, "share": round(share, 3)}
+        mm = m + 4.0  # a few px around, so the overlay border goes too
+        bx, by = max(0.0, cb[0] - mm), max(0.0, cb[1] - mm)
+        blur = frac((bx, by, min(W, cb[0] + cb[2] + mm) - bx, min(H, cb[1] + cb[3] + mm) - by))
+    nick = None
+    if lk["nick"] and nick_at:
+        nick = {"text": lk["nick"], "x": nick_at[0], "y": nick_at[1], "an": nick_at[2]}
+    return {"layout": layout, "bg": bg, "parts": parts, "blur": blur, "pos": pos, "hook_pos": hook_pos,
+            "divider": divider, "divider_color": color or "FFFFFF", "nick": nick, "look": lk}
+
+
+def nick_ass(ass_text: Optional[str], sp: Dict[str, Any]) -> Optional[str]:
+    """Adds the streamer's nick (small, all clip long) to the subtitle document, or makes one just for it."""
+    nk = sp.get("nick")
+    if not nk:
+        return ass_text
+    style = "Style: Nick,Rubik,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,3,2,7,0,0,0,1"
+    line = "Dialogue: 7,0:00:00.00,9:59:59.00,Nick,,0,0,0,,{\\an%d\\pos(%d,%d)}%s" % (nk["an"], nk["x"], nk["y"], nk["text"])
+    if not ass_text:
+        return ("[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n"
+                "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
+                "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+                "Alignment, MarginL, MarginR, MarginV, Encoding\n" + style + "\n\n[Events]\n"
+                "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n" + line + "\n")
+    out = re.sub(r"(\[V4\+ Styles\]\nFormat:[^\n]*\n)", lambda mt: mt.group(1) + style + "\n", ass_text, count=1)
+    return out.rstrip("\n") + "\n" + line + "\n"
 
 
 # ─── 3. ffmpeg ────────────────────────────────────────────────────────────────
@@ -272,6 +372,12 @@ def _px(fr: Sequence[float], src_w: int, src_h: int) -> Tuple[int, int, int, int
     x = int(_clamp(fr[0] * src_w, 0, src_w - w))
     y = int(_clamp(fr[1] * src_h, 0, src_h - h))
     return x, y, w, h
+
+
+def _round_mask(r: int) -> str:
+    """geq alpha: transparent outside a rounded rectangle with corner radius r."""
+    return (f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(abs(X-W/2),W/2-{r})*gt(abs(Y-H/2),H/2-{r}),"
+            f"if(lte(hypot(abs(X-W/2)-(W/2-{r}),abs(Y-H/2)-(H/2-{r})),{r}),255,0),255)'")
 
 
 def video_filter(sp: Dict[str, Any], src_w: int, src_h: int, fps: int = 30) -> str:
@@ -286,7 +392,7 @@ def video_filter(sp: Dict[str, Any], src_w: int, src_h: int, fps: int = 30) -> s
     # the game picture with the webcam blurred out
     if sp.get("blur"):
         bx, by, bw, bh = _px(sp["blur"], src_w, src_h)
-        chains.append(f"[raw]split=2[ra][rb]")
+        chains.append("[raw]split=2[ra][rb]")
         chains.append(f"[rb]crop={bw}:{bh}:{bx}:{by},boxblur=20:3[rbl]")
         chains.append(f"[ra][rbl]overlay={bx}:{by}[clean]")
     else:
@@ -298,16 +404,32 @@ def video_filter(sp: Dict[str, Any], src_w: int, src_h: int, fps: int = 30) -> s
     for k, p in enumerate(parts):
         x, y, w, h = _px(p["src"], src_w, src_h)
         b = int(p.get("border") or 0)
-        dw, dh = p["dst"][2] - 2 * b, p["dst"][3] - 2 * b
+        r = int(p.get("radius") or 0)
+        dw, dh = _even(p["dst"][2] - 2 * b), _even(p["dst"][3] - 2 * b)
         if p["role"] == "game":
             src = clean[gi]
             gi += 1
         else:
             src = f"[rc{ci}]"
             ci += 1
-        pad = f",pad={dw + 2 * b}:{dh + 2 * b}:{b}:{b}:color=white" if b else ""
-        chains.append(f"{src}crop={w}:{h}:{x}:{y},scale={dw}:{dh}:flags=lanczos,setsar=1{pad}[p{k}]")
+        base = f"{src}crop={w}:{h}:{x}:{y},scale={dw}:{dh}:flags=lanczos,setsar=1"
+        col = p.get("color") or "FFFFFF"
+        if r:
+            ow, oh = dw + 2 * b, dh + 2 * b
+            chains.append(f"{base},format=rgba,{_round_mask(max(2, r - b))}[pi{k}]")
+            if b:
+                chains.append(f"color=c=0x{col}:s={ow}x{oh},format=rgba,{_round_mask(r)}[pf{k}]")
+                chains.append(f"[pf{k}][pi{k}]overlay={b}:{b}:shortest=1[p{k}]")
+            else:
+                chains.append(f"[pi{k}]null[p{k}]")
+        else:
+            pad = f",pad={dw + 2 * b}:{dh + 2 * b}:{b}:{b}:color=0x{col}" if b else ""
+            chains.append(f"{base}{pad}[p{k}]")
         labels[k] = f"[p{k}]"
+    tail = ""
+    if sp.get("divider"):
+        dx, dy, dw, dh = sp["divider"]
+        tail = f",drawbox=x={dx}:y={dy}:w={dw}:h={dh}:color=0x{sp.get('divider_color') or 'FFFFFF'}:t=fill"
     if sp.get("bg"):
         chains.append(f"{clean[-1]}scale={OUT_W}:{OUT_H}:force_original_aspect_ratio=increase,crop={OUT_W}:{OUT_H},"
                       f"boxblur=25:2,eq=brightness=-0.12,setsar=1[bg]")
@@ -317,12 +439,12 @@ def video_filter(sp: Dict[str, Any], src_w: int, src_h: int, fps: int = 30) -> s
         if first["dst"] != [0, 0, OUT_W, OUT_H]:
             # «top»: the parts fill the phone from top to bottom
             chains.append("".join(labels[k] for k in range(len(parts))) + f"vstack={len(parts)}[stk]")
-            chains.append(f"[stk]fps={fps}[base]")
+            chains.append(f"[stk]fps={fps}{tail},format=yuv420p[base]")
             return ";".join(chains)
         cur, start = labels[0], 1
     for k in range(start, len(parts)):
         x, y = parts[k]["dst"][0], parts[k]["dst"][1]
         chains.append(f"{cur}{labels[k]}overlay={x}:{y}[o{k}]")
         cur = f"[o{k}]"
-    chains.append(f"{cur}fps={fps}[base]")
+    chains.append(f"{cur}fps={fps}{tail},format=yuv420p[base]")
     return ";".join(chains)

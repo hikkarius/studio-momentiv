@@ -756,8 +756,41 @@
                     <button type="button" data-v="full"><i class="m"><s class="c" style="height:34%"></s><s class="g" style="height:20%"></s><s class="b" style="flex:1"></s></i>Вебка + вся гра</button>
                     <button type="button" data-v="pip"><i class="m"><s class="g" style="flex:1"></s><s class="c pip"></s></i>Гра на весь екран</button>
                   </div>
-                  <label class="vx-lbl" for="vxCamShare">Розмір вебки</label>
-                  <div class="vx-range"><span>менше</span><input type="range" id="vxCamShare" min="22" max="50" step="1" value="34"><span>більше</span></div>
+                  <div class="vx-look" id="vxLook">
+                    <div class="vx-row" id="vxCamSizeRow"><label class="vx-lbl" for="vxCamSize" id="vxCamSizeLbl">Розмір вебки</label>
+                      <div class="vx-range"><span>менше</span><input type="range" id="vxCamSize" min="22" max="60" step="1" value="34"><span>більше</span></div></div>
+                    <div class="vx-row" id="vxCamZoomRow"><label class="vx-lbl" for="vxCamZoom">Наближення вебки</label>
+                      <div class="vx-range"><span>уся</span><input type="range" id="vxCamZoom" min="100" max="300" step="5" value="100"><span>ближче</span></div></div>
+                    <div class="vx-row"><label class="vx-lbl" for="vxGameZoom">Наближення гри</label>
+                      <div class="vx-range"><span>уся</span><input type="range" id="vxGameZoom" min="100" max="300" step="5" value="100"><span>ближче</span></div></div>
+                    <div class="vx-row" id="vxPipRow"><div class="vx-lbl">Де вікно з вебкою</div>
+                      <div class="vx-seg vx-corner" id="vxPipCorner">
+                        <button type="button" data-v="tl" title="Угорі зліва">↖</button>
+                        <button type="button" data-v="tr" title="Угорі справа">↗</button>
+                        <button type="button" data-v="bl" title="Унизу зліва">↙</button>
+                        <button type="button" data-v="br" title="Унизу справа">↘</button>
+                      </div></div>
+                    <p class="vx-hint">Або прямо на телефоні: тягни межу між вебкою й грою, коліщатко миші наближує, перетягування зсуває картинку.</p>
+                    <div class="vx-row" id="vxRoundRow"><div class="vx-lbl">Кути вікна</div>
+                      <div class="vx-seg" id="vxCamRound">
+                        <button type="button" data-v="0">Прямі кути</button>
+                        <button type="button" data-v="1">Заокруглені</button>
+                      </div></div>
+                    <div class="vx-row" id="vxFrameRow"><div class="vx-lbl" id="vxFrameLbl">Рамка вікна</div>
+                      <div class="vx-swatches" id="vxCamFrame">
+                        <button type="button" data-v="none" class="auto" title="Без рамки">Без</button>
+                        <button type="button" data-v="white" style="background:#FFFFFF" title="Біла"></button>
+                        <button type="button" data-v="cam" style="background:#9146FF" title="Фіолетова"></button>
+                        <button type="button" data-v="gold" style="background:#E6C068" title="Золота"></button>
+                      </div></div>
+                    <label class="vx-check vx-switch" id="vxDivRow"><input type="checkbox" id="vxCamDiv"> Лінія між вебкою й грою</label>
+                    <div class="vx-row"><label class="vx-lbl" for="vxNick">Нік стрімера на відео</label>
+                      <input type="text" id="vxNick" maxlength="30" placeholder="наприклад, @lebiga" autocomplete="off"></div>
+                    <div class="vx-lookfoot">
+                      <label class="vx-check"><input type="checkbox" id="vxLookOwn"> Лише для цього кліпу</label>
+                      <button type="button" class="ed-btn sm" id="vxLookReset" title="Розміри й наближення як спочатку">↺ Як було</button>
+                    </div>
+                  </div>
                 </div>
               </section>
               <section class="vx-pane" data-t="style">

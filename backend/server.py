@@ -1150,6 +1150,8 @@ def _ensure_vertical(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any]
             hook_round=opts["hook_round"], hook_stroke=opts["hook_stroke"],
             hook_pos=opts["hook_pos"] if opts["hook_pos"] is not None else layout.stream.get("hook_pos"),
         )
+    if layout.kind == "stream":
+        ass = streamer.nick_ass(ass, layout.stream)  # the streamer's nick is drawn even without subtitles
     caps = app_state.get_gpu_capabilities()
     with vertical_render.RENDER_LOCK:
         if not path.exists():
@@ -1210,14 +1212,20 @@ def _stream_info(project_id: str, proj: Dict[str, Any], redetect: bool = False) 
             log.warning(f"Webcam detection failed for {project_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Не вдалося знайти вебку: {e}")
         info = {"cam": found["cam"], "face": found["face"], "w": found["w"], "h": found["h"], "note": found["note"],
-                "auto": True, "game_x": float(old.get("game_x", 0.5))}
+                "auto": True, "look": _stream_look(old)}
         path.write_text(json.dumps(info), encoding="utf-8")
         return info
 
 
+def _stream_look(info: Dict[str, Any]) -> Dict[str, Any]:
+    """The video's look (older files kept only game_x at the top level)."""
+    base = {"game_x": info["game_x"]} if "game_x" in info else {}
+    return streamer.clean_look(info.get("look") or {}, base)
+
+
 def _stream_layout(info: Dict[str, Any], opts: Dict[str, Any]) -> "vertical_render.Layout":
-    sp = streamer.plan(info.get("cam"), info.get("face"), int(info["w"]), int(info["h"]),
-                       opts.get("stream_layout") or "top", opts.get("cam_share"), float(info.get("game_x", 0.5)))
+    look = opts.get("stream_look") or _stream_look(info)
+    sp = streamer.plan(info.get("cam"), info.get("face"), int(info["w"]), int(info["h"]), look)
     if not info.get("cam"):
         note = info.get("note") or "Вебки немає."
         note += " Показую лише гру. Щоб додати вебку, натисни «Позначити вебку»."
@@ -1227,33 +1235,40 @@ def _stream_layout(info: Dict[str, Any], opts: Dict[str, Any]) -> "vertical_rend
 
 
 def _stream_key(info: Dict[str, Any]) -> str:
-    return hashlib.sha1(json.dumps([info.get("cam"), info.get("face"), info.get("game_x")]).encode()).hexdigest()[:6]
+    return hashlib.sha1(json.dumps([info.get("cam"), info.get("face"), _stream_look(info)], sort_keys=True).encode()).hexdigest()[:6]
 
 
 class StreamCamRequest(BaseModel):
     cam: Optional[List[float]] = None
-    game_x: Optional[float] = None
-    keep_cam: bool = False  # only move the game area
+    keep_cam: bool = False  # only change the look
+    look: Optional[Dict[str, Any]] = None  # partial: merged over the video's look
 
 
 @app.get("/api/projects/{project_id}/stream")
 def get_stream_info(project_id: str):
     """Where the webcam is in this stream recording (found automatically the first time)."""
     proj = _get_project(project_id)
-    return _stream_info(project_id, proj)
+    return _stream_public(_stream_info(project_id, proj))
 
 
 @app.post("/api/projects/{project_id}/stream/redetect")
 def redetect_stream(project_id: str):
     proj = _get_project(project_id)
-    return _stream_info(project_id, proj, redetect=True)
+    return _stream_public(_stream_info(project_id, proj, redetect=True))
+
+
+def _stream_public(info: Dict[str, Any]) -> Dict[str, Any]:
+    out = {k: v for k, v in info.items() if k != "game_x"}
+    out["look"] = _stream_look(info)
+    return out
 
 
 @app.put("/api/projects/{project_id}/stream")
 def set_stream_info(project_id: str, payload: StreamCamRequest):
-    """The user moved the webcam frame (or switched it off with cam=null) or the game area."""
+    """The user moved the webcam frame (or switched it off with cam=null) or changed the look (sizes, zoom, styling)."""
     proj = _get_project(project_id)
     info = dict(_stream_info(project_id, proj))
+    info["look"] = _stream_look(info)
     if not payload.keep_cam:
         cam = streamer.clean_cam(payload.cam)
         info["cam"] = cam
@@ -1263,8 +1278,8 @@ def set_stream_info(project_id: str, payload: StreamCamRequest):
             fx, fy = info["face"]
             if not (cam[0] <= fx <= cam[0] + cam[2] and cam[1] <= fy <= cam[1] + cam[3]):
                 info["face"] = None  # the face we found is not in the new frame: centre on the frame
-    if payload.game_x is not None:
-        info["game_x"] = round(max(0.0, min(1.0, float(payload.game_x))), 4)
+    info["look"] = streamer.clean_look(payload.look or {}, _stream_look(info))
+    info.pop("game_x", None)
     _stream_path(project_id).write_text(json.dumps(info), encoding="utf-8")
     return info
 
@@ -1279,16 +1294,12 @@ def get_caption_styles():
 
 
 @app.get("/api/projects/{project_id}/clips/{clip_index}/vertical-plan")
-def get_vertical_plan(project_id: str, clip_index: int, frame: Optional[str] = None,
-                      stream_layout: Optional[str] = None, cam_share: Optional[float] = None):
+def get_vertical_plan(project_id: str, clip_index: int, frame: Optional[str] = None):
     """What the vertical clip will look like: crop plan + caption words (for the live preview)."""
     proj, clip = _get_project_and_clip(project_id, clip_index)
     opts = vertical_render.normalize_opts(clip.get("vertical_opts"))
     if frame:
         opts["frame"] = frame if frame in vertical_render.FRAME_MODES else "auto"
-    if stream_layout or cam_share is not None:  # the browser's newest choice, before its save arrives
-        opts = vertical_render.normalize_opts({**opts, "stream_layout": stream_layout or opts["stream_layout"],
-                                               "cam_share": cam_share if cam_share is not None else opts["cam_share"]})
     if opts["frame"] == "stream":
         info = _stream_info(project_id, proj)
         layout = _stream_layout(info, opts)

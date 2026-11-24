@@ -6,6 +6,8 @@
  * clips you haven't touched yet. Rendering itself happens on the server (ffmpeg + .ass).
  * «Стрім: вебка + гра» (frame "stream"): the server finds the webcam rectangle once per video (streamer.py);
  * the «Рамки на кадрі» view shows it over the 16:9 frame, where it and the game area can be dragged.
+ * The «look» (layout, sizes, zooms, window, styling) is kept per video on the server; one clip may have its own
+ * (opts.stream_look). streamPlan() is the twin of streamer.plan(), so sliders and drags on the phone are live.
  * Wired by editor.js through Vertical.attach(ctx).
  */
 const Vertical = (() => {
@@ -22,8 +24,7 @@ const Vertical = (() => {
   ];
   let ctx = null;
   const st = { opts: null, plan: null, planKey: "", words: [], loading: false, raf: 0, saveTimer: null, pending: null, selWord: null, zipJob: null, capKey: "",
-    stream: null, streamPid: "", view: "phone", drag: null };
-  const DEFAULT_SHARE = 0.34;
+    stream: null, streamPid: "", view: "phone", drag: null, live: null, gesture: null, suppressClick: false, wheelTimer: null, spMemo: null };
 
   // What each style tile shows: one short phrase drawn in that style
   const TILE = { none: "<i>без тексту</i>", hl: "ЦЕ <i>ВОНО</i>", kar: "<i>ЦЕ</i> ВОНО", one: "ВОНО", box: "<i>Це воно</i>", gold: "ЦЕ <i>ВОНО</i>", min: "це воно" };
@@ -32,7 +33,7 @@ const Vertical = (() => {
   const TEXTS = [["FFFFFF", "Біле"], ["FFE14D", "Жовте"], ["FFF8EC", "Кремове"]];
   const DEFAULT_ACCENT = { hl: "FFE14D", kar: "7CFF4F", one: "FFCF33", gold: "E6C068", box: "FFE14D", min: "FFE14D" };
   const TEMPLATE_FIELDS = ["style", "frame", "pos", "hook", "size", "color", "text", "hook_style", "hook_size", "hook_full",
-    "round", "stroke", "hook_round", "hook_stroke", "hook_pos", "stream_layout", "cam_share"];
+    "round", "stroke", "hook_round", "hook_stroke", "hook_pos"];
   const LIGHT = ["FFFFFF", "FFF8EC"];
   // Same rule as the renderer: a white edge on white letters would melt them, so they keep the black one.
   const letterEdge = (stroke, text) => (stroke && !(stroke === "FFFFFF" && LIGHT.includes(text)) ? `#${stroke}` : "#000");
@@ -63,7 +64,7 @@ const Vertical = (() => {
     const own = clip.vertical_opts || {};
     const base = { style: "hl", frame: "auto", pos: null, hook: false, edits: {}, size: 1, color: null, text: null,
       hook_text: null, hook_style: "white", hook_size: 1, hook_full: false,
-      round: false, stroke: null, hook_round: false, hook_stroke: null, hook_pos: null, stream_layout: "top", cam_share: null };
+      round: false, stroke: null, hook_round: false, hook_stroke: null, hook_pos: null, stream_look: null };
     const o = Object.keys(own).length ? { ...base, ...own, edits: { ...(own.edits || {}) } } : { ...base, ...readTemplate(), edits: {} };
     if (!Object.keys(own).length && streamVideos().includes(ctx.pid())) o.frame = "stream";
     if (o.frame === "track" || o.frame === "split") o.frame = "auto"; // these now live inside «Авто»
@@ -79,7 +80,8 @@ const Vertical = (() => {
     document.querySelectorAll("#vxFrame button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === frame)));
     renderStream();
     const split = st.plan && st.plan.layout.kind === "split";
-    const streamPos = st.plan && st.plan.layout.kind === "stream" ? st.plan.layout.stream.pos : null;
+    const ssp = curSp();
+    const streamPos = ssp ? ssp.pos : null;
     $("vxPos").value = o.pos ?? (split ? 50 : streamPos ?? (styleOf(o.style).pos || 66));
     $("vxSize").value = Math.round((o.size || 1) * 100);
     $("vxSizeV").textContent = `${Math.round((o.size || 1) * 100)}%`;
@@ -93,7 +95,7 @@ const Vertical = (() => {
     document.querySelectorAll("#vxHookStyle button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === (o.hook_style || "white"))));
     document.querySelectorAll("#vxHookDur button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.v === "all") === !!o.hook_full)));
     $("vxHookSize").value = Math.round((o.hook_size || 1) * 100);
-    const streamHook = st.plan && st.plan.layout.kind === "stream" ? st.plan.layout.stream.hook_pos : null;
+    const streamHook = ssp ? ssp.hook_pos : null;
     const hookPos = o.hook_pos ?? streamHook ?? 9.9;
     $("vxHookPos").value = hookPos;
     const pressed = (id, v) => document.querySelectorAll(`#${id} button`).forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
@@ -212,7 +214,7 @@ const Vertical = (() => {
   function setOpt(k, v) {
     st.opts[k] = v;
     if (k === "frame") markStreamVideo(v === "stream");
-    if (["frame", "stream_layout", "cam_share"].includes(k)) {
+    if (k === "frame") {
       if (k === "frame" && v !== "stream") st.view = "phone";
       loadPlan(true);
     }
@@ -243,14 +245,13 @@ const Vertical = (() => {
     if (!c) return;
     const o = st.opts;
     const stream = o.frame === "stream";
-    const key = `${c.clip_index}:${c.start_sec}:${c.end_sec}:${o.frame}` + (stream ? `:${o.stream_layout}:${o.cam_share}` : "");
+    const key = `${c.clip_index}:${c.start_sec}:${c.end_sec}:${o.frame}`;
     if (!force && key === st.planKey && st.plan) return;
     st.planKey = key;
     $("vxBusy").hidden = false;
     $("vxBusy").textContent = stream && !st.stream ? "Шукаю вебку на стрімі… (до 10 с)" : "Шукаю обличчя…";
     try {
-      let url = `/api/projects/${ctx.pid()}/clips/${c.clip_index}/vertical-plan?frame=${o.frame}`;
-      if (stream) url += `&stream_layout=${o.stream_layout || "top"}` + (o.cam_share != null ? `&cam_share=${o.cam_share}` : "");
+      const url = `/api/projects/${ctx.pid()}/clips/${c.clip_index}/vertical-plan?frame=${o.frame}`;
       const plan = await ctx.api(url);
       if (st.planKey !== key) return;
       if (stream && (!st.stream || st.streamPid !== ctx.pid())) {
@@ -305,8 +306,8 @@ const Vertical = (() => {
       g.filter = "none";
       const h = (W / vw) * vh;
       g.drawImage(v, 0, (H - h) / 2, W, h);
-    } else if (lay.kind === "stream" && lay.stream && lay.stream.parts) {
-      drawStream(g, v, lay.stream, W, H);
+    } else if (lay.kind === "stream" && curSp()) {
+      drawStream(g, v, curSp(), W, H);
     } else if (lay.kind === "split" && lay.split.length === 2) {
       lay.split.forEach(([cx, cy, hf], k) => {
         let ch = vh * hf, cw = Math.min(vw, ch * (W / (H / 2)));
@@ -379,9 +380,116 @@ const Vertical = (() => {
   }
 
   // ─── «Стрім: вебка + гра» ──────────────────────────────────────────────────
-  /** Same parts as the renderer (streamer.plan): src in fractions of the frame, dst in px of 1080×1920. */
+  const OW = 1080, OH = 1920;
+  const LOOK_DEFAULT = { layout: "top", share: 0.34, cam_zoom: 1, game_zoom: 1, cam_fx: null, cam_fy: null, game_x: 0.5, game_y: 0.5,
+    pip_x: 0.04, pip_y: 0.035, pip_w: 0.48, round: false, frame: "white", divider: false, nick: "" };
+  const SIZE_KEYS = ["share", "cam_zoom", "game_zoom", "cam_fx", "cam_fy", "game_x", "game_y", "pip_x", "pip_y", "pip_w"];
+  const FRAME_COLORS = { none: null, white: "FFFFFF", cam: "9146FF", gold: "E6C068" };
+  const PIP_BORDER = 6, PIP_RADIUS = 28, NICK_TOP = [36, 48, 7];
+  const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const even = (v) => Math.max(2, Math.floor(Math.round(v) / 2) * 2);
+  const r4 = (v) => Math.round(v * 10000) / 10000;
+
+  /** Same ranges as streamer.clean_look. */
+  function cleanLook(raw) {
+    const o = { ...LOOK_DEFAULT, ...(raw || {}) };
+    const num = (k, lo, hi, nullable) => {
+      if (nullable && (o[k] === null || o[k] === undefined)) { o[k] = null; return; }
+      const v = Number(o[k]);
+      o[k] = Number.isFinite(v) ? clampN(v, lo, hi) : LOOK_DEFAULT[k];
+    };
+    if (!["top", "full", "pip"].includes(o.layout)) o.layout = "top";
+    num("share", 0.22, 0.6); num("cam_zoom", 1, 3); num("game_zoom", 1, 3);
+    num("cam_fx", 0, 1, true); num("cam_fy", 0, 1, true); num("game_x", 0, 1); num("game_y", 0, 1);
+    num("pip_w", 0.25, 0.8); num("pip_x", 0, 1); num("pip_y", 0, 1);
+    if (!(o.frame in FRAME_COLORS)) o.frame = "white";
+    o.round = !!o.round; o.divider = !!o.divider;
+    o.nick = String(o.nick || "").replace(/[{}\\\n\r]/g, "").trim().slice(0, 30);
+    return o;
+  }
+
+  function fit(aspect, box, focus, zoom = 1, bias = 0.45) {
+    const [bx, by, bw, bh] = box;
+    let w, h;
+    if (bw / bh > aspect) { w = bh * aspect; h = bh; } else { w = bw; h = bw / aspect; }
+    w /= zoom; h /= zoom;
+    return [clampN(focus[0] - w / 2, bx, bx + bw - w), clampN(focus[1] - h * bias, by, by + bh - h), w, h];
+  }
+
+  /** Twin of streamer.plan(): the same parts for the live preview (the render uses the Python one). */
+  function streamPlan(cam, face, W, H, look) {
+    const lk = cleanLook(look);
+    const layout = cam ? lk.layout : "game";
+    const gf = [lk.game_x * W, lk.game_y * H];
+    const frame = [0, 0, W, H];
+    let cb = null, f = null, m = 0;
+    if (cam) {
+      cb = [cam[0] * W, cam[1] * H, cam[2] * W, cam[3] * H];
+      m = 0.004 * W;
+      if (cb[2] > 8 * m && cb[3] > 8 * m) cb = [cb[0] + m, cb[1] + m, cb[2] - 2 * m, cb[3] - 2 * m];
+      if (lk.cam_fx !== null && lk.cam_fy !== null) f = [cb[0] + lk.cam_fx * cb[2], cb[1] + lk.cam_fy * cb[3]];
+      else if (face) f = [face[0] * W, face[1] * H];
+      else f = [cb[0] + cb[2] / 2, cb[1] + cb[3] / 2];
+      f = [clampN(f[0], cb[0], cb[0] + cb[2]), clampN(f[1], cb[1], cb[1] + cb[3])];
+    }
+    const color = FRAME_COLORS[lk.frame];
+    const frac = (b) => [b[0] / W, b[1] / H, b[2] / W, b[3] / H];
+    const part = (role, src, dst, border = 0, radius = 0) => ({ role, src: frac(src), dst: dst.map((v) => Math.trunc(v)), border, radius, color: border ? color : null });
+    const parts = [];
+    let bg = false, pos = null, hookPos = null, divider = null, at = null;
+    if (layout === "game") {
+      parts.push(part("game", fit(OW / OH, frame, gf, lk.game_zoom, 0.5), [0, 0, OW, OH]));
+      at = NICK_TOP;
+    } else if (layout === "top" || layout === "full") {
+      const ch = even(OH * lk.share);
+      parts.push(part("cam", fit(OW / ch, cb, f, lk.cam_zoom), [0, 0, OW, ch]));
+      if (layout === "top") {
+        const gh = OH - ch;
+        parts.push(part("game", fit(OW / gh, frame, gf, lk.game_zoom, 0.5), [0, ch, OW, gh]));
+        pos = Math.round(1000 * ch / OH) / 10;
+      } else {
+        const gh = even(OW * H / W);
+        bg = true;
+        parts.push(part("game", fit(W / H, frame, gf, lk.game_zoom, 0.5), [0, ch, OW, gh]));
+        pos = Math.round(10 * Math.min(85, 100 * (ch + gh + 150) / OH)) / 10;
+      }
+      if (lk.divider) divider = [0, ch - 3, OW, 6];
+      at = NICK_TOP;
+    } else {
+      const b = color ? PIP_BORDER : 0;
+      const pw = even(OW * lk.pip_w), ph = even(pw * cb[3] / cb[2]);
+      const ow = pw + 2 * b, oh = ph + 2 * b;
+      const px = Math.trunc(clampN(lk.pip_x * OW, 0, OW - ow)), py = Math.trunc(clampN(lk.pip_y * OH, 0, OH - oh));
+      parts.push(part("game", fit(OW / OH, frame, gf, lk.game_zoom, 0.5), [0, 0, OW, OH]));
+      parts.push(part("cam", fit(cb[2] / cb[3], cb, f, lk.cam_zoom), [px, py, ow, oh], b, lk.round ? PIP_RADIUS : 0));
+      if (py < OH * 0.3) hookPos = Math.round(10 * Math.min(80, 100 * (py + oh + 40) / OH)) / 10;
+      at = py + oh + 90 < OH ? [px + 8, py + oh + 14, 7] : [px + 8, py - 14, 1];
+    }
+    let blur = null;
+    if (cam) {
+      const mm = m + 4, bx = Math.max(0, cb[0] - mm), by = Math.max(0, cb[1] - mm);
+      blur = frac([bx, by, Math.min(W, cb[0] + cb[2] + mm) - bx, Math.min(H, cb[1] + cb[3] + mm) - by]);
+    }
+    const nick = lk.nick && at ? { text: lk.nick, x: at[0], y: at[1], an: at[2] } : null;
+    return { layout, bg, parts, blur, pos, hook_pos: hookPos, divider, divider_color: color || "FFFFFF", nick, look: lk };
+  }
+
+  const streamOn = () => st.opts && st.opts.frame === "stream" && st.plan && st.plan.layout.kind === "stream" && st.stream;
+  /** The look in effect: being dragged → this clip's own → the video's. */
+  const look = () => cleanLook(st.live || (st.opts && st.opts.stream_look) || (st.stream && st.stream.look));
+  /** The stream plan for the preview (memoised: draw() asks every frame). */
+  function curSp() {
+    if (!streamOn()) return null;
+    const src = st.plan.src || { w: st.stream.w, h: st.stream.h };
+    const lk = look();
+    const key = JSON.stringify([st.stream.cam, st.stream.face, src.w, src.h, lk]);
+    if (!st.spMemo || st.spMemo.key !== key) st.spMemo = { key, sp: streamPlan(st.stream.cam, st.stream.face, src.w, src.h, lk) };
+    return st.spMemo.sp;
+  }
+
+  /** Same parts as the renderer: src in fractions of the frame, dst in px of 1080×1920. */
   function drawStream(g, v, sp, W, H) {
-    const vw = v.videoWidth, vh = v.videoHeight, k = W / 1080;
+    const vw = v.videoWidth, vh = v.videoHeight, k = W / OW;
     g.fillStyle = "#000";
     g.fillRect(0, 0, W, H);
     if (sp.bg) {
@@ -394,8 +502,11 @@ const Vertical = (() => {
       const [sx, sy, sw, sh] = [p.src[0] * vw, p.src[1] * vh, p.src[2] * vw, p.src[3] * vh];
       const b = (p.border || 0) * k;
       const [dx, dy, dw, dh] = [p.dst[0] * k, p.dst[1] * k, p.dst[2] * k, p.dst[3] * k];
-      if (b) { g.fillStyle = "#fff"; g.fillRect(dx, dy, dw, dh); }
+      g.save();
+      if (p.radius) { g.beginPath(); g.roundRect(dx, dy, dw, dh, p.radius * k); g.clip(); }
+      if (b) { g.fillStyle = `#${p.color || "FFFFFF"}`; g.fillRect(dx, dy, dw, dh); }
       g.drawImage(v, sx, sy, sw, sh, dx + b, dy + b, dw - 2 * b, dh - 2 * b);
+      g.restore();
       if (p.role === "game" && sp.blur) {
         // the webcam inside the game picture is blurred, as in the render
         const bx0 = Math.max(p.src[0], sp.blur[0]), by0 = Math.max(p.src[1], sp.blur[1]);
@@ -413,6 +524,20 @@ const Vertical = (() => {
         }
       }
     }
+    if (sp.divider) {
+      g.fillStyle = `#${sp.divider_color}`;
+      g.fillRect(sp.divider[0] * k, sp.divider[1] * k, sp.divider[2] * k, sp.divider[3] * k);
+    }
+    if (sp.nick) {
+      g.font = `800 ${46 * k}px Rubik, system-ui, sans-serif`;
+      g.textBaseline = sp.nick.an === 7 ? "top" : "alphabetic";
+      g.lineJoin = "round";
+      g.lineWidth = 6 * k;
+      g.strokeStyle = "#000";
+      g.fillStyle = "#fff";
+      g.strokeText(sp.nick.text, sp.nick.x * k, sp.nick.y * k);
+      g.fillText(sp.nick.text, sp.nick.x * k, sp.nick.y * k);
+    }
   }
 
   function renderStream() {
@@ -420,8 +545,6 @@ const Vertical = (() => {
     $("vxStream").hidden = !on;
     $("vxView").hidden = !on;
     if (!on) st.view = "phone";
-    document.querySelectorAll("#vxLay button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === (st.opts.stream_layout || "top"))));
-    $("vxCamShare").value = Math.round((st.opts.cam_share ?? DEFAULT_SHARE) * 100);
     document.querySelectorAll("#vxView button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === st.view)));
     const fed = st.view === "frame";
     $("vxFed").hidden = !fed;
@@ -435,7 +558,85 @@ const Vertical = (() => {
       : `<b class="no">Вебку не знайдено.</b> ${escapeText(s.note || "")} Натисни «Рамка вебки» і познач її на кадрі.`;
     $("vxCamSt").innerHTML = html;
     $("vxCamOff").disabled = !(s && s.cam);
+    renderLook();
     placeBoxes();
+  }
+
+  /** Sliders and styling controls show the look in effect (the clip's own or the video's). */
+  function renderLook() {
+    const lk = look(), hasCam = !!(st.stream && st.stream.cam), pip = lk.layout === "pip";
+    $("vxLay").hidden = !hasCam;
+    document.querySelectorAll("#vxLay button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === lk.layout)));
+    ["vxCamSizeRow", "vxCamZoomRow", "vxRoundRow"].forEach((id) => { $(id).hidden = !hasCam; });
+    $("vxRoundRow").hidden = !hasCam || !pip;
+    $("vxDivRow").hidden = !hasCam || pip;
+    $("vxFrameRow").hidden = !hasCam || (!pip && !lk.divider);
+    $("vxFrameLbl").textContent = pip ? "Рамка вікна" : "Колір лінії";
+    $("vxPipRow").hidden = !hasCam || !pip;
+    const size = $("vxCamSize");
+    if (pip) { size.min = 25; size.max = 80; } else { size.min = 22; size.max = 60; }
+    $("vxCamSizeLbl").textContent = pip ? "Розмір вікна з вебкою" : "Розмір вебки";
+    const set = (el, v) => { if (document.activeElement !== el || !st.live) el.value = v; };
+    set(size, Math.round((pip ? lk.pip_w : lk.share) * 100));
+    set($("vxCamZoom"), Math.round(lk.cam_zoom * 100));
+    set($("vxGameZoom"), Math.round(lk.game_zoom * 100));
+    const sp = curSp(), cam = sp && sp.parts.find((p) => p.role === "cam");
+    const corner = cam ? (cam.dst[1] + cam.dst[3] / 2 < OH / 2 ? "t" : "b") + (cam.dst[0] + cam.dst[2] / 2 < OW / 2 ? "l" : "r") : "";
+    document.querySelectorAll("#vxPipCorner button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === corner)));
+    document.querySelectorAll("#vxCamRound button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.v === "1") === lk.round)));
+    document.querySelectorAll("#vxCamFrame button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === lk.frame)));
+    $("vxCamDiv").checked = lk.divider;
+    if (document.activeElement !== $("vxNick")) $("vxNick").value = lk.nick;
+    $("vxLookOwn").checked = !!st.opts.stream_look;
+  }
+
+  /** While dragging a slider or a picture: preview only. */
+  function liveLook(patch) {
+    st.live = { ...look(), ...patch };
+    afterLook();
+  }
+  /** Keeps the change: in this clip (own look) or in the video (every clip without its own). */
+  async function commitLook(patch) {
+    const lk = cleanLook({ ...look(), ...patch });
+    SIZE_KEYS.forEach((k) => { if (typeof lk[k] === "number") lk[k] = r4(lk[k]); });
+    st.live = null;
+    if (st.opts.stream_look) {
+      st.opts.stream_look = lk;
+      save();
+      afterLook();
+      return;
+    }
+    if (st.stream) st.stream = { ...st.stream, look: lk }; // show it right away; the server answer replaces it
+    afterLook();
+    try {
+      st.stream = await ctx.api(`/api/projects/${ctx.pid()}/stream`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keep_cam: true, look: lk }),
+      });
+      st.streamPid = ctx.pid();
+    } catch (e) {
+      ctx.toast("Не вдалося зберегти вигляд стріму: " + e.message, true);
+    }
+    afterLook();
+  }
+  function afterLook() {
+    renderLook();
+    const sp = curSp();
+    if (sp && st.opts.pos == null && sp.pos != null) { $("vxPos").value = sp.pos; $("vxCap").style.top = `${sp.pos}%`; }
+    if (sp && st.opts.hook_pos == null) { const hp = sp.hook_pos ?? 9.9; $("vxHookPos").value = hp; $("vxHook").style.top = `${hp}%`; }
+    placeBoxes();
+  }
+
+  function setOwnLook(on) {
+    st.opts.stream_look = on ? look() : null;
+    save();
+    renderStream();
+  }
+
+  function pipCorner(v) {
+    const sp = curSp(), cam = sp && sp.parts.find((p) => p.role === "cam");
+    if (!cam) return;
+    const [, , ow, oh] = cam.dst;
+    commitLook({ pip_x: v[1] === "l" ? 0.04 : (OW - 0.04 * OW - ow) / OW, pip_y: v[0] === "t" ? 0.035 : (OH - 0.035 * OH - oh) / OH });
   }
 
   /** Puts the webcam frame and the game area over the 16:9 picture (percentages of the frame). */
@@ -446,15 +647,11 @@ const Vertical = (() => {
     const cam = st.drag && st.drag.cam ? st.drag.cam : s && s.cam;
     cb.hidden = !cam;
     if (cam) { put(cb, cam); cb.classList.toggle("low", cam[1] < 0.08); }
-    const sp = st.plan && st.plan.layout.kind === "stream" ? st.plan.layout.stream : null;
+    const sp = curSp();
     const game = sp && sp.parts.find((p) => p.role === "game");
-    const whole = !game || game.src[2] > 0.99;
+    const whole = !game || (game.src[2] > 0.99 && game.src[3] > 0.99);
     gb.hidden = whole;
-    if (!whole) {
-      const r = [...game.src];
-      if (st.drag && st.drag.gx != null) r[0] = Math.max(0, Math.min(1 - r[2], st.drag.gx - r[2] / 2));
-      put(gb, r);
-    }
+    if (!whole) put(gb, game.src);
   }
 
   function drawSource() {
@@ -496,7 +693,7 @@ const Vertical = (() => {
     renderStream();
   }
 
-  /** Dragging the webcam frame (move or a corner) and the game area (left-right). */
+  /** «Рамки на кадрі»: dragging the webcam frame (move or a corner) and the game area. */
   function startDrag(e) {
     const fed = $("vxFed");
     const r = fed.getBoundingClientRect();
@@ -507,14 +704,14 @@ const Vertical = (() => {
     e.preventDefault();
     const x0 = (e.clientX - r.left) / r.width, y0 = (e.clientY - r.top) / r.height;
     const cam0 = st.stream && st.stream.cam ? [...st.stream.cam] : null;
-    const sp = st.plan && st.plan.layout.stream;
+    const sp = curSp();
     const game = sp && sp.parts.find((p) => p.role === "game");
-    const gx0 = game ? game.src[0] + game.src[2] / 2 : 0.5;
+    const g0 = game ? [game.src[0] + game.src[2] / 2, game.src[1] + game.src[3] / 2] : [0.5, 0.5];
     const mode = onCam ? (handle ? handle.dataset.h : "move") : "game";
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
     const move = (ev) => {
       const dx = (ev.clientX - r.left) / r.width - x0, dy = (ev.clientY - r.top) / r.height - y0;
-      if (mode === "game") { st.drag = { gx: clamp(gx0 + dx, 0, 1) }; placeBoxes(); return; }
+      if (mode === "game") { liveLook({ game_x: clamp(g0[0] + dx, 0, 1), game_y: clamp(g0[1] + dy, 0, 1) }); return; }
       let [x, y, w, h] = cam0;
       if (mode === "move") { x = clamp(x + dx, 0, 1 - w); y = clamp(y + dy, 0, 1 - h); }
       else {
@@ -531,13 +728,108 @@ const Vertical = (() => {
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      if (mode === "game") { if (st.live) commitLook({ game_x: st.live.game_x, game_y: st.live.game_y }); return; }
       const d = st.drag;
-      if (!d) return;
-      if (d.cam) saveStream({ cam: d.cam.map((v) => Math.round(v * 10000) / 10000), game_x: (st.stream && st.stream.game_x) ?? 0.5 });
-      else if (d.gx != null) saveStream({ keep_cam: true, game_x: Math.round(d.gx * 10000) / 10000 });
+      if (d && d.cam) saveStream({ cam: d.cam.map(r4) });
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+  }
+
+  // ─── Direct manipulation on the phone ──────────────────────────────────────
+  /** What is under the pointer on the phone (1080×1920 coordinates). */
+  function phoneHit(x, y) {
+    const sp = curSp();
+    if (!sp || st.view !== "phone") return null;
+    const cam = sp.parts.find((p) => p.role === "cam"), game = sp.parts.find((p) => p.role === "game");
+    const inside = (p) => p && x >= p.dst[0] && x <= p.dst[0] + p.dst[2] && y >= p.dst[1] && y <= p.dst[1] + p.dst[3];
+    if (cam && sp.layout !== "pip" && Math.abs(y - cam.dst[3]) < 45) return { mode: "seam", part: cam };
+    if (cam && sp.layout === "pip") {
+      const [px, py, pw, ph] = cam.dst;
+      const right = px + pw / 2 < OW / 2, down = py + ph / 2 < OH / 2;  // the handle is the inner corner
+      const hx = right ? px + pw : px, hy = down ? py + ph : py;
+      if (Math.abs(x - hx) < 60 && Math.abs(y - hy) < 60) return { mode: "pipsize", part: cam, right, down };
+      if (inside(cam)) return { mode: "pipmove", part: cam };
+    }
+    if (inside(cam)) return { mode: "cam", part: cam };
+    if (inside(game)) return { mode: "game", part: game };
+    return null;
+  }
+  const CURSOR = { seam: "ns-resize", pipsize: "nwse-resize", pipmove: "move", cam: "grab", game: "grab" };
+  function phoneXY(e) {
+    const r = $("vxCanvas").getBoundingClientRect();
+    return [((e.clientX - r.left) / r.width) * OW, ((e.clientY - r.top) / r.height) * OH];
+  }
+
+  function phoneDown(e) {
+    if (e.button !== 0 || !streamOn()) return;
+    const [x0, y0] = phoneXY(e);
+    const hit = phoneHit(x0, y0);
+    if (!hit) return;
+    const ph = $("vxPhone");
+    try { ph.setPointerCapture(e.pointerId); } catch (_) {}
+    const p = hit.part, lk = look(), cam = st.stream.cam;
+    const [sx, sy, sw, sh] = p.src;
+    const start = {
+      fx: cam ? (sx + sw / 2 - cam[0]) / cam[2] : 0.5, fy: cam ? (sy + sh * 0.45 - cam[1]) / cam[3] : 0.5,
+      gx: sx + sw / 2, gy: sy + sh / 2, dst: [...p.dst],
+    };
+    st.gesture = { moved: false };
+    const move = (ev) => {
+      const [x, y] = phoneXY(ev);
+      const dx = x - x0, dy = y - y0;
+      if (!st.gesture.moved && Math.hypot(dx, dy) < 12) return;
+      st.gesture.moved = true;
+      ph.style.cursor = hit.mode === "cam" || hit.mode === "game" ? "grabbing" : CURSOR[hit.mode];
+      const [px, py, pw, phh] = start.dst;
+      if (hit.mode === "seam") liveLook({ share: clampN(y / OH, 0.22, 0.6) });
+      else if (hit.mode === "cam") liveLook({ cam_fx: clampN(start.fx - (dx / pw) * sw / cam[2], 0, 1), cam_fy: clampN(start.fy - (dy / phh) * sh / cam[3], 0, 1) });
+      else if (hit.mode === "game") liveLook({ game_x: clampN(start.gx - (dx / pw) * sw, 0, 1), game_y: clampN(start.gy - (dy / phh) * sh, 0, 1) });
+      else if (hit.mode === "pipmove") liveLook({ pip_x: clampN(px + dx, 0, OW - pw) / OW, pip_y: clampN(py + dy, 0, OH - phh) / OH });
+      else if (hit.mode === "pipsize") {
+        const b = (p.border || 0) * 2;
+        const ow = clampN(pw + (hit.right ? dx : -dx), OW * 0.25 + b, OW * 0.8 + b);
+        const oh = b + (ow - b) * (phh - b) / (pw - b);
+        liveLook({ pip_w: (ow - b) / OW, pip_x: (hit.right ? px : px + pw - ow) / OW, pip_y: (hit.down ? py : py + phh - oh) / OH });
+      }
+    };
+    const up = () => {
+      ph.removeEventListener("pointermove", move);
+      ph.removeEventListener("pointerup", up);
+      ph.removeEventListener("pointercancel", up);
+      ph.style.cursor = "";
+      const moved = st.gesture && st.gesture.moved;
+      st.gesture = null;
+      if (moved) {
+        st.suppressClick = true;
+        const lk2 = st.live;
+        st.live = null;
+        if (lk2) commitLook(lk2);
+      }
+    };
+    ph.addEventListener("pointermove", move);
+    ph.addEventListener("pointerup", up);
+    ph.addEventListener("pointercancel", up);
+  }
+
+  function phoneHover(e) {
+    if (st.gesture) return;
+    const ph = $("vxPhone");
+    const hit = streamOn() && e.buttons === 0 ? phoneHit(...phoneXY(e)) : null;
+    ph.style.cursor = hit ? CURSOR[hit.mode] : "";
+  }
+
+  /** Mouse wheel over the webcam or the game: zoom (kept 0.5 s after the last notch). */
+  function phoneWheel(e) {
+    if (!streamOn()) return;
+    const hit = phoneHit(...phoneXY(e));
+    if (!hit) return;
+    e.preventDefault();
+    const key = hit.part.role === "cam" ? "cam_zoom" : "game_zoom";
+    const lk = look();
+    liveLook({ [key]: clampN(Math.round((lk[key] + (e.deltaY < 0 ? 0.1 : -0.1)) * 100) / 100, 1, 3) });
+    clearTimeout(st.wheelTimer);
+    st.wheelTimer = setTimeout(() => { const l = st.live; st.live = null; if (l) commitLook(l); }, 500);
   }
 
   function loop() {
@@ -619,6 +911,7 @@ const Vertical = (() => {
     st.words = [];
     st.selWord = null;
     if (st.streamPid !== ctx.pid()) { st.stream = null; st.streamPid = ""; }
+    st.live = null;
     $("vxWedit").hidden = true;
     renderControls();
     renderNote();
@@ -637,13 +930,35 @@ const Vertical = (() => {
     ctx = context;
     $("vxStyle").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setOpt("style", b.dataset.v); });
     $("vxFrame").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setOpt("frame", b.dataset.v); });
-    $("vxLay").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setOpt("stream_layout", b.dataset.v); });
-    $("vxCamShare").addEventListener("change", (e) => setOpt("cam_share", Number(e.target.value) / 100));
+    $("vxLay").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) commitLook({ layout: b.dataset.v }); });
+    const sizeKey = () => (look().layout === "pip" ? "pip_w" : "share");
+    $("vxCamSize").addEventListener("input", (e) => liveLook({ [sizeKey()]: Number(e.target.value) / 100 }));
+    $("vxCamSize").addEventListener("change", (e) => commitLook({ [sizeKey()]: Number(e.target.value) / 100 }));
+    [["vxCamZoom", "cam_zoom"], ["vxGameZoom", "game_zoom"]].forEach(([id, k]) => {
+      $(id).addEventListener("input", (e) => liveLook({ [k]: Number(e.target.value) / 100 }));
+      $(id).addEventListener("change", (e) => commitLook({ [k]: Number(e.target.value) / 100 }));
+    });
+    $("vxPipCorner").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) pipCorner(b.dataset.v); });
+    $("vxCamRound").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) commitLook({ round: b.dataset.v === "1" }); });
+    $("vxCamFrame").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) commitLook({ frame: b.dataset.v }); });
+    $("vxCamDiv").addEventListener("change", (e) => commitLook({ divider: e.target.checked }));
+    $("vxNick").addEventListener("input", (e) => liveLook({ nick: e.target.value }));
+    $("vxNick").addEventListener("change", (e) => commitLook({ nick: e.target.value }));
+    $("vxNick").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); e.stopPropagation(); });
+    $("vxLookOwn").addEventListener("change", (e) => setOwnLook(e.target.checked));
+    $("vxLookReset").addEventListener("click", () => {
+      const d = {};
+      SIZE_KEYS.forEach((k) => { d[k] = LOOK_DEFAULT[k]; });
+      commitLook(d);
+    });
+    $("vxPhone").addEventListener("pointerdown", phoneDown);
+    $("vxPhone").addEventListener("pointermove", phoneHover);
+    $("vxPhone").addEventListener("wheel", phoneWheel, { passive: false });
     $("vxView").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setView(b.dataset.v); });
     $("vxCamFind").addEventListener("click", redetect);
-    $("vxCamOff").addEventListener("click", () => saveStream({ cam: null, game_x: (st.stream && st.stream.game_x) ?? 0.5 }));
+    $("vxCamOff").addEventListener("click", () => saveStream({ cam: null }));
     $("vxCamMark").addEventListener("click", () => {
-      if (st.stream && !st.stream.cam) saveStream({ cam: [0.02, 0.66, 0.26, 0.3], game_x: st.stream.game_x ?? 0.5 });
+      if (st.stream && !st.stream.cam) saveStream({ cam: [0.02, 0.66, 0.26, 0.3] });
       setView("frame");
     });
     $("vxFed").addEventListener("pointerdown", startDrag);
@@ -691,7 +1006,7 @@ const Vertical = (() => {
       ctx.toast("Готуємо архів… Великі архіви можуть зайняти хвилину.");
       ctx.download(`/api/projects/${ctx.pid()}/export-zip`);
     });
-    const toggle = () => ctx.togglePlay();
+    const toggle = () => { if (st.suppressClick) { st.suppressClick = false; return; } ctx.togglePlay(); };
     $("vxPhone").addEventListener("click", toggle);
     $("vxPhone").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); toggle(); } });
     $("vxPlay").addEventListener("click", toggle);
@@ -708,8 +1023,12 @@ const Vertical = (() => {
   /** Read-only snapshot for UI tests. */
   function state() {
     return { opts: st.opts, layout: st.plan && st.plan.layout.kind, words: st.words.length, cap: $("vxCap").textContent,
-      stream: st.plan && st.plan.layout.stream, cam: st.stream && st.stream.cam, view: st.view };
+      stream: curSp(), server: st.plan && st.plan.layout.stream, cam: st.stream && st.stream.cam, view: st.view,
+      look: st.opts && st.opts.frame === "stream" ? look() : null };
   }
 
-  return { attach, onClip, onShow, state };
+  /** The preview's plan for a look (tests compare it with streamer.plan). */
+  function twin(lk) { return st.stream ? streamPlan(st.stream.cam, st.stream.face, st.plan.src.w, st.plan.src.h, lk) : null; }
+
+  return { attach, onClip, onShow, state, twin };
 })();

@@ -897,7 +897,7 @@ DEFAULT_OPTS: Dict[str, Any] = {"style": DEFAULT_STYLE, "frame": "auto", "pos": 
                                 "size": 1.0, "color": None, "text": None,
                                 "hook_text": None, "hook_style": "white", "hook_size": 1.0, "hook_full": False,
                                 "round": False, "stroke": None, "hook_round": False, "hook_stroke": None, "hook_pos": None,
-                                "stream_layout": "top", "cam_share": None}
+                                "stream_look": None}
 # Colour presets offered in the editor (RGB hex). None = the style's own colour.
 ACCENT_COLORS = ("FFE14D", "7CFF4F", "FF4D4D", "4DC3FF", "FF5EC4", "E6C068", "FF9F1C")
 TEXT_COLORS = ("FFFFFF", "FFE14D", "FFF8EC")
@@ -919,12 +919,9 @@ def normalize_opts(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     except (TypeError, ValueError):
         o["pos"] = None
     o["hook"] = bool(raw.get("hook", False))
-    o["stream_layout"] = raw.get("stream_layout") if raw.get("stream_layout") in ("top", "full", "pip") else "top"
-    cs = raw.get("cam_share")
-    try:
-        o["cam_share"] = None if cs in (None, "") else round(max(0.22, min(0.5, float(cs))), 3)
-    except (TypeError, ValueError):
-        o["cam_share"] = None
+    if isinstance(raw.get("stream_look"), dict):  # «Стрім»: this clip's own look instead of the video's
+        import streamer
+        o["stream_look"] = streamer.clean_look(raw["stream_look"])
 
     def num(key: str, lo: float, hi: float) -> float:
         try:
