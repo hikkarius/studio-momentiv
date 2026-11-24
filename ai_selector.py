@@ -8,9 +8,10 @@ import logging
 import math
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from config_loader import CANDIDATE_MODELS, get_gemini_client
+from config_loader import CANDIDATE_MODELS, app_config, get_gemini_client
 from clip_refiner import rubric_score
 from constants import FILTER_INSTRUCTIONS, FilterMode, resolve_filter_mode
 from languages import language_name
@@ -397,6 +398,35 @@ def _call_gemini_single_window(
     raise GeminiUnavailableError(GEMINI_UNAVAILABLE_MESSAGE)
 
 
+# Long videos: transcript windows go to Gemini in parallel (gemini.parallel_windows at a time).
+# A per-minute limit hit on one window pauses that window and tries it again instead of losing it.
+_RATE_RETRY_WAITS: tuple[float, ...] = (30.0, 60.0)
+_RATE_RETRY_MAX_WAIT = 90.0
+
+
+def _parallel_windows() -> int:
+    try:
+        return max(1, int(app_config.gemini.parallel_windows or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _window_with_rate_retry(index: int, total: int, **kwargs) -> list[dict]:
+    """One window; on a per-minute limit waits (Google's retry delay if given) and tries again.
+    The per-day limit and other errors go up unchanged (the queue pauses on GeminiQuotaError)."""
+    for attempt in range(len(_RATE_RETRY_WAITS) + 1):
+        log.info(f"Analyzing transcript window {index + 1}/{total}...")
+        try:
+            return _call_gemini_single_window(**kwargs)
+        except GeminiQuotaError as e:
+            if e.daily or attempt >= len(_RATE_RETRY_WAITS):
+                raise
+            wait = min(_RATE_RETRY_MAX_WAIT, max(_RATE_RETRY_WAITS[attempt], (e.retry_after or 0) + 2))
+            log.warning(f"Window {index + 1}: Gemini per-minute limit, trying again in {wait:.0f} s")
+            time.sleep(wait)
+    raise AssertionError("unreachable")
+
+
 def analyze_and_find_clips(
     client=None,
     segments: list[dict] = None,
@@ -453,25 +483,33 @@ def analyze_and_find_clips(
         f"into {num_chunks} chronological windows (~{clips_per_chunk} clips per window)."
     )
 
+    windows = [segments[i * chunk_size: (i + 1) * chunk_size] for i in range(num_chunks)]
+    windows = [w for w in windows if w]
+    workers = max(1, min(_parallel_windows(), len(windows)))
+    log.info(f"Analyzing {len(windows)} windows, up to {workers} at a time")
+
+    def run(i: int, chunk_segs: list[dict]) -> list[dict]:
+        return _window_with_rate_retry(
+            i, len(windows),
+            client=client,
+            segments=chunk_segs,
+            count=clips_per_chunk,
+            min_len=min_len,
+            max_len=max_len,
+            filter_mode=filter_mode,
+            detected_lang=detected_lang,
+            target_len=target_len,
+        )
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="GeminiWindow") as pool:
+        futures = [pool.submit(run, i, w) for i, w in enumerate(windows)]
+
+    # Results are taken in window order, so the merge is the same as one-by-one analysis
     all_clips: list[dict] = []
     gemini_error: Optional[GeminiUnavailableError] = None
-    for i in range(num_chunks):
-        chunk_segs = segments[i * chunk_size: (i + 1) * chunk_size]
-        if not chunk_segs:
-            continue
+    for i, fut in enumerate(futures):
         try:
-            log.info(f"Analyzing transcript window {i + 1}/{num_chunks}...")
-            clips = _call_gemini_single_window(
-                client=client,
-                segments=chunk_segs,
-                count=clips_per_chunk,
-                min_len=min_len,
-                max_len=max_len,
-                filter_mode=filter_mode,
-                detected_lang=detected_lang,
-                target_len=target_len,
-            )
-            all_clips.extend(clips)
+            all_clips.extend(fut.result())
         except GeminiUnavailableError as e:
             gemini_error = e
             log.warning(f"Window {i + 1} analysis failed: Gemini unavailable")
