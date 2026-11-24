@@ -224,11 +224,12 @@ def test_settings_gemini_key_written_to_env(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "old")
     config_loader.ENV_PATH.write_text("OTHER=1\nGEMINI_API_KEY=old\n", encoding="utf-8")
     assert client.post("/api/settings", json={"gemini_api_key": "short"}).status_code == 400
-    r = client.post("/api/settings", json={"gemini_api_key": "AIzaSyTESTKEY1234567890abcd"})
+    fake_key = "AIza" + "SyTESTKEY1234567890abcd"  # built at run time (secret scanning)
+    r = client.post("/api/settings", json={"gemini_api_key": fake_key})
     assert r.status_code == 200
     assert r.json()["gemini_key"] == {"set": True, "hint": "…abcd"}
-    assert config_loader.ENV_PATH.read_text(encoding="utf-8") == "OTHER=1\nGEMINI_API_KEY=AIzaSyTESTKEY1234567890abcd\n"
-    assert os.environ["GEMINI_API_KEY"] == "AIzaSyTESTKEY1234567890abcd"
+    assert config_loader.ENV_PATH.read_text(encoding="utf-8") == f"OTHER=1\nGEMINI_API_KEY={fake_key}\n"
+    assert os.environ["GEMINI_API_KEY"] == fake_key
 
 
 def test_broken_user_settings_file_does_not_stop_studio():

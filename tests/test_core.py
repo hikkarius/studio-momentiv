@@ -97,9 +97,11 @@ class TestConfigLoading:
 
 class TestGeminiApiKey:
     def test_ensure_gemini_api_key_returns_key(self):
-        key = ensure_gemini_api_key()
-        assert key is not None
-        assert len(key) > 10
+        # The key from the (isolated) .env is found and put into the environment.
+        import config_loader
+        fake_key = "AIza" + "x" * 35
+        config_loader.ENV_PATH.write_text(f"GEMINI_API_KEY={fake_key}\n", encoding="utf-8")
+        assert ensure_gemini_api_key() == fake_key
 
     def test_ensure_gemini_api_key_env_override(self):
         import os

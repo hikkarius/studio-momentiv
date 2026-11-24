@@ -393,6 +393,17 @@ def test_delete_project_preserves_shared_source_path(tmp_path):
     assert not os.path.exists(mock_src)
 
 
+def test_media_refuses_a_video_outside_the_studio_folders(tmp_path):
+    # A real .mp4 that is not in web_uploads/web_output: only the folder guard can stop it.
+    outside = tmp_path / "someone_elses_video.mp4"
+    outside.write_bytes(b"private video bytes")
+    assert client.get("/api/media", params={"path": str(outside)}).status_code == 403
+    assert client.get("/api/media", params={"path": str(server.UPLOADS_DIR / ".." / ".." / outside.name)}).status_code == 403
+    inside = server.UPLOADS_DIR / "own_video.mp4"
+    inside.write_bytes(b"own video bytes")
+    assert client.get("/api/media", params={"path": str(inside)}).content == b"own video bytes"
+
+
 def test_media_streaming_path_traversal_guard():
     # Attempt directory traversal outside web_uploads and web_output
     traversal_path = "web_uploads/../../Windows/System32/drivers/etc/hosts"
@@ -867,6 +878,13 @@ def _make_review_project(tmp_path):
         {"start": 40.0, "end": 62.0, "title": "Другий", "score": 95, "caption": "о2", "hashtags": ["#b"]},
     ])
     return pid, src
+
+
+def test_db_refuses_an_unknown_clip_status(tmp_path):
+    pid, _ = _make_review_project(tmp_path)
+    with pytest.raises(ValueError):
+        db.update_clip_fields(pid, 1, review_status="maybe")
+    assert db.get_candidate_clips(pid)[0]["review_status"] == ""
 
 
 def test_clip_review_status_and_texts(tmp_path):

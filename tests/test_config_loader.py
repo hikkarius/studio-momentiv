@@ -20,24 +20,16 @@ def test_ensure_gemini_api_key_from_environ(monkeypatch):
 def test_ensure_gemini_api_key_from_env_file(tmp_path, monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     fake_env = tmp_path / ".env"
-    fake_env.write_text('GEMINI_API_KEY="AIzaTestKeyFromFile456"\n', encoding="utf-8")
-
-    # Point config_loader env_file check to fake_env
-    with patch("config_loader.Path") as mock_path_cls:
-        # Let Path(__file__).parent / ".env" return fake_env
-        mock_parent = MagicMock()
-        mock_parent.__truediv__.return_value = fake_env
-        mock_path_cls.return_value.parent = mock_parent
-
-        key = ensure_gemini_api_key()
-        assert key == "AIzaTestKeyFromFile456"
+    fake_key = "AIza" + "TestKeyFromFile456"
+    fake_env.write_text(f'GEMINI_API_KEY="{fake_key}"\n', encoding="utf-8")
+    monkeypatch.setattr(config_loader, "ENV_PATH", fake_env)
+    assert ensure_gemini_api_key() == fake_key
 
 
 def test_ensure_gemini_api_key_not_found(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    with patch.object(Path, "exists", return_value=False):
-        key = ensure_gemini_api_key()
-        assert key is None
+    monkeypatch.setattr(config_loader, "ENV_PATH", Path("/nonexistent/.env"))
+    assert ensure_gemini_api_key() is None
 
 
 def test_get_gemini_client():

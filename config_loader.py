@@ -13,6 +13,8 @@ import yaml
 log = logging.getLogger("shorts_core")
 
 _CFG_PATH = Path(__file__).parent / "config.yaml"
+# The Gemini key lives here (tests point it at a temp file, so they never read the real key).
+ENV_PATH = Path(__file__).parent / ".env"
 
 
 def ensure_gemini_api_key() -> str | None:
@@ -23,7 +25,7 @@ def ensure_gemini_api_key() -> str | None:
     if os.environ.get("GEMINI_API_KEY"):
         return os.environ["GEMINI_API_KEY"]
 
-    env_file = Path(__file__).parent / ".env"
+    env_file = ENV_PATH
     if env_file.exists():
         try:
             from dotenv import load_dotenv
@@ -64,7 +66,6 @@ from config_schema import AppConfig
 # Changes made in the studio's «Налаштування» screen. Kept apart from config.yaml so that
 # its comments survive and a code update never overwrites the user's choices.
 USER_SETTINGS_PATH = Path(__file__).parent / "user_settings.json"
-ENV_PATH = Path(__file__).parent / ".env"
 
 
 def _deep_merge(base: dict, extra: dict) -> dict:
