@@ -302,11 +302,11 @@ const Queue = (() => {
             </div>` : "";
       cards.push(`
         <li class="q-item video-card ${it.status}">
-          <div class="history-thumb-wrap q-thumb"><span class="q-ico">${it.source_url && !it.project_id ? "🔗" : "🎬"}</span>${thumb}${over}</div>
+          <div class="history-thumb-wrap q-thumb">${over ? "" : `<span class="q-ico">${it.source_url && !it.project_id ? "🔗" : "🎬"}</span>`}${thumb}${over}</div>
           <span class="vc-badge${it.status === "failed" ? " bad" : ""}">${escapeHtml(badge)}</span>${menu}
           <div class="history-details">
             <span class="history-item-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
-            <span class="video-card-meta">${escapeHtml(meta)}</span>${actions}
+            <span class="video-card-meta">${it.status === "failed" ? errorSummaryHtml(meta) : escapeHtml(meta)}</span>${actions}
           </div>
         </li>`);
     }

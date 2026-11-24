@@ -70,8 +70,11 @@ const Editor = (() => {
   function stripClips() {
     if (st.mode !== "vx") return visible();
     const kept = byTime().filter((i) => st.clips[i].review_status === "keep");
-    return kept.length ? kept : byTime();
+    return kept.length ? kept : byTime().filter((i) => st.clips[i].review_status !== "drop");
   }
+
+  /** Step 2 while no clip is «В роботі»: an explanation instead of the phone. */
+  const vxEmpty = () => st.mode === "vx" && !!st.project && !st.clips.some((c) => c.review_status === "keep");
 
   function renderList() {
     const L = $("edList");
@@ -90,8 +93,10 @@ const Editor = (() => {
           <span class="ed-num">№${c.num}</span><span class="ed-dur">${Math.round(len(c))} с</span>${TIER[c.tier] || ""}${r === "keep" ? '<span class="ed-ok" title="Беру">✓</span>' : ""}</div>
         <div class="ed-rb"><div class="ed-rt">${esc(c.title)}</div>
         <div class="ed-rm"><span>${fmtS(c.start_sec)}${r === "drop" ? " · не беру" : ""}</span><span class="s" title="Місце серед кліпів цього відео (ШІ дав ${esc(c.virality_score)})">★ ${esc(scoreOf(c))}</span></div></div>`;
-      li.addEventListener("click", () => select(i));
-      li.addEventListener("keydown", (e) => { if (e.key === "Enter") select(i); });
+      // step 2 with nothing in work: a clip opens on step 1, where it can be taken «В роботі»
+      const pick = () => { if (vxEmpty()) setMode("table"); select(i); };
+      li.addEventListener("click", pick);
+      li.addEventListener("keydown", (e) => { if (e.key === "Enter") pick(); });
       L.appendChild(li);
     });
     if (!vis.length) {
@@ -100,9 +105,12 @@ const Editor = (() => {
       L.innerHTML = `<li class="ed-empty">${st.mode === "vx" ? "Тут поки порожньо." : empty[st.filter]}</li>`;
     }
     const anyKept = st.clips.some((c) => c.review_status === "keep");
+    $("edVx").classList.toggle("is-empty", vxEmpty());
+    $("vxEmpty").hidden = !vxEmpty();
+    $("editor").classList.toggle("vx-none", !anyKept);
     $("edStripTitle").textContent = st.mode === "vx" && anyKept ? "Кліпи в роботі" : "Кліпи";
     const note = document.querySelector("#editor .ed-vx-note");
-    note.textContent = anyKept ? "Тут лише кліпи «В роботі». Щоб додати ще, повернись на крок 1." : "У роботі поки нічого: познач кліпи «В роботі» на кроці 1, тоді тут будуть лише вони.";
+    note.textContent = anyKept ? "Тут лише кліпи «В роботі». Щоб додати ще, повернись на крок 1." : "Клік по кліпу відкриє його на кроці 1.";
 
     SHELVES.forEach((f) => {
       $(`edCnt_${f}`).textContent = st.clips.filter((c) => shelfOf(c) === f).length;
@@ -1046,8 +1054,8 @@ const Editor = (() => {
     const none = !cut && pv && Object.values(pv).every((r) => !r.count);
     btn.disabled = !!none || cuts.length > 0; // once cut, the button only shows the result; «↶ Повернути все» undoes it
     btn.classList.toggle("none", !!none);
-    btn.title = none ? "У цьому кліпі довгих пауз немає" : "Вирізати довгі паузи всередині кліпу (jump cut). Чистий оригінал лишається для скачування";
-    if (none) { bar.innerHTML = '<span class="hint">Довгих пауз немає: кліп і так іде щільно.</span>'; }
+    btn.title = none ? "Довгих пауз немає: кліп і так іде щільно" : "Вирізати довгі паузи всередині кліпу (jump cut). Чистий оригінал лишається для скачування";
+    if (none) { btn.textContent = "✓ Пауз немає"; bar.innerHTML = ""; } // the button itself says it; the row keeps its height
     else bar.innerHTML = `<span>Темп:</span><span class="seg" role="group" aria-label="Темп: наскільки різати паузи">${Object.entries(PAUSE_MODES).map(([k, m]) => {
         const r = pv && pv[k];
         const res = r ? (r.count ? ` · −${fmt1(r.removed_sec)} с` : " · 0 с") : "";
@@ -1442,6 +1450,7 @@ const Editor = (() => {
     $("vxMorePop").addEventListener("click", (e) => { if (e.target.closest("button")) closeVxMore(); });
     document.addEventListener("click", (e) => { if (!e.target.closest(".vx-more")) closeVxMore(); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeVxMore(); });
+    $("vxEmptyBack").addEventListener("click", () => setMode("table"));
     $("vxPrev").addEventListener("click", () => step(-1));
     $("vxNext").addEventListener("click", () => step(1));
     $("edBack").addEventListener("click", () => {

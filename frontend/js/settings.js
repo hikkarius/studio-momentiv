@@ -222,7 +222,7 @@ const Settings = (() => {
   }
 
   async function resetAll() {
-    if (!confirm("Повернути всі налаштування як було спочатку? Ключ Gemini, відео й кліпи лишаться.")) return;
+    if (!(await askConfirm("Повернути всі налаштування як було спочатку? Ключ Gemini, відео й кліпи лишаться.", { ok: "Повернути" }))) return;
     const res = await fetch("/api/settings/reset", { method: "POST" });
     if (res.ok) {
       view = await res.json();
@@ -349,10 +349,10 @@ const Settings = (() => {
       : info.latest ? "У тебе найновіша версія." : "Не вдалося перевірити оновлення (немає інтернету?).";
   }
 
-  function update() {
+  async function update() {
     const info = typeof Welcome !== "undefined" && Welcome.info ? Welcome.info() : null;
     if (!info) return;
-    if (!confirm(`Оновити студію до версії ${info.latest}? Вона закриється й відкриється знову. Твої відео, кліпи й ключ лишаться.`)) return;
+    if (!(await askConfirm(`Оновити студію до версії ${info.latest}? Вона закриється й відкриється знову. Твої відео, кліпи й ключ лишаться.`, { ok: "Оновити" }))) return;
     Welcome.update(true);
   }
 
@@ -491,10 +491,10 @@ const Settings = (() => {
     if (typeof loadRecentProjects === "function") loadRecentProjects();
   }
 
-  function cleanClips() {
+  async function cleanClips() {
     const days = parseInt($("diskOlder").value, 10) || 0;
     const what = days ? `файли кліпів, старші за ${days} днів` : "усі готові файли кліпів";
-    if (!confirm(`Видалити ${what}? Самі кліпи й позначки лишаться, файл зробиться знову при скачуванні.`)) return;
+    if (!(await askConfirm(`Видалити ${what}? Самі кліпи й позначки лишаться, файл зробиться знову при скачуванні.`, { ok: "Видалити", danger: true }))) return;
     cleanup({ clips: true, older_than_days: days }, "Файли кліпів видалено");
   }
 
@@ -507,7 +507,7 @@ const Settings = (() => {
       cleanup({ clips: true, project_ids: [b.dataset.clean] }, "Файли кліпів видалено");
     } else if (b.dataset.del) {
       const p = disk.projects.find((x) => x.id === b.dataset.del);
-      if (!confirm(`Видалити «${p ? p.title : "відео"}» повністю? Зникнуть відео, кліпи й позначки. Це не скасувати.`)) return;
+      if (!(await askConfirm(`Видалити «${p ? p.title : "відео"}» повністю? Зникнуть відео, кліпи й позначки. Це не скасувати.`, { ok: "Видалити", danger: true }))) return;
       const res = await fetch(`/api/projects/${encodeURIComponent(b.dataset.del)}`, { method: "DELETE" });
       if (!res.ok) {
         showToast(await errorText(res), "error");
