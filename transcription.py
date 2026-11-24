@@ -298,9 +298,10 @@ def merge_refilled_words(words: list[dict], refills: dict) -> list[dict]:
     there when the new pass heard more) and returns all words in time order."""
     out = list(words)
     for (s, e), new in refills.items():
-        inside = [w for w in out if s - 0.2 <= w["start"] <= e + 0.2]
+        # only words that start inside the region; neighbours heard right at its edge stay
+        inside = [w for w in out if s <= w["start"] < e]
         if len(new) > len(inside):
-            out = [w for w in out if not (s - 0.2 <= w["start"] <= e + 0.2)] + new
+            out = [w for w in out if not (s <= w["start"] < e)] + new
     out.sort(key=lambda w: (w["start"], w["end"]))
     return out
 

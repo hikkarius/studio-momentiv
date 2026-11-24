@@ -220,3 +220,10 @@ def test_transcription_marks_the_model_busy(monkeypatch, tmp_path):
     assert seen_busy == [before + 1]
     assert app_state._whisper_busy == before
     assert app_state._whisper_last_used >= t0
+
+
+def test_refill_keeps_a_heard_word_right_at_the_region_edge():
+    words = [_w(3.9, 4.2, "до"), _w(8.1, 8.5, "після")]  # just outside 4.0–8.0, heard by batched decoding
+    refill = {(4.0, 8.0): [_w(4.3, 4.8, "Привіт,"), _w(5.0, 5.6, "друзі.")]}
+    out = transcription.merge_refilled_words(words, refill)
+    assert [w["word"] for w in out] == ["до", "Привіт,", "друзі.", "після"]

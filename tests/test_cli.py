@@ -70,6 +70,24 @@ def test_run_studio_launcher(monkeypatch):
         "get_gpu_capabilities",
         lambda: GpuCapabilities(has_nvenc=True, nvenc_device_name="Mock RTX"),
     )
+    # A real studio may already listen on :8000 on the laptop; the launcher must see a free port here
+    class _FreePort:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def settimeout(self, t):
+            pass
+
+        def connect_ex(self, addr):
+            return 111  # connection refused
+
+    monkeypatch.setattr("socket.socket", _FreePort)
     uvicorn_calls = []
     mock_thread = MagicMock()
     monkeypatch.setattr("threading.Thread", lambda *args, **kwargs: mock_thread)
