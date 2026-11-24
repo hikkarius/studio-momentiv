@@ -25,7 +25,7 @@ const Vertical = (() => {
   let ctx = null;
   const st = { opts: null, plan: null, planKey: "", words: [], loading: false, raf: 0, saveTimer: null, pending: null, selWord: null, zipJob: null, capKey: "",
     stream: null, streamPid: "", autoPid: "", sel: null, view: "phone", drag: null, live: null, gesture: null, suppressClick: false, wheelTimer: null, spMemo: null,
-    ideasBusy: null, ideasAsked: new Set() };
+    ideasBusy: null, ideasAsked: new Set(), templates: [], status: new Map(), batch: null, listTimer: 0, listZip: null, viewRestored: false };
 
   // What each style tile shows: one short phrase drawn in that style
   const TILE = { none: "<i>без тексту</i>", hl: "ЦЕ <i>ВОНО</i>", kar: "<i>ЦЕ</i> ВОНО", one: "ВОНО", box: "<i>Це воно</i>", gold: "ЦЕ <i>ВОНО</i>", min: "це воно" };
@@ -209,6 +209,7 @@ const Vertical = (() => {
     $("vxHookOn").checked = !!o.hook;
     $("vxHookSet").hidden = !o.hook;
     renderIdeas();
+    renderTemplates();
     if (document.activeElement !== $("vxHookText")) $("vxHookText").value = o.hook_text || ctx.clip().title || "";
     document.querySelectorAll("#vxHookStyle button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === (o.hook_style || "white"))));
     document.querySelectorAll("#vxHookDur button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.v === "all") === !!o.hook_full)));
@@ -1344,6 +1345,140 @@ const Vertical = (() => {
   }
   const hookPaneOpen = () => { const p = document.querySelector('#edVx .vx-pane[data-t="hook"]'); return p && !p.hidden; };
 
+  // ─── Named templates («Подкаст», «Стрім») ───────────────────────────────────
+  const tplLook = (o) => JSON.stringify(TEMPLATE_FIELDS.map((k) => (o && o[k] !== undefined ? o[k] : null)));
+  const NORM = (o) => ({ pos: null, color: null, text: null, stroke: null, hook_stroke: null, hook_pos: null, ...o });
+  const tplMatch = (o) => (st.templates.find((t) => tplLook(NORM(t.opts)) === tplLook(NORM(o))) || {}).name || "";
+  const tplOptions = (sel, empty) => (empty ? `<option value="">${empty}</option>` : "") +
+    st.templates.map((t) => `<option value="${escapeText(t.name)}"${t.name === sel ? " selected" : ""}>${escapeText(t.name)}</option>`).join("");
+
+  async function loadTemplates() {
+    try { st.templates = (await ctx.api("/api/vertical-templates")).templates || []; } catch (_) { st.templates = []; }
+    renderTemplates();
+  }
+  function renderTemplates() {
+    if (!st.opts) return;
+    const cur = tplMatch(st.opts);
+    $("vxTpl").innerHTML = tplOptions(cur, st.templates.length ? "— свій вигляд —" : "— ще немає шаблонів —");
+    $("vxTplDel").hidden = !cur;
+    const keepSel = $("vxLTpl").value;
+    $("vxLTpl").innerHTML = tplOptions(keepSel || (st.templates[0] || {}).name, st.templates.length ? "" : "— ще немає шаблонів —");
+    $("vxLApply").disabled = !st.templates.length;
+  }
+  /** Puts a template on clips (the server keeps each clip's word edits and title text) and refreshes them here. */
+  async function applyTemplate(name, indexes) {
+    await flush();
+    const r = await ctx.api(`/api/projects/${ctx.pid()}/apply-template`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, clips: indexes }),
+    });
+    const byIdx = new Map(r.clips.filter(Boolean).map((c) => [c.clip_index, c]));
+    ctx.clips().forEach((c) => { const u = byIdx.get(c.clip_index); if (u) c.vertical_opts = u.vertical_opts; });
+    const cur = ctx.clip();
+    if (cur && byIdx.has(cur.clip_index)) { onClip(); writeTemplate(st.opts); }
+    return byIdx.size;
+  }
+  async function saveTemplate() {
+    const name = $("vxTplName").value.trim();
+    if (!name) { $("vxTplName").focus(); return; }
+    try {
+      const exists = st.templates.some((t) => t.name === name);
+      await flush();
+      st.templates = (await ctx.api("/api/vertical-templates", {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, opts: st.opts }),
+      })).templates;
+      $("vxTplNew").hidden = true;
+      $("vxTplName").value = "";
+      renderTemplates();
+      ctx.toast(exists ? `Шаблон «${name}» оновлено` : `Шаблон «${name}» збережено`);
+    } catch (e) { ctx.toast(e.message, true); }
+  }
+
+  // ─── «Усі разом»: every clip «В роботі» as a row ───────────────────────────
+  const kept = () => ctx.clips().filter((c) => c.review_status === "keep").sort((a, b) => (b.rank_score ?? 0) - (a.rank_score ?? 0));
+  const isList = () => !$("vxList").hidden;
+  function setListView(list, remember = true) {
+    $("vxList").hidden = !list;
+    $("edVx").classList.toggle("is-list", list);
+    if (remember) { try { localStorage.setItem("studio-vx-view", list ? "all" : "one"); } catch (_) {} }
+    if (list) { flush(); refreshList(); } else { clearTimeout(st.listTimer); onShow(); }
+  }
+  async function refreshList() {
+    clearTimeout(st.listTimer);
+    if (!isList() || $("edVx").hidden) return;
+    try {
+      const r = await ctx.api(`/api/projects/${ctx.pid()}/vertical-status`);
+      st.status = new Map(r.clips.map((x) => [x.clip_index, x]));
+      st.batch = r.job;
+    } catch (e) { ctx.toast(e.message, true); }
+    renderList();
+    if (st.batch && st.batch.status === "running") st.listTimer = setTimeout(refreshList, 1500);
+  }
+  function renderList() {
+    const rows = kept();
+    const ready = rows.filter((c) => (st.status.get(c.clip_index) || {}).ready);
+    const todo = rows.length - ready.length;
+    const job = st.batch && st.batch.status === "running" ? st.batch : null;
+    $("vxLSum").innerHTML = `В роботі: <b>${rows.length}</b> · готово ${ready.length}`;
+    $("vxLMake").disabled = !!job || !todo;
+    $("vxLMake").textContent = job ? `Роблю ${Math.min(job.done + 1, job.total)} з ${job.total}…` : todo ? `Зробити ${todo} незроблен${todo === 1 ? "ий" : "і"}` : "Усі зроблені";
+    $("vxLZip").disabled = !ready.length || !!st.listZip;
+    $("vxLProg").hidden = !job;
+    if (job) $("vxLProgBar").style.width = `${Math.round((job.done / Math.max(1, job.total)) * 100)}%`;
+    const fmt = (sec) => `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`;
+    $("vxLRows").innerHTML = rows.map((c) => {
+      const s = st.status.get(c.clip_index) || {};
+      const o = c.vertical_opts || {};
+      const hook = o.hook ? (o.hook_text || c.title) : "";
+      const ideas = (c.title_variants || []).length;
+      let state;
+      if (s.ready) state = `<span class="vx-lok">✓ Готово</span><button type="button" class="ed-btn sm" data-dl="${c.clip_index}" aria-label="Скачати №${c.num}">⬇</button>`;
+      else if (job && job.current_index === c.clip_index) state = `<span class="vx-lbusy">Роблю…</span>`;
+      else if (job && !(job.ready || []).includes(c.clip_index)) state = `<span class="vx-lmuted">У черзі</span>`;
+      else state = `<span class="vx-lmuted">Не зроблено</span>`;
+      return `<div class="vx-lrow" role="row" data-i="${c.clip_index}">` +
+        `<span role="cell"><img class="vx-lthumb" alt="" loading="lazy" src="/api/projects/${encodeURIComponent(ctx.pid())}/clips/${c.clip_index}/thumbnail"></span>` +
+        `<span role="cell"><button type="button" class="vx-lname" data-open="${c.clip_index}">№${c.num} ${escapeText(c.title || "")}<small>з ${fmt(c.start_sec)}</small></button></span>` +
+        `<span role="cell" class="vx-lmuted">${fmt(c.end_sec - c.start_sec)}</span>` +
+        `<span role="cell" class="vx-lhook">${hook ? escapeText(hook) : `<button type="button" data-hook="${c.clip_index}">${ideas ? "обрати з 3" : "обрати заголовок"}</button>`}</span>` +
+        `<span role="cell"><select data-tpl="${c.clip_index}" aria-label="Шаблон для №${c.num}">${tplOptions(s.template || "", "— свій —")}</select></span>` +
+        `<span role="cell" class="vx-lstate">${state}</span></div>`;
+    }).join("");
+  }
+  async function makeAll() {
+    try {
+      await flush();
+      st.batch = await ctx.api(`/api/projects/${ctx.pid()}/render-vertical`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clips: [] }),
+      });
+      renderList();
+      st.listTimer = setTimeout(refreshList, 800);
+    } catch (e) { ctx.toast(e.message, true); }
+  }
+  async function listZip() {
+    const ready = kept().filter((c) => (st.status.get(c.clip_index) || {}).ready).map((c) => c.clip_index);
+    if (!ready.length || st.listZip) return;
+    try {
+      const job = await ctx.api(`/api/projects/${ctx.pid()}/export-vertical-zip`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subs: true, clips: ready }),
+      });
+      st.listZip = job.id;
+      renderList();
+      for (;;) {
+        const j = await ctx.api(`/api/vertical-jobs/${job.id}`);
+        if (j.status === "completed") { ctx.download(`/api/vertical-jobs/${job.id}/file`); ctx.toast("Архів готовий"); break; }
+        if (j.status !== "running") { ctx.toast("Архів не вдалося зібрати: " + (j.error || ""), true); break; }
+        await new Promise((res) => setTimeout(res, 1000));
+      }
+    } catch (e) { ctx.toast(e.message, true); }
+    st.listZip = null;
+    renderList();
+  }
+  function openFromList(idx, tab) {
+    setListView(false);
+    ctx.openClip(idx);
+    if (tab) { const b = document.querySelector(`#vxTabs button[data-t="${tab}"]`); if (b) b.click(); }
+  }
+
   // ─── Public ────────────────────────────────────────────────────────────────
   /** Called when the selected clip changes or its bounds change. */
   function onClip() {
@@ -1370,6 +1505,13 @@ const Vertical = (() => {
 
   function onShow() {
     if ($("edVx").hidden || !ctx.clip()) return;
+    if (!st.viewRestored) {
+      st.viewRestored = true;
+      let v = "one";
+      try { v = localStorage.getItem("studio-vx-view") || "one"; } catch (_) {}
+      if (v === "all") { setListView(true, false); return; }
+    }
+    if (isList()) { refreshList(); return; }
     if (!st.opts) onClip();
     autoStream();
     loadPlan();
@@ -1455,6 +1597,44 @@ const Vertical = (() => {
       setOpt("hook_text", v && v !== (ctx.clip().title || "") ? v : null);
       if (v && !(ctx.clip().title_variants || []).some((x) => x.text === v)) rememberTitle("свій", v);
     });
+    $("vxTpl").addEventListener("change", async (e) => {
+      if (!e.target.value) return;
+      try { await applyTemplate(e.target.value, [ctx.clip().clip_index]); } catch (err) { ctx.toast(err.message, true); }
+    });
+    $("vxTplSave").addEventListener("click", () => { $("vxTplNew").hidden = false; $("vxTplName").value = tplMatch(st.opts); $("vxTplName").focus(); });
+    $("vxTplOk").addEventListener("click", saveTemplate);
+    $("vxTplName").addEventListener("keydown", (e) => { if (e.key === "Enter") saveTemplate(); if (e.key === "Escape") $("vxTplNew").hidden = true; e.stopPropagation(); });
+    $("vxTplDel").addEventListener("click", async () => {
+      const name = tplMatch(st.opts);
+      if (!name) return;
+      try {
+        st.templates = (await ctx.api(`/api/vertical-templates/${encodeURIComponent(name)}`, { method: "DELETE" })).templates;
+        renderTemplates();
+        ctx.toast(`Шаблон «${name}» видалено. Кліпи не змінились.`);
+      } catch (e) { ctx.toast(e.message, true); }
+    });
+    $("vxToList").addEventListener("click", () => setListView(true));
+    $("vxToOne").addEventListener("click", () => setListView(false));
+    $("vxLMake").addEventListener("click", makeAll);
+    $("vxLZip").addEventListener("click", listZip);
+    $("vxLApply").addEventListener("click", async () => {
+      const name = $("vxLTpl").value;
+      if (!name) return;
+      try { const n = await applyTemplate(name, []); ctx.toast(`«${name}» на ${n} кліпах`); refreshList(); } catch (e) { ctx.toast(e.message, true); }
+    });
+    $("vxLRows").addEventListener("change", async (e) => {
+      const sel = e.target.closest("select[data-tpl]");
+      if (!sel || !sel.value) return;
+      try { await applyTemplate(sel.value, [Number(sel.dataset.tpl)]); refreshList(); } catch (err) { ctx.toast(err.message, true); }
+    });
+    $("vxLRows").addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      if (b.dataset.open) openFromList(Number(b.dataset.open));
+      else if (b.dataset.hook) openFromList(Number(b.dataset.hook), "hook");
+      else if (b.dataset.dl) ctx.download(`/api/projects/${ctx.pid()}/clips/${b.dataset.dl}/vertical?subs=true`);
+    });
+    loadTemplates();
     $("vxIdeaList").addEventListener("click", (e) => { const b = e.target.closest("button[data-i]"); if (b) pickIdea(Number(b.dataset.i)); });
     $("vxIdeaMore").addEventListener("click", () => fetchIdeas());
     $("vxHookText").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); e.stopPropagation(); });
@@ -1503,5 +1683,5 @@ const Vertical = (() => {
   /** The preview's plan for a look (tests compare it with streamer.plan). */
   function twin(lk) { return st.stream ? streamPlan(st.stream.cam, st.stream.face, st.plan.src.w, st.plan.src.h, lk) : null; }
 
-  return { attach, onClip, onShow, state, twin, onHookPane };
+  return { attach, onClip, onShow, onHookPane, state, twin, setListView };
 })();

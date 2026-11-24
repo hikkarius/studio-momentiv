@@ -707,6 +707,29 @@
             <p>На кроці 1 натисни <b>«В роботі»</b> (або клавішу <kbd>Y</kbd>) на кліпах, які хочеш змонтувати. Тут будуть лише вони, готові до 9:16.</p>
             <button type="button" class="vx-big vx-empty-go" id="vxEmptyBack">← До монтажного столу</button>
           </div>
+          <div class="vx-list" id="vxList" hidden>
+            <div class="vx-lhead">
+              <div class="vx-seg vx-lview" role="group" aria-label="Як показувати кліпи">
+                <button type="button" id="vxToOne" aria-pressed="false">По одному</button>
+                <button type="button" aria-pressed="true">Усі разом</button>
+              </div>
+              <span class="vx-lsum" id="vxLSum"></span>
+              <span class="vx-lsp"></span>
+              <label class="vx-ltpl"><span>Шаблон для всіх</span><select id="vxLTpl"></select></label>
+              <button type="button" class="ed-btn" id="vxLApply">Застосувати</button>
+              <button type="button" class="vx-big vx-lmake" id="vxLMake">Зробити незроблені</button>
+              <button type="button" class="ed-btn" id="vxLZip">⬇ Скачати готові · ZIP</button>
+            </div>
+            <div class="vx-lprog" id="vxLProg" hidden><i id="vxLProgBar"></i></div>
+            <div class="vx-ltable" role="table" aria-label="Кліпи «В роботі»">
+              <div class="vx-lrow vx-lth" role="row">
+                <span role="columnheader">Кадр</span><span role="columnheader">Кліп</span><span role="columnheader">Довжина</span>
+                <span role="columnheader">Заголовок на відео</span><span role="columnheader">Шаблон</span><span role="columnheader">Стан</span>
+              </div>
+              <div id="vxLRows" role="rowgroup"></div>
+            </div>
+            <p class="ed-small">Клік по назві відкриває кліп для тонких правок. Студія робить кліпи по одному у фоні, можна займатися іншим.</p>
+          </div>
           <div class="vx-studio">
             <div class="vx-stage">
               <div class="vx-shead">
@@ -719,6 +742,7 @@
                   <button type="button" class="ed-btn sm" id="vxPrev" title="Попередній кліп (↑)" aria-label="Попередній кліп">↑</button>
                   <button type="button" class="ed-btn sm" id="vxNext" title="Наступний кліп (↓)" aria-label="Наступний кліп">↓</button>
                 </div>
+                <button type="button" class="ed-btn sm" id="vxToList" title="Усі кліпи «В роботі» одним списком">☰ Усі разом</button>
               </div>
               <div class="vx-view vx-seg" id="vxView" role="group" aria-label="Що показати" hidden>
                 <button type="button" data-v="frame" aria-pressed="false">Рамки на кадрі</button>
@@ -837,6 +861,15 @@
               <section class="vx-pane" data-t="style">
                 <h3>Стиль субтитрів</h3>
                 <p class="vx-lead">Клік по плитці, і телефон одразу покаже результат.</p>
+                <div class="vx-tplrow">
+                  <label class="vx-ltpl"><span>Шаблон</span><select id="vxTpl"></select></label>
+                  <button type="button" class="ed-btn sm" id="vxTplSave">Зберегти як…</button>
+                  <button type="button" class="ed-btn sm" id="vxTplDel" hidden>Видалити шаблон</button>
+                </div>
+                <div class="vx-tplnew" id="vxTplNew" hidden>
+                  <input type="text" id="vxTplName" maxlength="40" placeholder="Назва, напр. Подкаст" aria-label="Назва шаблону">
+                  <button type="button" class="ed-btn sm primary" id="vxTplOk">Зберегти</button>
+                </div>
                 <div class="vx-tiles" id="vxStyle"></div>
                 <div class="vx-row">
                   <label class="vx-lbl" for="vxPos">Висота субтитрів</label>

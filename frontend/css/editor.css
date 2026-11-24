@@ -733,3 +733,39 @@
 .vx-idea-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .vx-idea-note { font-size: var(--fs-sm); color: var(--ed-muted); }
 .ed-copyrow { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Step 2 «Усі разом»: every clip «В роботі» as a row, named templates, background «Зробити» */
+#edVx.is-list .vx-studio { display: none; }
+.vx-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px 20px 20px; }
+.vx-list[hidden] { display: none; }
+.vx-lhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.vx-lsum { font-size: var(--fs-lg); color: var(--ed-fg); }
+.vx-lsp { flex: 1; }
+.vx-ltpl { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--ed-muted); }
+.vx-ltpl select, .vx-lrow select { font: inherit; font-size: var(--fs-md); color: var(--ed-fg); background: var(--ed-panel2); border: 1px solid var(--ed-line); border-radius: var(--r-md); padding: 8px 10px; min-width: 0; max-width: 100%; }
+#edVx .vx-big.vx-lmake { flex: none; width: auto; padding: 11px 18px; }
+#edVx .vx-big.vx-lmake:disabled { opacity: .5; cursor: default; }
+.vx-lprog { height: 4px; border-radius: var(--r-pill); background: var(--ed-line); overflow: hidden; }
+.vx-lprog i { display: block; height: 100%; width: 0; background: var(--ed-accent); transition: width .3s; }
+.vx-ltable { border: 1px solid var(--ed-line); border-radius: var(--r-lg); background: var(--ed-panel); overflow: hidden; }
+.vx-lrow { display: grid; grid-template-columns: 46px minmax(0, 2fr) 64px minmax(0, 1.6fr) 160px 170px; gap: 14px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--ed-line); font-size: var(--fs-md); }
+.vx-lth { border-top: 0; font-size: var(--fs-xs); letter-spacing: .07em; text-transform: uppercase; color: var(--ed-muted); font-weight: 800; padding-top: 12px; padding-bottom: 8px; }
+.vx-lthumb { width: 46px; height: 82px; border-radius: var(--r-sm); object-fit: cover; background: var(--ed-sunk); }
+.vx-lname { text-align: left; font: inherit; font-weight: 600; color: var(--ed-fg); background: none; border: 0; padding: 0; cursor: pointer; min-width: 0; }
+.vx-lname:hover { color: var(--ed-accent-text); text-decoration: underline; }
+.vx-lname small { display: block; font-weight: 400; color: var(--ed-muted); font-size: var(--fs-sm); }
+.vx-lmuted { color: var(--ed-muted); }
+.vx-lhook { color: var(--ed-muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vx-lhook button { font: inherit; color: var(--ed-accent-text); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+.vx-lstate { display: flex; align-items: center; gap: 8px; }
+.vx-lok { color: var(--ok); font-weight: 600; }
+.vx-lbusy { color: var(--ed-accent-text); font-weight: 600; }
+.vx-tplrow, .vx-tplnew { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vx-tplnew input { flex: 1; min-width: 140px; font: inherit; font-size: var(--fs-md); color: var(--ed-fg); background: var(--ed-panel2); border: 1px solid var(--ed-line); border-radius: var(--r-md); padding: 8px 10px; }
+@media (max-width: 900px) {
+  .vx-lrow { grid-template-columns: 46px minmax(0, 1fr); gap: 6px 12px; }
+  .vx-lrow > :nth-child(1) { grid-row: span 3; }
+  .vx-lrow > :nth-child(3), .vx-lrow > :nth-child(4) { display: none; }
+  .vx-lrow > :nth-child(n+5) { grid-column: 2; }
+  .vx-lth { display: none; }
+}

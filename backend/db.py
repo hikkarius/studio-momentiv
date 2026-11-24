@@ -145,6 +145,14 @@ def init_db():
             # JSON: hook titles the AI offered for the 9:16 title, [{"text": ..., "kind": ...}, ...]
             conn.execute("ALTER TABLE candidate_clips ADD COLUMN title_variants TEXT NOT NULL DEFAULT '[]';")
 
+        # Named looks for 9:16 clips («Подкаст», «Стрім»): JSON of vertical_render.TEMPLATE_FIELDS
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS vertical_templates (
+            name TEXT PRIMARY KEY,
+            opts TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        );""")
+
         # Which offered title the author picked: the AI is shown these to learn the author's taste
         conn.execute("""
         CREATE TABLE IF NOT EXISTS title_choices (
@@ -410,6 +418,33 @@ def title_choices(limit: int = 12) -> Dict[str, Any]:
             "SELECT kind, COUNT(*) AS n FROM title_choices GROUP BY kind"
         ).fetchall()}
     return {"recent": recent, "counts": counts, "total": sum(counts.values())}
+
+
+def list_vertical_templates() -> List[Dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute("SELECT name, opts FROM vertical_templates ORDER BY name COLLATE NOCASE").fetchall()
+    out = []
+    for r in rows:
+        try:
+            opts = json.loads(r["opts"])
+        except Exception:
+            opts = {}
+        out.append({"name": r["name"], "opts": opts if isinstance(opts, dict) else {}})
+    return out
+
+
+def save_vertical_template(name: str, opts: Dict[str, Any]) -> None:
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO vertical_templates (name, opts, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET opts = excluded.opts, updated_at = excluded.updated_at",
+            (name, json.dumps(opts, ensure_ascii=False), time.time()),
+        )
+
+
+def delete_vertical_template(name: str) -> bool:
+    with get_db() as conn:
+        return conn.execute("DELETE FROM vertical_templates WHERE name = ?", (name,)).rowcount > 0
 
 
 def create_job(job_id: str, project_id: str, job_type: str) -> Dict[str, Any]:

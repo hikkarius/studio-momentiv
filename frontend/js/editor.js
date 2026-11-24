@@ -1291,7 +1291,9 @@ const Editor = (() => {
   function init() {
     if (typeof Vertical !== "undefined") {
       const keptCount = () => st.clips.filter((c) => c.review_status === "keep").length;
-      Vertical.attach({ clip, pid, api, patch, toast, download, video, seek, togglePlay, postText, copy, keptCount });
+      const clips = () => st.clips;
+      const openClip = (clipIndex) => { const i = st.clips.findIndex((c) => c.clip_index === clipIndex); if (i >= 0) select(i); };
+      Vertical.attach({ clip, pid, api, patch, toast, download, video, seek, togglePlay, postText, copy, keptCount, clips, openClip });
     }
     document.addEventListener("keydown", onKey);
     document.addEventListener("pointerdown", (e) => { if (st.pop && !e.target.closest(".ed-pop")) closePop(); });
