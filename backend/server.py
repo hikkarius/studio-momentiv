@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 import pauses
 import subtitles_generator
+import reactions
 import streamer
 import vertical_render
 from backend import app_update, db, job_runner, queue_runner, storage, support_report
@@ -350,6 +351,9 @@ async def upload_file(file: UploadFile = File(...)):
     }
 
 
+_fetch_chat = reactions.fetch_chat  # tests replace it: no network
+
+
 def ingest_url(url: str, progress_cb=None) -> tuple[Dict[str, Any], bool]:
     """
     Downloads a video by URL into UPLOADS_DIR and creates its project.
@@ -405,6 +409,12 @@ def ingest_url(url: str, progress_cb=None) -> tuple[Dict[str, Any], bool]:
             source_path=video_path,
             duration=duration,
         )
+        try:  # a Twitch VOD / YouTube stream: its chat replay helps find the reactions (best effort, ≤5 min)
+            n = _fetch_chat(url, str(_safe_project_output_dir(project["id"]) / "chat.json"))
+            if n:
+                log.info(f"Chat replay for {project['id']}: {n} messages")
+        except Exception as e:
+            log.warning(f"Chat replay skipped: {e}")
         return project, False
     finally:
         if os.path.exists(temp_dir):

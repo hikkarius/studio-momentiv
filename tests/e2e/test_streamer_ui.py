@@ -5,12 +5,22 @@ tests/test_streamer.py checks it on real frames).
 """
 import json
 
+import pytest
+
 import streamer
 from backend import server
 from tests.e2e.conftest import PROJECT_ID
 from tests.e2e.test_ui import keep_first_clip, open_editor, vx_tab
 
 CAM = [0.02, 0.62, 0.3, 0.34]
+
+
+@pytest.fixture(autouse=True)
+def _no_stream_frame_left():
+    """The e2e project id is shared: a leftover stream.json would switch later tests' clips to «Стрім»."""
+    server._stream_path(PROJECT_ID).unlink(missing_ok=True)
+    yield
+    server._stream_path(PROJECT_ID).unlink(missing_ok=True)
 
 
 def test_stream_mode_card_layouts_and_dragging(page, studio, project, monkeypatch):

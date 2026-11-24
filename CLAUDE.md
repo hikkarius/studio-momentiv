@@ -18,7 +18,9 @@
 - `transcription.py` (Whisper + кеш `.transcript_cache/`), `ai_selector.py` (Gemini: перебір
   `gemini.candidate_models`, до 3 проходів, потім `GeminiUnavailableError`; ніколи не вигадувати кліпи),
   `clip_refiner.py` (межі кліпів), `vertical_render.py` (9:16, кадрування за обличчям YuNet, субтитри ASS),
-  `streamer.py` («Стрім: вебка + гра»: рамка вебки на відео, розкладки top/full/pip, той самий план для превʼю й рендера),
+  `streamer.py` («Стрім: вебка + гра»: рамка вебки на відео, «вигляд» — розкладка, розміри, наближення, оформлення —
+  на відео або на кліп, сцени всередині кліпу; `plan()` має двійника `streamPlan()` у `vertical.js`),
+  `reactions.py` (для стрімів: сплески гучності й чат як підказки Gemini у транскрипції),
   `subtitles_generator.py` (SRT).
 - `config.yaml` — значення за замовчуванням; `user_settings.json` (екран «Налаштування») поверх нього;
   ключ у `.env` (`GEMINI_API_KEY`). `config_loader.py`, `config_schema.py`.
