@@ -943,7 +943,7 @@ def export_selected_zip(project_id: str, clips: str = ""):
     else:
         chosen = [c for c in all_clips if c.get("review_status") == "keep"]
     if not chosen:
-        raise HTTPException(status_code=400, detail="Не обрано жодного кліпу. Позначте кліпи «Беру» і спробуйте ще раз.")
+        raise HTTPException(status_code=400, detail="Жодного кліпу «В роботі». Познач їх на кроці 1.")
     chosen.sort(key=lambda c: c.get("virality_score", 0), reverse=True)
 
     project_out_dir = _safe_project_output_dir(project_id)
@@ -1256,7 +1256,7 @@ def start_vertical_zip(project_id: str, payload: VerticalZipRequest):
     else:
         chosen = [c for c in all_clips if c.get("review_status") == "keep"]
     if not chosen:
-        raise HTTPException(status_code=400, detail="Не обрано жодного кліпу. Позначте кліпи «Беру» і спробуйте ще раз.")
+        raise HTTPException(status_code=400, detail="Жодного кліпу «В роботі». Познач їх на кроці 1.")
     chosen.sort(key=lambda c: c.get("virality_score", 0), reverse=True)
     job_id = uuid.uuid4().hex[:12]
     safe = "".join(ch for ch in proj.get("title", "video") if ch.isalnum() or ch in (" ", "_", "-")).strip()

@@ -28,9 +28,9 @@ const Home = (() => {
     busy: ["⏳ Обробляється", ""],
     failed: ["Не вдалося", "bad"],
     empty: ["Без кліпів", ""],
-    new: ["● Нове", "new"],
-    work: ["✂ В роботі", ""],
-    done: ["✓ Готово", "done"],
+    new: ["● Нове відео", "new"],
+    work: ["✂ Розбираю", ""],
+    done: ["✓ Розібрано", "done"],
   };
 
   function metaOf(p, st) {
@@ -41,7 +41,7 @@ const Home = (() => {
       case "busy": return "Обробляється…";
       case "failed": return errorSummaryHtml(p.last_error);
       case "empty": return "Клік, щоб знайти кліпи";
-      case "done": return `<b>${kept} в роботі</b> з ${total} · усі переглянуто`;
+      case "done": return `<b>${kept} в роботі</b> з ${total} · усі розібрано`;
       default: {
         // «Вірусні» first; weaker clips wait in «Запас» (older projects without the counts fall back to the total)
         if (p.new_count == null) return `<b>${total} кліпів</b>${kept ? ` · ${kept} в роботі` : ""}`;

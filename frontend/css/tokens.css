@@ -14,6 +14,8 @@
   /* meaning */
   --ok: #58c27d; --ok-rgb: 88 194 125; --ok-soft: #15301f;
   --danger: #e05a5a; --danger-rgb: 224 90 90; --danger-soft: #3a1a1a; --danger-text: #e0675a;
+  /* solid fills under white text (badges, toasts): at least 4.5:1 with white in both themes */
+  --ok-solid: #1f7a45; --danger-solid: #b5363a; --info-solid: #2f62c7;
   --warn: #fbbf24; --warn-rgb: 251 191 36;
   --info: #5b8def; --info-rgb: 59 130 246; --info-soft: #18233a; --info-text: #9cc4f0;
   /* clip statuses: Нове / В роботі / Виконано / Не беру / Запас */
@@ -41,6 +43,7 @@
     --accent-grad: linear-gradient(90deg, #548000, #649200);
     --ok: #1b7f4b; --ok-rgb: 27 127 75; --ok-soft: #d9efe1;
     --danger: #c2334a; --danger-rgb: 194 51 74; --danger-soft: #f8dde2; --danger-text: #b3261e;
+    --ok-solid: #1b7f4b; --danger-solid: #c2334a; --info-solid: #2f6fd6;
     --info: #2f6fd6; --info-soft: #dce7fb; --info-text: #1d4ed8;
     --st-new: #b5bcc2;
     --shadow: 0 1px 2px rgba(17, 21, 24, .06), 0 4px 14px rgba(17, 21, 24, .05); --pop-shadow: 0 8px 24px rgba(17, 21, 24, .18);
@@ -56,6 +59,7 @@
   --accent-grad: linear-gradient(90deg, #548000, #649200);
   --ok: #1b7f4b; --ok-rgb: 27 127 75; --ok-soft: #d9efe1;
   --danger: #c2334a; --danger-rgb: 194 51 74; --danger-soft: #f8dde2; --danger-text: #b3261e;
+  --ok-solid: #1b7f4b; --danger-solid: #c2334a; --info-solid: #2f6fd6;
   --info: #2f6fd6; --info-soft: #dce7fb; --info-text: #1d4ed8;
   --st-new: #b5bcc2;
   --shadow: 0 1px 2px rgba(17, 21, 24, .06), 0 4px 14px rgba(17, 21, 24, .05); --pop-shadow: 0 8px 24px rgba(17, 21, 24, .18);

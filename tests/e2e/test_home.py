@@ -78,12 +78,12 @@ def test_reviewed_video_shows_progress(page, studio, project):
     page.goto(studio["url"] + "/")
     card = page.locator(".video-card", has_text="Тестовий подкаст")
     card.wait_for()
-    assert "В роботі" in card.locator(".vc-badge").inner_text()
+    assert "Розбираю" in card.locator(".vc-badge").inner_text()
     assert "2 вірусних · 1 в роботі" in card.locator(".video-card-meta").inner_text()
     for idx in (3, 4):
         db.update_clip_fields(PROJECT_ID, idx, review_status="drop")
     page.reload()
-    assert "Готово" in page.locator(".video-card", has_text="Тестовий подкаст").locator(".vc-badge").inner_text()
+    assert "Розібрано" in page.locator(".video-card", has_text="Тестовий подкаст").locator(".vc-badge").inner_text()
 
 
 def test_search_and_sort_with_many_videos(page, studio, extra_projects):

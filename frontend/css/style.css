@@ -1057,7 +1057,7 @@ body {
   position: fixed;
   bottom: 24px;
   right: 24px;
-  background: var(--ok);
+  background: var(--ok-solid);
   color: var(--white);
   padding: 12px 20px;
   border-radius: var(--r-sm);
@@ -1078,15 +1078,15 @@ body {
 }
 
 .toast.toast-success {
-  background: var(--accent-emerald);
+  background: var(--ok-solid);
 }
 
 .toast.toast-info {
-  background: var(--accent-blue);
+  background: var(--info-solid);
 }
 
 .toast.toast-error {
-  background: var(--danger);
+  background: var(--danger-solid);
 }
 
 /* ── Interactive Trim Modal & Extra Controls ────────────────────────────── */
@@ -1352,7 +1352,7 @@ body {
 .hero-title { font-family: var(--head-font); font-weight: 400; font-size: clamp(24px, 3.4vw, 34px); text-transform: uppercase; letter-spacing: .01em; color: var(--text-strong); text-wrap: balance; }
 .hero-sub { color: var(--text-muted); font-size: var(--fs-md); max-width: 60ch; }
 .hero-source { display: flex; gap: 8px; width: min(760px, 100%); padding: 8px; border-radius: var(--r-md); background: var(--bg-card-alt); border: 2px solid var(--border-color); margin-top: 6px; }
-.hero-source:focus-within { border-color: var(--accent-orange); }
+.hero-source:focus-within { border-color: var(--accent-orange); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / .3); }
 .hero-input { background: transparent; border: 0; font-size: var(--fs-lg); padding: 12px 10px; min-width: 0; }
 .hero-input:focus { border: 0; }
 .hero-file, .hero-go { font-size: var(--fs-md); padding: 12px 18px; }
@@ -1439,8 +1439,8 @@ body:not(.home-empty) .home-how { display: none !important; }
 
 .vc-badge { position: absolute; left: 10px; top: 10px; z-index: 2; font-family: inherit; font-weight: 800; font-size: var(--fs-xs); line-height: 1.2; letter-spacing: .02em; padding: 4px 9px; border-radius: var(--r-pill); background: rgb(var(--scrim-rgb) / .72); color: var(--white); pointer-events: none; white-space: nowrap; }
 .vc-badge.new { background: var(--accent-orange); color: var(--accent-ink); }
-.vc-badge.done { background: var(--ok); color: var(--white); }
-.vc-badge.bad { background: var(--danger); color: var(--white); }
+.vc-badge.done { background: var(--ok-solid); color: var(--white); }
+.vc-badge.bad { background: var(--danger-solid); color: var(--white); }
 .vc-dots { position: absolute; right: 8px; top: 8px; z-index: 3; width: 32px; height: 32px; border-radius: var(--r-md); border: 0; background: rgb(var(--scrim-rgb) / .6); color: var(--white); font-weight: 800; font-size: var(--fs-lg); cursor: pointer; opacity: 0; transition: opacity .15s; }
 .video-card:hover .vc-dots, .video-card:focus-within .vc-dots, .video-card.menu-open .vc-dots { opacity: 1; }
 @media (hover: none) { .vc-dots { opacity: 1; } }
