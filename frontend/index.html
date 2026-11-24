@@ -681,7 +681,16 @@
                   <button type="button" class="ed-btn sm" id="vxNext" title="Наступний кліп (↓)" aria-label="Наступний кліп">↓</button>
                 </div>
               </div>
+              <div class="vx-view vx-seg" id="vxView" role="group" aria-label="Що показати" hidden>
+                <button type="button" data-v="frame" aria-pressed="false">Рамки на кадрі</button>
+                <button type="button" data-v="phone" aria-pressed="true">Як на телефоні</button>
+              </div>
               <div class="vx-screen">
+              <div class="vx-fed" id="vxFed" hidden>
+                  <canvas id="vxSrc" width="960" height="540"></canvas>
+                  <div class="vx-gameb" id="vxGameB" title="Частина гри, що йде на телефон. Тягни вліво-вправо."><span>ГРА · тягни вліво-вправо</span></div>
+                  <div class="vx-camb" id="vxCamB" title="Рамка вебки. Тягни її або кутики."><span>ВЕБКА</span><i data-h="nw"></i><i data-h="ne"></i><i data-h="sw"></i><i data-h="se"></i></div>
+                </div>
               <div class="vx-phone" id="vxPhone" role="button" tabindex="0" aria-label="Попередній вигляд вертикального кліпу. Клік: грати або пауза">
                   <canvas id="vxCanvas" width="360" height="640"></canvas>
                   <div class="vx-hook" id="vxHook" hidden></div>
@@ -730,6 +739,25 @@
                   <button type="button" data-v="blur" title="Весь горизонтальний кадр на розмитому тлі">
                     <svg viewBox="0 0 66 90" aria-hidden="true"><rect x="1" y="1" width="64" height="88" rx="9" class="f" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="2" width="62" height="25" rx="8" fill="currentColor" opacity=".12"/><rect x="2" y="63" width="62" height="25" rx="8" fill="currentColor" opacity=".12"/><rect x="3" y="28" width="60" height="34" fill="currentColor" opacity=".25" stroke="currentColor" stroke-width="1.2"/><circle cx="24" cy="41" r="5" fill="currentColor" opacity=".7"/><circle cx="43" cy="41" r="5" fill="currentColor" opacity=".7"/></svg>
                     <span><b>Весь кадр</b><small>Видно все відео, зверху й знизу розмитий фон. Коли в кадрі кілька людей.</small></span></button>
+                  <button type="button" data-v="stream" title="Запис стріму: вебка окремо, гра окремо">
+                    <svg viewBox="0 0 66 90" aria-hidden="true"><rect x="1" y="1" width="64" height="88" rx="9" class="f" stroke="currentColor" stroke-width="1.5"/><rect x="3" y="3" width="60" height="28" rx="7" class="cm" opacity=".45"/><circle cx="33" cy="15" r="6" fill="currentColor" opacity=".7"/><path d="M22 31c2-6 6-8 11-8s9 2 11 8" fill="currentColor" opacity=".5"/><rect x="3" y="33" width="60" height="54" rx="7" fill="currentColor" opacity=".18"/><path d="M8 78l14-18 10 10 9-14 18 22z" fill="currentColor" opacity=".35"/></svg>
+                    <span><b>Стрім: вебка + гра</b><small>Для записів стрімів: обличчя стрімера окремо, гра окремо.</small></span></button>
+                </div>
+                <div class="vx-stream" id="vxStream" hidden>
+                  <p class="vx-camst" id="vxCamSt" role="status"></p>
+                  <div class="vx-cambtns">
+                    <button type="button" class="ed-btn sm" id="vxCamMark" title="Показати рамку вебки на кадрі, щоб посунути її">▭ Рамка вебки</button>
+                    <button type="button" class="ed-btn sm" id="vxCamFind" title="Знайти вебку ще раз автоматично">↻ Знайти</button>
+                    <button type="button" class="ed-btn sm" id="vxCamOff">Без вебки</button>
+                  </div>
+                  <div class="vx-lbl">Розкладка</div>
+                  <div class="vx-lay" id="vxLay">
+                    <button type="button" data-v="top"><i class="m"><s class="c" style="height:34%"></s><s class="g" style="flex:1"></s></i>Вебка зверху</button>
+                    <button type="button" data-v="full"><i class="m"><s class="c" style="height:34%"></s><s class="g" style="height:20%"></s><s class="b" style="flex:1"></s></i>Вебка + вся гра</button>
+                    <button type="button" data-v="pip"><i class="m"><s class="g" style="flex:1"></s><s class="c pip"></s></i>Гра на весь екран</button>
+                  </div>
+                  <label class="vx-lbl" for="vxCamShare">Розмір вебки</label>
+                  <div class="vx-range"><span>менше</span><input type="range" id="vxCamShare" min="22" max="50" step="1" value="34"><span>більше</span></div>
                 </div>
               </section>
               <section class="vx-pane" data-t="style">

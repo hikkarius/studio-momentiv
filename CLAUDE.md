@@ -18,6 +18,7 @@
 - `transcription.py` (Whisper + кеш `.transcript_cache/`), `ai_selector.py` (Gemini: перебір
   `gemini.candidate_models`, до 3 проходів, потім `GeminiUnavailableError`; ніколи не вигадувати кліпи),
   `clip_refiner.py` (межі кліпів), `vertical_render.py` (9:16, кадрування за обличчям YuNet, субтитри ASS),
+  `streamer.py` («Стрім: вебка + гра»: рамка вебки на відео, розкладки top/full/pip, той самий план для превʼю й рендера),
   `subtitles_generator.py` (SRT).
 - `config.yaml` — значення за замовчуванням; `user_settings.json` (екран «Налаштування») поверх нього;
   ключ у `.env` (`GEMINI_API_KEY`). `config_loader.py`, `config_schema.py`.
@@ -50,7 +51,8 @@ Windows (ноутбук автора, `C:\studio_momentiv`):
 ## Правила
 
 - Чистий 16:9 кліп завжди має лишатися доступним для скачування (автор монтує в CapCut).
-- Кадрування для вертикалі: лише «Авто (за обличчям)» і «Весь кадр».
+- Кадрування для вертикалі: лише «Авто (за обличчям)», «Весь кадр» і «Стрім: вебка + гра» (для записів стрімів).
+  Рамка вебки зберігається на відео у `web_output/<id>/stream.json` (не у `vertical/`, бо прибирання диска чистить `vertical/`).
 - Нічого не ламати в даних друзів при оновленні: `update.ps1` зберігає `.env`, `user_settings.json`,
   `studio_data.db*`, `web_output/`, `web_uploads/`, `.venv/`, `tools/`. Нові файли даних додавати в його `$Keep`.
 - Помилки Gemini показувати чесно, людською мовою (ліміт безкоштовного ключа, неправильний ключ, 503).

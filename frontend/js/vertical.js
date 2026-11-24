@@ -4,6 +4,8 @@
  * (face tracking / blurred fit / two people stacked) and lays the caption style over it, synced
  * to the playhead. Settings are saved per clip (vertical_opts) and remembered as the template for
  * clips you haven't touched yet. Rendering itself happens on the server (ffmpeg + .ass).
+ * «Стрім: вебка + гра» (frame "stream"): the server finds the webcam rectangle once per video (streamer.py);
+ * the «Рамки на кадрі» view shows it over the 16:9 frame, where it and the game area can be dragged.
  * Wired by editor.js through Vertical.attach(ctx).
  */
 const Vertical = (() => {
@@ -19,7 +21,9 @@ const Vertical = (() => {
     { id: "min", name: "Мінімал", chunk: 7, chars: 34, mode: "none", pos: 72 },
   ];
   let ctx = null;
-  const st = { opts: null, plan: null, planKey: "", words: [], loading: false, raf: 0, saveTimer: null, pending: null, selWord: null, zipJob: null, capKey: "" };
+  const st = { opts: null, plan: null, planKey: "", words: [], loading: false, raf: 0, saveTimer: null, pending: null, selWord: null, zipJob: null, capKey: "",
+    stream: null, streamPid: "", view: "phone", drag: null };
+  const DEFAULT_SHARE = 0.34;
 
   // What each style tile shows: one short phrase drawn in that style
   const TILE = { none: "<i>без тексту</i>", hl: "ЦЕ <i>ВОНО</i>", kar: "<i>ЦЕ</i> ВОНО", one: "ВОНО", box: "<i>Це воно</i>", gold: "ЦЕ <i>ВОНО</i>", min: "це воно" };
@@ -28,7 +32,7 @@ const Vertical = (() => {
   const TEXTS = [["FFFFFF", "Біле"], ["FFE14D", "Жовте"], ["FFF8EC", "Кремове"]];
   const DEFAULT_ACCENT = { hl: "FFE14D", kar: "7CFF4F", one: "FFCF33", gold: "E6C068", box: "FFE14D", min: "FFE14D" };
   const TEMPLATE_FIELDS = ["style", "frame", "pos", "hook", "size", "color", "text", "hook_style", "hook_size", "hook_full",
-    "round", "stroke", "hook_round", "hook_stroke", "hook_pos"];
+    "round", "stroke", "hook_round", "hook_stroke", "hook_pos", "stream_layout", "cam_share"];
   const LIGHT = ["FFFFFF", "FFF8EC"];
   // Same rule as the renderer: a white edge on white letters would melt them, so they keep the black one.
   const letterEdge = (stroke, text) => (stroke && !(stroke === "FFFFFF" && LIGHT.includes(text)) ? `#${stroke}` : "#000");
@@ -36,9 +40,22 @@ const Vertical = (() => {
   function readTemplate() {
     try { return JSON.parse(localStorage.getItem(TEMPLATE_KEY) || "{}") || {}; } catch (_) { return {}; }
   }
+  // «Стрім» is a property of the video, not a taste: it is remembered per video, other videos keep their own frame.
+  const STREAM_KEY = "studio-stream-videos";
+  function streamVideos() {
+    try { return JSON.parse(localStorage.getItem(STREAM_KEY) || "[]") || []; } catch (_) { return []; }
+  }
+  function markStreamVideo(on) {
+    const pid = ctx.pid();
+    const list = streamVideos().filter((x) => x !== pid);
+    if (on) list.push(pid);
+    try { localStorage.setItem(STREAM_KEY, JSON.stringify(list.slice(-200))); } catch (_) {}
+  }
   function writeTemplate(o) {
     const t = {};
+    const old = readTemplate();
     TEMPLATE_FIELDS.forEach((k) => { t[k] = o[k]; });
+    if (t.frame === "stream") t.frame = old.frame && old.frame !== "stream" ? old.frame : "auto";
     try { localStorage.setItem(TEMPLATE_KEY, JSON.stringify(t)); } catch (_) {}
   }
 
@@ -46,8 +63,9 @@ const Vertical = (() => {
     const own = clip.vertical_opts || {};
     const base = { style: "hl", frame: "auto", pos: null, hook: false, edits: {}, size: 1, color: null, text: null,
       hook_text: null, hook_style: "white", hook_size: 1, hook_full: false,
-      round: false, stroke: null, hook_round: false, hook_stroke: null, hook_pos: null };
+      round: false, stroke: null, hook_round: false, hook_stroke: null, hook_pos: null, stream_layout: "top", cam_share: null };
     const o = Object.keys(own).length ? { ...base, ...own, edits: { ...(own.edits || {}) } } : { ...base, ...readTemplate(), edits: {} };
+    if (!Object.keys(own).length && streamVideos().includes(ctx.pid())) o.frame = "stream";
     if (o.frame === "track" || o.frame === "split") o.frame = "auto"; // these now live inside «Авто»
     return o;
   }
@@ -57,9 +75,12 @@ const Vertical = (() => {
     const o = st.opts;
     $("vxStyle").innerHTML = STYLES.map((s) => `<button type="button" data-v="${s.id}" aria-pressed="${s.id === o.style}">` +
       `<span class="vx-tile vx-t-${s.id}" aria-hidden="true">${TILE[s.id]}</span><b>${s.name}</b></button>`).join("");
-    document.querySelectorAll("#vxFrame button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === (o.frame === "blur" ? "blur" : "auto"))));
+    const frame = ["blur", "stream"].includes(o.frame) ? o.frame : "auto";
+    document.querySelectorAll("#vxFrame button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === frame)));
+    renderStream();
     const split = st.plan && st.plan.layout.kind === "split";
-    $("vxPos").value = o.pos ?? (split ? 50 : styleOf(o.style).pos || 66);
+    const streamPos = st.plan && st.plan.layout.kind === "stream" ? st.plan.layout.stream.pos : null;
+    $("vxPos").value = o.pos ?? (split ? 50 : streamPos ?? (styleOf(o.style).pos || 66));
     $("vxSize").value = Math.round((o.size || 1) * 100);
     $("vxSizeV").textContent = `${Math.round((o.size || 1) * 100)}%`;
     const acc = o.color || DEFAULT_ACCENT[o.style] || "FFE14D";
@@ -72,7 +93,9 @@ const Vertical = (() => {
     document.querySelectorAll("#vxHookStyle button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === (o.hook_style || "white"))));
     document.querySelectorAll("#vxHookDur button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.v === "all") === !!o.hook_full)));
     $("vxHookSize").value = Math.round((o.hook_size || 1) * 100);
-    $("vxHookPos").value = o.hook_pos ?? 9.9;
+    const streamHook = st.plan && st.plan.layout.kind === "stream" ? st.plan.layout.stream.hook_pos : null;
+    const hookPos = o.hook_pos ?? streamHook ?? 9.9;
+    $("vxHookPos").value = hookPos;
     const pressed = (id, v) => document.querySelectorAll(`#${id} button`).forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
     pressed("vxRound", o.round ? "1" : "0");
     pressed("vxHookRound", o.hook_round ? "1" : "0");
@@ -92,7 +115,7 @@ const Vertical = (() => {
     ph.style.setProperty("--vx-hstroke", letterEdge(o.hook_stroke, o.text || "FFFFFF"));
     $("vxCap").style.top = `${$("vxPos").value}%`;
     const hook = $("vxHook");
-    hook.style.top = `${o.hook_pos ?? 9.9}%`;
+    hook.style.top = `${hookPos}%`;
     hook.className = `vx-hook h-${o.hook_style || "white"}`;
     hook.innerHTML = `<span>${escapeText(o.hook_text || ctx.clip().title || "")}</span>`;
     $("vxDlSubs").disabled = o.style === "none";
@@ -104,7 +127,7 @@ const Vertical = (() => {
     const p = st.plan;
     let text = "";
     if (p) {
-      const kind = { track: "Кадр слідкує за обличчям.", split: "У кадрі двоє: ділю екран навпіл.", blur: "Показую весь кадр на розмитому тлі.", center: "Кадр по центру." }[p.layout.kind];
+      const kind = { track: "Кадр слідкує за обличчям.", split: "У кадрі двоє: ділю екран навпіл.", blur: "Показую весь кадр на розмитому тлі.", center: "Кадр по центру.", stream: "" }[p.layout.kind] || "";
       text = p.layout.note || (st.opts.frame === "auto" ? `Авто: ${kind.toLowerCase()}` : "");
       if (!p.words.length && st.opts.style !== "none") text = (text ? text + " " : "") + "Тексту для цього відео немає, субтитрів не буде.";
     }
@@ -188,7 +211,11 @@ const Vertical = (() => {
 
   function setOpt(k, v) {
     st.opts[k] = v;
-    if (k === "frame") loadPlan(true);
+    if (k === "frame") markStreamVideo(v === "stream");
+    if (["frame", "stream_layout", "cam_share"].includes(k)) {
+      if (k === "frame" && v !== "stream") st.view = "phone";
+      loadPlan(true);
+    }
     renderControls();
     renderNote();
     writeTemplate(st.opts);
@@ -214,14 +241,22 @@ const Vertical = (() => {
   async function loadPlan(force = false) {
     const c = ctx.clip();
     if (!c) return;
-    const key = `${c.clip_index}:${c.start_sec}:${c.end_sec}:${st.opts.frame}`;
+    const o = st.opts;
+    const stream = o.frame === "stream";
+    const key = `${c.clip_index}:${c.start_sec}:${c.end_sec}:${o.frame}` + (stream ? `:${o.stream_layout}:${o.cam_share}` : "");
     if (!force && key === st.planKey && st.plan) return;
     st.planKey = key;
     $("vxBusy").hidden = false;
-    $("vxBusy").textContent = "Шукаю обличчя…";
+    $("vxBusy").textContent = stream && !st.stream ? "Шукаю вебку на стрімі… (до 10 с)" : "Шукаю обличчя…";
     try {
-      const plan = await ctx.api(`/api/projects/${ctx.pid()}/clips/${c.clip_index}/vertical-plan?frame=${st.opts.frame}`);
+      let url = `/api/projects/${ctx.pid()}/clips/${c.clip_index}/vertical-plan?frame=${o.frame}`;
+      if (stream) url += `&stream_layout=${o.stream_layout || "top"}` + (o.cam_share != null ? `&cam_share=${o.cam_share}` : "");
+      const plan = await ctx.api(url);
       if (st.planKey !== key) return;
+      if (stream && (!st.stream || st.streamPid !== ctx.pid())) {
+        st.stream = await ctx.api(`/api/projects/${ctx.pid()}/stream`);
+        st.streamPid = ctx.pid();
+      }
       st.plan = plan;
       st.words = mergeWords(plan.words || []);
       $("vxBusy").hidden = true;
@@ -270,6 +305,8 @@ const Vertical = (() => {
       g.filter = "none";
       const h = (W / vw) * vh;
       g.drawImage(v, 0, (H - h) / 2, W, h);
+    } else if (lay.kind === "stream" && lay.stream && lay.stream.parts) {
+      drawStream(g, v, lay.stream, W, H);
     } else if (lay.kind === "split" && lay.split.length === 2) {
       lay.split.forEach(([cx, cy, hf], k) => {
         let ch = vh * hf, cw = Math.min(vw, ch * (W / (H / 2)));
@@ -341,10 +378,172 @@ const Vertical = (() => {
     }).join("");
   }
 
+  // ─── «Стрім: вебка + гра» ──────────────────────────────────────────────────
+  /** Same parts as the renderer (streamer.plan): src in fractions of the frame, dst in px of 1080×1920. */
+  function drawStream(g, v, sp, W, H) {
+    const vw = v.videoWidth, vh = v.videoHeight, k = W / 1080;
+    g.fillStyle = "#000";
+    g.fillRect(0, 0, W, H);
+    if (sp.bg) {
+      const s = Math.max(W / vw, H / vh);
+      g.filter = "blur(10px) brightness(0.8)";
+      g.drawImage(v, (W - vw * s) / 2, (H - vh * s) / 2, vw * s, vh * s);
+      g.filter = "none";
+    }
+    for (const p of sp.parts) {
+      const [sx, sy, sw, sh] = [p.src[0] * vw, p.src[1] * vh, p.src[2] * vw, p.src[3] * vh];
+      const b = (p.border || 0) * k;
+      const [dx, dy, dw, dh] = [p.dst[0] * k, p.dst[1] * k, p.dst[2] * k, p.dst[3] * k];
+      if (b) { g.fillStyle = "#fff"; g.fillRect(dx, dy, dw, dh); }
+      g.drawImage(v, sx, sy, sw, sh, dx + b, dy + b, dw - 2 * b, dh - 2 * b);
+      if (p.role === "game" && sp.blur) {
+        // the webcam inside the game picture is blurred, as in the render
+        const bx0 = Math.max(p.src[0], sp.blur[0]), by0 = Math.max(p.src[1], sp.blur[1]);
+        const bx1 = Math.min(p.src[0] + p.src[2], sp.blur[0] + sp.blur[2]), by1 = Math.min(p.src[1] + p.src[3], sp.blur[1] + sp.blur[3]);
+        if (bx1 > bx0 && by1 > by0) {
+          const fx = (x) => dx + ((x - p.src[0]) / p.src[2]) * dw, fy = (y) => dy + ((y - p.src[1]) / p.src[3]) * dh;
+          g.save();
+          g.beginPath();
+          g.rect(fx(bx0), fy(by0), fx(bx1) - fx(bx0), fy(by1) - fy(by0));
+          g.clip();
+          g.filter = "blur(8px)";
+          g.drawImage(v, bx0 * vw, by0 * vh, (bx1 - bx0) * vw, (by1 - by0) * vh, fx(bx0), fy(by0), fx(bx1) - fx(bx0), fy(by1) - fy(by0));
+          g.restore();
+          g.filter = "none";
+        }
+      }
+    }
+  }
+
+  function renderStream() {
+    const on = st.opts.frame === "stream";
+    $("vxStream").hidden = !on;
+    $("vxView").hidden = !on;
+    if (!on) st.view = "phone";
+    document.querySelectorAll("#vxLay button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === (st.opts.stream_layout || "top"))));
+    $("vxCamShare").value = Math.round((st.opts.cam_share ?? DEFAULT_SHARE) * 100);
+    document.querySelectorAll("#vxView button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === st.view)));
+    const fed = st.view === "frame";
+    $("vxFed").hidden = !fed;
+    $("vxPhone").hidden = fed;
+    const s = st.stream;
+    let html = "";
+    if (on && !s) html = "Шукаю вебку на стрімі…";
+    else if (s && s.cam) html = s.auto === false ? "<b>✓ Рамку вебки виставлено вручну.</b> Одна на всі кліпи цього відео."
+      : "<b>✓ Вебку знайдено.</b> Перевір рамку на кадрі; одна на всі кліпи цього відео.";
+    else if (s) html = s.auto === false ? "<b class=\"no\">Вебку вимкнено:</b> на телефоні лише гра."
+      : `<b class="no">Вебку не знайдено.</b> ${escapeText(s.note || "")} Натисни «Рамка вебки» і познач її на кадрі.`;
+    $("vxCamSt").innerHTML = html;
+    $("vxCamOff").disabled = !(s && s.cam);
+    placeBoxes();
+  }
+
+  /** Puts the webcam frame and the game area over the 16:9 picture (percentages of the frame). */
+  function placeBoxes() {
+    if ($("vxFed").hidden) return;
+    const s = st.stream, cb = $("vxCamB"), gb = $("vxGameB");
+    const put = (el, r) => { el.style.left = `${r[0] * 100}%`; el.style.top = `${r[1] * 100}%`; el.style.width = `${r[2] * 100}%`; el.style.height = `${r[3] * 100}%`; };
+    const cam = st.drag && st.drag.cam ? st.drag.cam : s && s.cam;
+    cb.hidden = !cam;
+    if (cam) { put(cb, cam); cb.classList.toggle("low", cam[1] < 0.08); }
+    const sp = st.plan && st.plan.layout.kind === "stream" ? st.plan.layout.stream : null;
+    const game = sp && sp.parts.find((p) => p.role === "game");
+    const whole = !game || game.src[2] > 0.99;
+    gb.hidden = whole;
+    if (!whole) {
+      const r = [...game.src];
+      if (st.drag && st.drag.gx != null) r[0] = Math.max(0, Math.min(1 - r[2], st.drag.gx - r[2] / 2));
+      put(gb, r);
+    }
+  }
+
+  function drawSource() {
+    const cv = $("vxSrc"), v = ctx.video();
+    if (!v.videoWidth || v.readyState < 2) return;
+    const g = cv.getContext("2d");
+    g.drawImage(v, 0, 0, cv.width, cv.height);
+  }
+
+  async function saveStream(body) {
+    try {
+      st.stream = await ctx.api(`/api/projects/${ctx.pid()}/stream`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      st.streamPid = ctx.pid();
+    } catch (e) {
+      ctx.toast("Не вдалося зберегти рамку: " + e.message, true);
+    }
+    st.drag = null;
+    await loadPlan(true);
+  }
+
+  async function redetect() {
+    const btn = $("vxCamFind");
+    btn.disabled = true;
+    $("vxCamSt").textContent = "Шукаю вебку на стрімі… (до 10 с)";
+    try {
+      st.stream = await ctx.api(`/api/projects/${ctx.pid()}/stream/redetect`, { method: "POST" });
+      st.streamPid = ctx.pid();
+    } catch (e) {
+      ctx.toast("Не вдалося знайти вебку: " + e.message, true);
+    }
+    btn.disabled = false;
+    await loadPlan(true);
+  }
+
+  function setView(v) {
+    st.view = v;
+    renderStream();
+  }
+
+  /** Dragging the webcam frame (move or a corner) and the game area (left-right). */
+  function startDrag(e) {
+    const fed = $("vxFed");
+    const r = fed.getBoundingClientRect();
+    const handle = e.target.closest("i[data-h]");
+    const onCam = e.target.closest("#vxCamB");
+    const onGame = e.target.closest("#vxGameB");
+    if (!onCam && !onGame) return;
+    e.preventDefault();
+    const x0 = (e.clientX - r.left) / r.width, y0 = (e.clientY - r.top) / r.height;
+    const cam0 = st.stream && st.stream.cam ? [...st.stream.cam] : null;
+    const sp = st.plan && st.plan.layout.stream;
+    const game = sp && sp.parts.find((p) => p.role === "game");
+    const gx0 = game ? game.src[0] + game.src[2] / 2 : 0.5;
+    const mode = onCam ? (handle ? handle.dataset.h : "move") : "game";
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const move = (ev) => {
+      const dx = (ev.clientX - r.left) / r.width - x0, dy = (ev.clientY - r.top) / r.height - y0;
+      if (mode === "game") { st.drag = { gx: clamp(gx0 + dx, 0, 1) }; placeBoxes(); return; }
+      let [x, y, w, h] = cam0;
+      if (mode === "move") { x = clamp(x + dx, 0, 1 - w); y = clamp(y + dy, 0, 1 - h); }
+      else {
+        let x1 = x + w, y1 = y + h;
+        if (mode.includes("w")) x = clamp(x + dx, 0, x1 - 0.04);
+        if (mode.includes("e")) x1 = clamp(x1 + dx, x + 0.04, 1);
+        if (mode.includes("n")) y = clamp(y + dy, 0, y1 - 0.04);
+        if (mode.includes("s")) y1 = clamp(y1 + dy, y + 0.04, 1);
+        w = x1 - x; h = y1 - y;
+      }
+      st.drag = { cam: [x, y, w, h] };
+      placeBoxes();
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const d = st.drag;
+      if (!d) return;
+      if (d.cam) saveStream({ cam: d.cam.map((v) => Math.round(v * 10000) / 10000), game_x: (st.stream && st.stream.game_x) ?? 0.5 });
+      else if (d.gx != null) saveStream({ keep_cam: true, game_x: Math.round(d.gx * 10000) / 10000 });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
   function loop() {
     st.raf = 0;
     if ($("edVx").hidden || $("editor").hidden) return;
-    draw();
+    if (st.view === "frame") drawSource(); else draw();
     st.raf = requestAnimationFrame(loop);
   }
   function startLoop() { if (!st.raf) st.raf = requestAnimationFrame(loop); }
@@ -419,6 +618,7 @@ const Vertical = (() => {
     st.planKey = "";
     st.words = [];
     st.selWord = null;
+    if (st.streamPid !== ctx.pid()) { st.stream = null; st.streamPid = ""; }
     $("vxWedit").hidden = true;
     renderControls();
     renderNote();
@@ -437,6 +637,16 @@ const Vertical = (() => {
     ctx = context;
     $("vxStyle").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setOpt("style", b.dataset.v); });
     $("vxFrame").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setOpt("frame", b.dataset.v); });
+    $("vxLay").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setOpt("stream_layout", b.dataset.v); });
+    $("vxCamShare").addEventListener("change", (e) => setOpt("cam_share", Number(e.target.value) / 100));
+    $("vxView").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setView(b.dataset.v); });
+    $("vxCamFind").addEventListener("click", redetect);
+    $("vxCamOff").addEventListener("click", () => saveStream({ cam: null, game_x: (st.stream && st.stream.game_x) ?? 0.5 }));
+    $("vxCamMark").addEventListener("click", () => {
+      if (st.stream && !st.stream.cam) saveStream({ cam: [0.02, 0.66, 0.26, 0.3], game_x: st.stream.game_x ?? 0.5 });
+      setView("frame");
+    });
+    $("vxFed").addEventListener("pointerdown", startDrag);
     $("vxPos").addEventListener("input", (e) => { $("vxCap").style.top = `${e.target.value}%`; });
     $("vxPos").addEventListener("change", (e) => setOpt("pos", Number(e.target.value)));
     $("vxHookOn").addEventListener("change", (e) => setOpt("hook", e.target.checked));
@@ -497,7 +707,8 @@ const Vertical = (() => {
 
   /** Read-only snapshot for UI tests. */
   function state() {
-    return { opts: st.opts, layout: st.plan && st.plan.layout.kind, words: st.words.length, cap: $("vxCap").textContent };
+    return { opts: st.opts, layout: st.plan && st.plan.layout.kind, words: st.words.length, cap: $("vxCap").textContent,
+      stream: st.plan && st.plan.layout.stream, cam: st.stream && st.stream.cam, view: st.view };
   }
 
   return { attach, onClip, onShow, state };
