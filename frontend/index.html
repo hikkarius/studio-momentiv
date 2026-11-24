@@ -59,7 +59,7 @@
         <button class="tab-btn active" id="tabUrlBtn" onclick="switchSourceTab('url')">Посилання</button>
       </div>
       <div class="hero-source" id="tabUrlContent">
-        <textarea id="urlInput" rows="1" placeholder="Встав посилання на YouTube чи TikTok" title="Можна вставити кілька посилань, кожне з нового рядка" class="input-text hero-input" aria-label="Посилання на відео"></textarea>
+        <textarea id="urlInput" rows="1" placeholder="Посилання на YouTube чи TikTok" title="Можна вставити кілька посилань, кожне з нового рядка" class="input-text hero-input" aria-label="Посилання на відео"></textarea>
         <button class="btn btn-secondary hero-file" type="button" onclick="document.getElementById('fileInput').click()">📁 Файл з комп’ютера</button>
         <button class="btn btn-primary hero-go" id="urlDownloadBtn" onclick="Queue.submitHero()">В чергу →</button>
       </div>
@@ -533,6 +533,7 @@
               <button type="button" class="btn btn-primary" id="welcomeSave" onclick="Welcome.saveKey()">Перевірити й зберегти</button>
             </div>
             <div class="welcome-msg" id="welcomeMsg" role="status" aria-live="polite"></div>
+            <button type="button" class="btn btn-secondary welcome-later" onclick="Welcome.close()">Пізніше: спершу подивлюсь студію</button>
           </li>
         </ol>
         <div class="welcome-gpu" id="welcomeGpu"></div>
@@ -544,8 +545,7 @@
         </details>
       </div>
       <footer class="settings-foot">
-        <button type="button" class="btn btn-secondary btn-sm" onclick="Welcome.close()">Пізніше</button>
-        <span id="welcomeVersion"></span>
+        <span id="welcomeVersion" hidden></span>
       </footer>
     </section>
   </div>

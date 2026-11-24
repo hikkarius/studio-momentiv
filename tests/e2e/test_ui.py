@@ -743,3 +743,13 @@ def test_keyboard_stays_in_the_open_window(page, studio, project):
     page.locator("#editor").wait_for(state="hidden")
     page.wait_for_function("!document.querySelector('main.studio-container').inert")
     assert not page.errors
+
+
+def test_phone_editor_opens_at_the_top(page, studio, project):
+    """On a narrow screen the editor starts at the video, not scrolled down to the clip strip."""
+    page.set_viewport_size({"width": 390, "height": 844})
+    open_editor(page, studio)
+    page.wait_for_timeout(300)
+    top = page.evaluate("document.getElementById('edVideo').getBoundingClientRect().top")
+    assert 0 <= top < 844
+    assert not page.errors

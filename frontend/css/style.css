@@ -1501,3 +1501,6 @@ body:not(.home-empty) .home-how { display: none !important; }
 .err-more span { display: block; margin-top: 4px; overflow-wrap: anywhere; }
 .q-item.failed .video-card-meta { color: inherit; }
 .video-card .vc-acts { padding: 0 14px 14px; margin-top: -4px; }
+
+/* Phone: the link field keeps its placeholder on one line */
+@media (max-width: 640px) { .hero-input { font-size: var(--fs-md); } }

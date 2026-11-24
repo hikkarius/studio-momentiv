@@ -144,7 +144,11 @@ const Editor = (() => {
 
   function scrollToCurrent() {
     const row = $("edList").querySelector('[aria-current="true"]');
-    if (row) row.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (!row) return;
+    // only sideways inside the strip: scrollIntoView also scrolled the whole editor down on a phone
+    const L = $("edList"), lr = L.getBoundingClientRect(), rr = row.getBoundingClientRect();
+    if (rr.left < lr.left) L.scrollLeft += rr.left - lr.left - 8;
+    else if (rr.right > lr.right) L.scrollLeft += rr.right - lr.right + 8;
   }
 
   /** Clips the map shows: those of the open shelf, plus the open clip (it may have just left the shelf). */
