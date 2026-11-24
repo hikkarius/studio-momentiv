@@ -141,6 +141,21 @@ def init_db():
         if "limit_reason" not in queue_columns:
             conn.execute("ALTER TABLE queue_items ADD COLUMN limit_reason TEXT NOT NULL DEFAULT '';")
 
+        if "title_variants" not in columns:
+            # JSON: hook titles the AI offered for the 9:16 title, [{"text": ..., "kind": ...}, ...]
+            conn.execute("ALTER TABLE candidate_clips ADD COLUMN title_variants TEXT NOT NULL DEFAULT '[]';")
+
+        # Which offered title the author picked: the AI is shown these to learn the author's taste
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS title_choices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id TEXT NOT NULL,
+            clip_index INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            text TEXT NOT NULL,
+            created_at REAL NOT NULL
+        );""")
+
 
 def new_shelf_size(duration_sec: float) -> int:
     """How many of the best clips go to «Нові»: about one per 90 s of video, 5…15."""
@@ -273,6 +288,11 @@ def _clip_row(row: Any) -> Dict[str, Any]:
         d["cuts"] = cuts if isinstance(cuts, list) else []
     except Exception:
         d["cuts"] = []
+    try:
+        tv = json.loads(d.get("title_variants") or "[]")
+        d["title_variants"] = tv if isinstance(tv, list) else []
+    except Exception:
+        d["title_variants"] = []
     return d
 
 
@@ -344,6 +364,9 @@ def update_clip_fields(project_id: str, clip_index: int, **fields: Any) -> Optio
     if fields.get("reserve") is not None:
         sets.append("reserve = ?")
         values.append(1 if fields["reserve"] else 0)
+    if fields.get("title_variants") is not None:
+        sets.append("title_variants = ?")
+        values.append(json.dumps(fields["title_variants"], ensure_ascii=False))
     if fields.get("vertical_opts") is not None:
         sets.append("vertical_opts = ?")
         values.append(json.dumps(fields["vertical_opts"], ensure_ascii=False))
@@ -358,6 +381,35 @@ def update_clip_fields(project_id: str, clip_index: int, **fields: Any) -> Optio
         rows = conn.execute("SELECT * FROM candidate_clips WHERE project_id = ?", (project_id,)).fetchall()
     clip = next((c for c in with_ranks([_clip_row(r) for r in rows]) if c["clip_index"] == clip_index), None)
     return clip
+
+
+TITLE_KINDS = ("цифра", "питання", "інтрига", "свій")
+
+
+def add_title_choice(project_id: str, clip_index: int, kind: str, text: str) -> None:
+    """Remembers the title the author put on a clip. One row per clip: a new pick replaces the old one."""
+    kind = kind if kind in TITLE_KINDS else "свій"
+    text = str(text).strip()[:200]
+    if not text:
+        return
+    with get_db() as conn:
+        conn.execute("DELETE FROM title_choices WHERE project_id = ? AND clip_index = ?", (project_id, clip_index))
+        conn.execute(
+            "INSERT INTO title_choices (project_id, clip_index, kind, text, created_at) VALUES (?, ?, ?, ?, ?)",
+            (project_id, int(clip_index), kind, text, time.time()),
+        )
+
+
+def title_choices(limit: int = 12) -> Dict[str, Any]:
+    """The author's latest title picks (newest first) and how often each kind was picked overall."""
+    with get_db() as conn:
+        recent = [dict(r) for r in conn.execute(
+            "SELECT kind, text FROM title_choices ORDER BY created_at DESC, id DESC LIMIT ?", (int(limit),)
+        ).fetchall()]
+        counts = {r["kind"]: r["n"] for r in conn.execute(
+            "SELECT kind, COUNT(*) AS n FROM title_choices GROUP BY kind"
+        ).fetchall()}
+    return {"recent": recent, "counts": counts, "total": sum(counts.values())}
 
 
 def create_job(job_id: str, project_id: str, job_type: str) -> Dict[str, Any]:

@@ -24,7 +24,8 @@ const Vertical = (() => {
   ];
   let ctx = null;
   const st = { opts: null, plan: null, planKey: "", words: [], loading: false, raf: 0, saveTimer: null, pending: null, selWord: null, zipJob: null, capKey: "",
-    stream: null, streamPid: "", autoPid: "", sel: null, view: "phone", drag: null, live: null, gesture: null, suppressClick: false, wheelTimer: null, spMemo: null };
+    stream: null, streamPid: "", autoPid: "", sel: null, view: "phone", drag: null, live: null, gesture: null, suppressClick: false, wheelTimer: null, spMemo: null,
+    ideasBusy: null, ideasAsked: new Set() };
 
   // What each style tile shows: one short phrase drawn in that style
   const TILE = { none: "<i>без тексту</i>", hl: "ЦЕ <i>ВОНО</i>", kar: "<i>ЦЕ</i> ВОНО", one: "ВОНО", box: "<i>Це воно</i>", gold: "ЦЕ <i>ВОНО</i>", min: "це воно" };
@@ -207,6 +208,7 @@ const Vertical = (() => {
     $("vxText").innerHTML = TEXTS.map(([c, n], i) => `<button type="button" data-v="${i ? c : ""}" aria-pressed="${(o.text || "") === (i ? c : "")}" style="background:#${c}" title="${n}"></button>`).join("");
     $("vxHookOn").checked = !!o.hook;
     $("vxHookSet").hidden = !o.hook;
+    renderIdeas();
     if (document.activeElement !== $("vxHookText")) $("vxHookText").value = o.hook_text || ctx.clip().title || "";
     document.querySelectorAll("#vxHookStyle button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === (o.hook_style || "white"))));
     document.querySelectorAll("#vxHookDur button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.v === "all") === !!o.hook_full)));
@@ -1285,6 +1287,63 @@ const Vertical = (() => {
     setTimeout(() => { $("vxProg").hidden = true; $("vxProgBar").style.width = "0"; $("vxZipInfo").textContent = ""; }, 1500);
   }
 
+  // ─── Title ideas: three hooks from the AI, the author's pick teaches it ──────
+  const ideaKey = (c) => `${ctx.pid()}:${c.clip_index}`;
+  function renderIdeas() {
+    const c = ctx && ctx.clip();
+    if (!c) return;
+    const list = Array.isArray(c.title_variants) ? c.title_variants : [];
+    const cur = (st.opts && st.opts.hook && (st.opts.hook_text || c.title)) || "";
+    $("vxIdeaList").innerHTML = list.map((v, i) => {
+      const on = cur.trim() === v.text.trim();
+      return `<button type="button" role="radio" class="vx-idea" data-i="${i}" aria-checked="${on}">` +
+        `<span class="vx-idea-t">${escapeText(v.text)}</span><span class="vx-idea-k">${escapeText(v.kind)}</span></button>`;
+    }).join("");
+    $("vxIdeaMore").textContent = list.length ? "↻ Ще 3 варіанти" : "Запропонувати 3 заголовки";
+    $("vxIdeaMore").disabled = st.ideasBusy === ideaKey(c);
+  }
+  async function fetchIdeas() {
+    const c = ctx.clip();
+    if (!c || st.ideasBusy) return;
+    const key = ideaKey(c);
+    st.ideasBusy = key;
+    st.ideasAsked.add(key);
+    $("vxIdeaNote").textContent = "ШІ придумує заголовки…";
+    renderIdeas();
+    try {
+      const r = await ctx.api(`/api/projects/${ctx.pid()}/clips/${c.clip_index}/title-ideas`, { method: "POST" });
+      c.title_variants = r.variants;
+      $("vxIdeaNote").textContent = r.taste ? `ШІ враховує твої вибори: ${r.taste}` : "";
+    } catch (e) {
+      $("vxIdeaNote").textContent = e.message;
+    } finally {
+      st.ideasBusy = null;
+      if (ctx.clip() === c) renderIdeas();
+    }
+  }
+  function rememberTitle(kind, text) {
+    const c = ctx.clip();
+    if (!c || !text) return;
+    ctx.api(`/api/projects/${ctx.pid()}/clips/${c.clip_index}/title-choice`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, text }),
+    }).catch(() => {}); // learning is a bonus: a failed save must not bother the author
+  }
+  function pickIdea(i) {
+    const v = (ctx.clip().title_variants || [])[i];
+    if (!v) return;
+    st.opts.hook = true;
+    setOpt("hook_text", v.text);
+    rememberTitle(v.kind, v.text);
+  }
+  /** The «Заголовок» tab was opened: ask the AI once per clip if it has no ideas yet. */
+  function onHookPane() {
+    const c = ctx && ctx.clip();
+    if (!c || $("edVx").hidden) return;
+    renderIdeas();
+    if (!(c.title_variants || []).length && !st.ideasAsked.has(ideaKey(c))) fetchIdeas();
+  }
+  const hookPaneOpen = () => { const p = document.querySelector('#edVx .vx-pane[data-t="hook"]'); return p && !p.hidden; };
+
   // ─── Public ────────────────────────────────────────────────────────────────
   /** Called when the selected clip changes or its bounds change. */
   function onClip() {
@@ -1304,7 +1363,9 @@ const Vertical = (() => {
     renderControls();
     renderNote();
     renderWordChips();
+    $("vxIdeaNote").textContent = "";
     if (!$("edVx").hidden) { loadPlan(); startLoop(); }
+    if (hookPaneOpen()) onHookPane();
   }
 
   function onShow() {
@@ -1313,6 +1374,7 @@ const Vertical = (() => {
     autoStream();
     loadPlan();
     startLoop();
+    if (hookPaneOpen()) onHookPane();
   }
 
   function attach(context) {
@@ -1391,7 +1453,10 @@ const Vertical = (() => {
     $("vxHookText").addEventListener("change", (e) => {
       const v = e.target.value.trim();
       setOpt("hook_text", v && v !== (ctx.clip().title || "") ? v : null);
+      if (v && !(ctx.clip().title_variants || []).some((x) => x.text === v)) rememberTitle("свій", v);
     });
+    $("vxIdeaList").addEventListener("click", (e) => { const b = e.target.closest("button[data-i]"); if (b) pickIdea(Number(b.dataset.i)); });
+    $("vxIdeaMore").addEventListener("click", () => fetchIdeas());
     $("vxHookText").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); e.stopPropagation(); });
     // Scrub through the clip under the preview
     const sc = $("vxScrub");
@@ -1438,5 +1503,5 @@ const Vertical = (() => {
   /** The preview's plan for a look (tests compare it with streamer.plan). */
   function twin(lk) { return st.stream ? streamPlan(st.stream.cam, st.stream.face, st.plan.src.w, st.plan.src.h, lk) : null; }
 
-  return { attach, onClip, onShow, state, twin };
+  return { attach, onClip, onShow, state, twin, onHookPane };
 })();

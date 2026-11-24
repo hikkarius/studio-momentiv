@@ -722,3 +722,14 @@
 .vx-sm-box span { position: absolute; left: -3px; top: -22px; background: var(--cam); color: var(--cam-ink); font-size: var(--fs-xs); font-weight: 800; padding: 2px 8px; border-radius: 5px 5px 5px 0; }
 .vx-sm-btns { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .vx-sm-btns [hidden] { display: none; }
+/* «Заголовок»: three hook titles from the AI (title_ideas.py) */
+.vx-ideas { display: flex; flex-direction: column; gap: 8px; }
+.vx-idea-list { display: flex; flex-direction: column; gap: 6px; }
+.vx-idea { display: flex; align-items: center; gap: 10px; text-align: left; font: inherit; font-size: var(--fs-md); color: var(--ed-fg); background: var(--ed-panel2); border: 1px solid var(--ed-line); border-radius: var(--r-md); padding: 10px 12px; cursor: pointer; }
+.vx-idea:hover { border-color: var(--ed-muted); }
+#editor .vx-idea[aria-checked="true"] { border-color: var(--ed-accent); background: var(--ed-accent-soft); }
+.vx-idea-t { flex: 1; min-width: 0; font-weight: 600; }
+.vx-idea-k { flex: none; font-size: var(--fs-xs); color: var(--ed-muted); background: var(--ed-sunk); border-radius: var(--r-pill); padding: 3px 9px; }
+.vx-idea-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.vx-idea-note { font-size: var(--fs-sm); color: var(--ed-muted); }
+.ed-copyrow { display: flex; flex-wrap: wrap; gap: 8px; }

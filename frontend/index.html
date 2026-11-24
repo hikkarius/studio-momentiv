@@ -693,7 +693,11 @@
               <label for="edTags">Хештеги <button type="button" id="edCopyTags">Копіювати</button></label>
               <input id="edTags" type="text">
             </div>
-            <button class="ed-btn" id="edCopyPost" type="button">⧉ Копіювати весь допис</button>
+            <div class="ed-copyrow">
+              <button class="ed-btn" id="edCopyPost" type="button">⧉ Для TikTok і Reels</button>
+              <button class="ed-btn" id="edCopyShorts" type="button">⧉ Назва для Shorts</button>
+            </div>
+            <div class="ed-small">TikTok і Reels: увесь допис. Shorts показує лише назву до 100 знаків, тому туди йде заголовок-гачок.</div>
           </div>
         </section>
         <section class="ed-panel ed-vx" id="edVx" aria-label="Вертикальний кліп" hidden>
@@ -752,6 +756,7 @@
                   <div class="vx-more-pop" id="vxMorePop" role="menu" hidden>
                     <button class="vx-mi" id="vxDlClean" type="button" role="menuitem"><b>9:16 без субтитрів</b><small>свої титри в CapCut</small></button>
                     <button class="vx-mi" id="vxCopyPost" type="button" role="menuitem"><b>Копіювати текст допису</b><small>заголовок, опис, хештеги</small></button>
+                    <button class="vx-mi" id="vxCopyShorts" type="button" role="menuitem"><b>Копіювати назву для Shorts</b><small>заголовок-гачок, до 100 знаків</small></button>
                     <button class="vx-mi" id="vxZip" type="button" role="menuitem"><b>ZIP усіх «В роботі» · 9:16</b><small id="vxZipInfo">із субтитрами, видно прогрес</small></button>
                     <button class="vx-mi" id="vxZipClean" type="button" role="menuitem"><b>ZIP усіх «В роботі» · чисті 16:9</b><small>для монтажу</small></button>
                   </div>
@@ -841,6 +846,14 @@
               <section class="vx-pane" data-t="hook" hidden>
                 <h3>Заголовок на відео</h3>
                 <p class="vx-lead">Плашка, яка утримує глядача перші секунди.</p>
+                <div class="vx-ideas" id="vxIdeas">
+                  <div class="vx-lbl">ШІ пропонує</div>
+                  <div class="vx-idea-list" id="vxIdeaList" role="radiogroup" aria-label="Заголовки від ШІ"></div>
+                  <div class="vx-idea-row">
+                    <button type="button" class="ed-btn sm" id="vxIdeaMore">↻ Ще 3 варіанти</button>
+                    <span class="vx-idea-note" id="vxIdeaNote" aria-live="polite"></span>
+                  </div>
+                </div>
                 <label class="vx-check vx-switch"><input type="checkbox" id="vxHookOn"> Показувати заголовок</label>
                 <div class="vx-hookset" id="vxHookSet">
                   <input type="text" id="vxHookText" maxlength="120" aria-label="Текст заголовка" placeholder="Текст заголовка">

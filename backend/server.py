@@ -29,6 +29,7 @@ import pauses
 import subtitles_generator
 import reactions
 import streamer
+import title_ideas
 import vertical_render
 from backend import app_update, backup, db, job_runner, keep_awake, queue_runner, storage, support_report
 from constants import resolve_filter_mode
@@ -938,6 +939,35 @@ def preview_clip_pauses(project_id: str, clip_index: int):
         cuts = pauses.find_pauses(start, end, levels=levels, words=words, min_gap=gap, keep=keep)
         out[name] = {"min_gap": gap, "keep": keep, "count": len(cuts), "removed_sec": pauses.removed(cuts)}
     return {"tempos": out}
+
+
+@app.post("/api/projects/{project_id}/clips/{clip_index}/title-ideas")
+def make_title_ideas(project_id: str, clip_index: int):
+    """Three hook titles (цифра / питання / інтрига) for the 9:16 title plate, from Gemini; stored on the clip."""
+    proj, clip = _get_project_and_clip(project_id, clip_index)
+    cached = load_transcript_cache(proj["source_path"], any_model=True)
+    words = cached[1] if cached else []
+    lang = (cached[2] if cached else "") or "uk"
+    text = title_ideas.clip_text_from_words(words, float(clip["start_sec"]), float(clip["end_sec"]))
+    try:
+        variants = title_ideas.suggest_titles(text, str(clip.get("title") or ""), lang, taste=db.title_choices())
+    except title_ideas.TitleIdeasError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    updated = db.update_clip_fields(project_id, clip_index, title_variants=variants)
+    return {"variants": variants, "clip": updated, "taste": db.title_choices()["total"]}
+
+
+class TitleChoiceRequest(BaseModel):
+    kind: str = Field(max_length=20)
+    text: str = Field(min_length=1, max_length=200)
+
+
+@app.post("/api/projects/{project_id}/clips/{clip_index}/title-choice")
+def save_title_choice(project_id: str, clip_index: int, payload: TitleChoiceRequest):
+    """Remembers which title the author put on the clip, so later suggestions follow their taste."""
+    _get_project_and_clip(project_id, clip_index)
+    db.add_title_choice(project_id, clip_index, payload.kind, payload.text)
+    return {"ok": True, "taste": db.title_choices()["total"]}
 
 
 @app.get("/api/projects/{project_id}/clips/{clip_index}/words")

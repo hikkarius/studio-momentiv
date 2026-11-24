@@ -535,6 +535,26 @@ def test_vertical_title_size_colour_and_scrub(page, studio, project):
     assert not page.errors
 
 
+def test_vertical_title_ideas_pick_and_shorts(page, studio, project):
+    keep_first_clip()
+    open_editor(page, studio)
+    page.click("#edMode button[data-m='vx']")
+    page.wait_for_function("Vertical.state().layout", timeout=20000)
+    idx = page.evaluate("Editor.state().clipIndex")
+    vx_tab(page, "hook")
+    ideas = page.locator("#vxIdeaList .vx-idea")
+    ideas.first.wait_for(timeout=6000)
+    assert ideas.count() == 3
+    assert "питання" in ideas.nth(1).inner_text()
+    ideas.nth(1).click()
+    assert wait_for(page, lambda: (lambda o: o.get("hook") is True and o.get("hook_text") == "Чи можна стати мільйонером чесно?")(clip(idx).get("vertical_opts", {})))
+    assert ideas.nth(1).get_attribute("aria-checked") == "true"
+    assert "мільйонером" in page.locator("#vxHook").inner_text().lower()
+    assert wait_for(page, lambda: db.title_choices()["recent"][:1] == [{"kind": "питання", "text": "Чи можна стати мільйонером чесно?"}])
+    assert clip(idx)["title_variants"][0]["kind"] == "цифра"
+    assert not page.errors
+
+
 def test_vertical_zip_of_kept_clips(page, studio, project):
     open_editor(page, studio)
     page.keyboard.press("y")

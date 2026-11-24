@@ -90,6 +90,14 @@ def studio(tmp_path_factory):
     words = _words()
     server.load_transcript_cache = lambda p, **kw: ([], words, "uk")
     subtitles_generator.load_transcript_cache = lambda p, **kw: ([], words, "uk")
+    # No real Gemini: the «Заголовок» tab gets three fixed hook titles
+    import title_ideas
+    saved["ideas"] = title_ideas.suggest_titles
+    title_ideas.suggest_titles = lambda text, title, lang="uk", taste=None, client=None: [
+        {"kind": "цифра", "text": "90% людей не знають цього"},
+        {"kind": "питання", "text": "Чи можна стати мільйонером чесно?"},
+        {"kind": "інтрига", "text": "Він сказав те, що всі приховують"},
+    ]
     db.init_db()
     # The test video is no stream: skip the real webcam search the editor starts in the background
     import streamer
@@ -117,6 +125,7 @@ def studio(tmp_path_factory):
     server.UPLOADS_DIR, server.OUTPUT_DIR = saved["up"], saved["out"]
     job_runner.UPLOADS_DIR, job_runner.OUTPUT_DIR = saved["jup"], saved["jout"]
     server.load_transcript_cache = saved["ltc"]
+    title_ideas.suggest_titles = saved["ideas"]
     if saved["key"] is None:
         os.environ.pop("GEMINI_API_KEY", None)
     else:
