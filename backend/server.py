@@ -1137,7 +1137,7 @@ def _ensure_vertical(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any]
         return str(path), filename
     duration = clip["end_sec"] - clip["start_sec"]
     if stream_info:
-        layout = _stream_layout(stream_info, opts)
+        layout = _stream_layout(stream_info, opts, _stream_clip_faces(project_id, proj, clip, stream_info))
     else:
         faces = _clip_faces(project_id, proj, clip)
         layout = vertical_render.plan_layout(faces, opts["frame"], duration)
@@ -1148,6 +1148,13 @@ def _ensure_vertical(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any]
             for t, x in layout.keyframes:
                 keys[round(pauses.map_time_clamped(t, cuts_rel), 3)] = x  # a move inside a cut lands on the cut
             layout.keyframes = sorted(keys.items())
+        if layout.kind == "stream" and layout.stream.get("scenes"):
+            moved = []
+            for sc in layout.stream["scenes"]:
+                a, b = pauses.map_time_clamped(sc["start"], cuts_rel), pauses.map_time_clamped(sc["end"], cuts_rel)
+                if b - a > 0.3:
+                    moved.append({**sc, "start": round(a, 3), "end": round(b, 3)})
+            layout.stream = {**layout.stream, "scenes": moved}
         duration -= pauses.removed(cuts)
     ass = None
     if subs:
@@ -1238,15 +1245,35 @@ def _stream_look(info: Dict[str, Any]) -> Dict[str, Any]:
     return streamer.clean_look(info.get("look") or {}, base)
 
 
-def _stream_layout(info: Dict[str, Any], opts: Dict[str, Any]) -> "vertical_render.Layout":
+def _stream_layout(info: Dict[str, Any], opts: Dict[str, Any], faces: Optional[Dict[str, Any]] = None) -> "vertical_render.Layout":
     look = opts.get("stream_look") or _stream_look(info)
-    sp = streamer.plan(info.get("cam"), info.get("face"), int(info["w"]), int(info["h"]), look)
+    w, h = int(info["w"]), int(info["h"])
+    sp = streamer.plan(info.get("cam"), info.get("face"), w, h, look)
+    if faces and info.get("cam"):
+        # parts of the clip where the streamer fills the screen or the webcam moved get their own picture
+        sp = streamer.with_scenes(sp, streamer.scenes(faces.get("samples") or [], info["cam"], info.get("face")), w, h)
     if not info.get("cam"):
         note = info.get("note") or "Вебки немає."
         note += " Показую лише гру. Щоб додати вебку, натисни «Позначити вебку»."
     else:
         note = "" if info.get("auto") is False else (info.get("note") or "")
+    kinds = {sc["kind"] for sc in sp.get("scenes") or []}
+    if kinds:
+        parts = (["стрімер на весь екран: там показую його крупно"] if "chat" in kinds else []) + \
+                (["вебка переїхала: там беру її з нового місця"] if "cam" in kinds else [])
+        note = (note + " " if note else "") + "У цьому кліпі змінюється сцена (" + "; ".join(parts) + ")."
     return vertical_render.Layout("stream", note=note, stream=sp)
+
+
+def _stream_clip_faces(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any], info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Face samples for the scene switches; a stream without a webcam or a failed search simply has none."""
+    if not info.get("cam"):
+        return None
+    try:
+        return _clip_faces(project_id, proj, clip)
+    except HTTPException as e:
+        log.warning(f"Stream scenes skipped for clip {clip.get('clip_index')}: {e.detail}")
+        return None
 
 
 def _stream_key(info: Dict[str, Any]) -> str:
@@ -1323,7 +1350,7 @@ def get_vertical_plan(project_id: str, clip_index: int, frame: Optional[str] = N
         opts["frame"] = frame if frame in vertical_render.FRAME_MODES else "auto"
     if opts["frame"] == "stream":
         info = _stream_info(project_id, proj)
-        layout = _stream_layout(info, opts)
+        layout = _stream_layout(info, opts, _stream_clip_faces(project_id, proj, clip, info))
         src = {"w": info["w"], "h": info["h"]}
     else:
         faces = _clip_faces(project_id, proj, clip)

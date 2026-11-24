@@ -350,7 +350,9 @@ const Vertical = (() => {
       const h = (W / vw) * vh;
       g.drawImage(v, 0, (H - h) / 2, W, h);
     } else if (lay.kind === "stream" && curSp()) {
-      drawStream(g, v, curSp(), W, H);
+      const sc = sceneAt(t);
+      if (sc && sc.kind === "chat") g.drawImage(v, sc.src[0] * vw, 0, sc.src[2] * vw, vh, 0, 0, W, H);
+      else drawStream(g, v, sc ? scenePlan(sc) : curSp(), W, H);
     } else if (lay.kind === "split" && lay.split.length === 2) {
       lay.split.forEach(([cx, cy, hf], k) => {
         let ch = vh * hf, cw = Math.min(vw, ch * (W / (H / 2)));
@@ -528,6 +530,18 @@ const Vertical = (() => {
     const key = JSON.stringify([st.stream.cam, st.stream.face, src.w, src.h, lk]);
     if (!st.spMemo || st.spMemo.key !== key) st.spMemo = { key, sp: streamPlan(st.stream.cam, st.stream.face, src.w, src.h, lk) };
     return st.spMemo.sp;
+  }
+
+  /** A part of the clip with its own picture (streamer on the whole screen, webcam moved), from the server. */
+  function sceneAt(t) {
+    const list = st.live || !st.plan || !st.plan.layout.stream ? null : st.plan.layout.stream.scenes;
+    return list ? list.find((sc) => t >= sc.start && t < sc.end) || null : null;
+  }
+  function scenePlan(sc) {
+    const lk = look(), src = st.plan.src;
+    const key = JSON.stringify([sc.cam, sc.face, lk]);
+    if (!sc.memo || sc.memo.key !== key) sc.memo = { key, sp: streamPlan(sc.cam, sc.face, src.w, src.h, lk) };
+    return sc.memo.sp;
   }
 
   /** Same parts as the renderer: src in fractions of the frame, dst in px of 1080×1920. */

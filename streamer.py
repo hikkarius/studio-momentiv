@@ -364,6 +364,98 @@ def nick_ass(ass_text: Optional[str], sp: Dict[str, Any]) -> Optional[str]:
     return out.rstrip("\n") + "\n" + line + "\n"
 
 
+# ─── 2b. Scenes inside a clip ─────────────────────────────────────────────────
+
+CHAT_FACE_H = 0.2     # a face this tall (share of the frame) is the streamer on the whole screen («Just Chatting»)
+SCENE_MIN = {"chat": 2.0, "cam": 3.0}  # shorter runs are noise (a game cutscene, a passing character)
+
+
+def _inside(cam: Sequence[float], f: Sequence[float], m: float = 0.03) -> bool:
+    return cam[0] - m <= f[0] <= cam[0] + cam[2] + m and cam[1] - m <= f[1] <= cam[1] + cam[3] + m
+
+
+def _median(v: List[float]) -> float:
+    v = sorted(v)
+    return v[len(v) // 2]
+
+
+def scenes(samples: Sequence[Sequence[Any]], cam: Optional[Sequence[float]], face: Optional[Sequence[float]] = None
+           ) -> List[Dict[str, Any]]:
+    """
+    Pure. Face samples of one clip ([[t, [[cx, cy, w, h, score], ...]], ...] as vertical_render.detect_faces gives)
+    → the parts of the clip that are not the usual «webcam + game»:
+      {"kind": "chat", "start", "end", "x"}  — the streamer fills the screen (no game): a 9:16 crop around the face;
+      {"kind": "cam",  "start", "end", "cam", "face"} — the webcam moved to another spot: the same layout with it.
+    Times are seconds from the clip start; the rest of the clip keeps the video's layout.
+    """
+    if not samples or not cam:
+        return []
+    step = samples[1][0] - samples[0][0] if len(samples) > 1 else 0.25
+    labels: List[Optional[Tuple[str, Tuple[float, float]]]] = []
+    for _, faces in samples:
+        faces = [f for f in faces if len(f) >= 4]
+        in_cam = [f for f in faces if _inside(cam, f)]
+        big = [f for f in faces if f[3] >= CHAT_FACE_H and not _inside(cam, f)]
+        small_out = [f for f in faces if f[3] < CHAT_FACE_H and not _inside(cam, f)]
+        if big and not in_cam:
+            b = max(big, key=lambda f: f[3])
+            labels.append(("chat", (b[0], b[1])))
+        elif in_cam:
+            labels.append(("normal", (0.0, 0.0)))
+        elif small_out and len(small_out) == 1:
+            labels.append(("cam", (small_out[0][0], small_out[0][1])))
+        else:
+            labels.append(None)  # no face (or a crowd): the scene goes on
+    # a sample without a face keeps the scene around it
+    last = next((lb for lb in labels if lb), ("normal", (0.0, 0.0)))
+    for i, lb in enumerate(labels):
+        if lb is None:
+            labels[i] = last
+        else:
+            last = lb
+    runs: List[Dict[str, Any]] = []
+    for i, (kind, pt) in enumerate(labels):  # type: ignore[misc]
+        if runs and runs[-1]["kind"] == kind:
+            runs[-1]["n"] += 1
+            runs[-1]["pts"].append(pt)
+        else:
+            runs.append({"kind": kind, "i": i, "n": 1, "pts": [pt]})
+    out: List[Dict[str, Any]] = []
+    for r in runs:
+        if r["kind"] == "normal" or r["n"] * step < SCENE_MIN[r["kind"]]:
+            continue
+        xs, ys = [p[0] for p in r["pts"]], [p[1] for p in r["pts"]]
+        if r["kind"] == "cam" and (max(xs) - min(xs) > 0.06 or max(ys) - min(ys) > 0.06):
+            continue  # a moving face is someone in the game, not a webcam
+        start = round(samples[r["i"]][0], 3)
+        end = round(samples[r["i"] + r["n"] - 1][0] + step, 3)
+        fx, fy = _median(xs), _median(ys)
+        if r["kind"] == "chat":
+            out.append({"kind": "chat", "start": start, "end": end, "x": round(fx, 4)})
+        else:
+            ox, oy = (face[0], face[1]) if face else (cam[0] + cam[2] / 2, cam[1] + cam[3] * 0.45)
+            nx = _clamp(cam[0] + fx - ox, 0.0, 1.0 - cam[2])
+            ny = _clamp(cam[1] + fy - oy, 0.0, 1.0 - cam[3])
+            out.append({"kind": "cam", "start": start, "end": end, "cam": [round(nx, 4), round(ny, 4), cam[2], cam[3]],
+                        "face": [round(fx, 4), round(fy, 4)]})
+    return out
+
+
+def with_scenes(sp: Dict[str, Any], found: List[Dict[str, Any]], src_w: int, src_h: int) -> Dict[str, Any]:
+    """Adds each scene's own picture to the plan: «chat» a 9:16 crop, «cam» a plan with the moved webcam."""
+    out = []
+    for sc in found:
+        sc = dict(sc)
+        if sc["kind"] == "chat":
+            w = min(1.0, (src_h * OUT_W / OUT_H) / src_w)
+            sc["src"] = [round(_clamp(sc["x"] - w / 2, 0.0, 1.0 - w), 5), 0.0, round(w, 5), 1.0]
+        else:
+            sub = plan(sc["cam"], sc["face"], src_w, src_h, sp.get("look"))
+            sc["plan"] = {k: sub[k] for k in ("layout", "bg", "parts", "blur", "divider", "divider_color")}
+        out.append(sc)
+    return {**sp, "scenes": out}
+
+
 # ─── 3. ffmpeg ────────────────────────────────────────────────────────────────
 
 def _px(fr: Sequence[float], src_w: int, src_h: int) -> Tuple[int, int, int, int]:
@@ -381,7 +473,33 @@ def _round_mask(r: int) -> str:
 
 
 def video_filter(sp: Dict[str, Any], src_w: int, src_h: int, fps: int = 30) -> str:
-    """filter_complex producing [base] (1080×1920) from input [0:v]."""
+    """filter_complex producing [base] (1080×1920) from input [0:v]; scenes (with_scenes) are laid over in their time."""
+    found = sp.get("scenes") or []
+    if not found:
+        return _one_filter(sp, src_w, src_h, fps)
+    n = len(found) + 1
+    chains = [f"[0:v]split={n}" + "".join(f"[sv{i}]" for i in range(n))]
+    chains.append(_tagged(_one_filter(sp, src_w, src_h, fps), "m", "[sv0]"))
+    cur = "[mbase]"
+    for i, sc in enumerate(found, 1):
+        if sc["kind"] == "chat":
+            x, y, w, h = _px(sc["src"], src_w, src_h)
+            chains.append(f"[sv{i}]crop={w}:{h}:{x}:{y},scale={OUT_W}:{OUT_H}:flags=lanczos,setsar=1,fps={fps},format=yuv420p[s{i}base]")
+        else:
+            chains.append(_tagged(_one_filter(sc["plan"], src_w, src_h, fps), f"s{i}", f"[sv{i}]"))
+        chains.append(f"{cur}[s{i}base]overlay=0:0:enable='between(t,{sc['start']:.3f},{sc['end']:.3f})'[sc{i}]")
+        cur = f"[sc{i}]"
+    chains.append(f"{cur}null[base]")
+    return ";".join(chains)
+
+
+def _tagged(fc: str, tag: str, inp: str) -> str:
+    """Renames a filter graph's own labels (so several can live in one graph) and feeds it from `inp`."""
+    fc = re.sub(r"\[(?!0:v\])([A-Za-z][A-Za-z0-9]*)\]", lambda mt: f"[{tag}{mt.group(1)}]", fc)
+    return fc.replace("[0:v]", inp)
+
+
+def _one_filter(sp: Dict[str, Any], src_w: int, src_h: int, fps: int = 30) -> str:
     parts = sp["parts"]
     games = [p for p in parts if p["role"] == "game"]
     cams = [p for p in parts if p["role"] == "cam"]

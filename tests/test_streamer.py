@@ -123,6 +123,53 @@ def test_plan_share_game_x_and_other_layouts():
     assert none["layout"] == "game" and len(none["parts"]) == 1 and none["blur"] is None
 
 
+def _samples(spec, step=0.25):
+    """spec: [(seconds, faces)] → face samples like vertical_render.detect_faces."""
+    out, t = [], 0.0
+    for sec, faces in spec:
+        for _ in range(int(round(sec / step))):
+            out.append([round(t, 3), faces])
+            t += step
+    return out
+
+
+WEBCAM_FACE = [0.14, 0.82, 0.04, 0.09, 0.9]
+
+
+def test_scenes_chat_and_moved_webcam():
+    s = _samples([(3, [WEBCAM_FACE]), (3, [[0.55, 0.4, 0.2, 0.42, 0.9]]), (1, []), (4, [[0.85, 0.2, 0.04, 0.09, 0.9]])])
+    out = streamer.scenes(s, CAM, FACE)
+    assert [o["kind"] for o in out] == ["chat", "cam"]
+    chat, moved = out
+    assert chat["start"] == 3.0 and chat["end"] == 7.0 and chat["x"] == 0.55  # the faceless second stays in the scene
+    assert moved["start"] == 7.0 and moved["end"] == 11.0
+    # the webcam keeps its size and moves with the face
+    assert moved["cam"][2:] == CAM[2:]
+    assert moved["cam"][0] == pytest.approx(CAM[0] + 0.85 - FACE[0], abs=1e-3)
+    assert moved["cam"][1] == pytest.approx(CAM[1] + 0.2 - FACE[1], abs=1e-3)
+
+
+def test_scenes_ignore_noise():
+    # a short close-up, a game character walking around, a face next to the webcam face: nothing changes
+    walking = [(0.5, [[0.3 + 0.1 * i, 0.4, 0.04, 0.09, 0.9]]) for i in range(8)]
+    s = _samples([(3, [WEBCAM_FACE]), (1, [[0.5, 0.4, 0.25, 0.45, 0.9]]), (2, [WEBCAM_FACE])] + walking)
+    assert streamer.scenes(s, CAM, FACE) == []
+    cutscene = _samples([(4, [WEBCAM_FACE, [0.6, 0.4, 0.3, 0.5, 0.9]])])
+    assert streamer.scenes(cutscene, CAM, FACE) == []
+    assert streamer.scenes(_samples([(5, [[0.5, 0.4, 0.3, 0.5, 0.9]])]), None) == []
+    assert streamer.scenes([], CAM) == []
+
+
+def test_with_scenes_builds_each_picture():
+    sp = streamer.plan(CAM, FACE, 1920, 1080, {"layout": "pip"})
+    out = streamer.with_scenes(sp, [{"kind": "chat", "start": 1, "end": 3, "x": 0.98},
+                                    {"kind": "cam", "start": 3, "end": 6, "cam": [0.7, 0.05, 0.24, 0.26], "face": [0.82, 0.15]}], 1920, 1080)
+    chat, moved = out["scenes"]
+    assert _inside(chat["src"]) and chat["src"][2] == pytest.approx(1080 * 1080 / 1920 / 1920, abs=1e-3)
+    assert moved["plan"]["layout"] == "pip" and moved["plan"]["blur"][0] < 0.7 < moved["plan"]["blur"][0] + 0.3
+    assert "[0:v]split=3" in streamer.video_filter(out, 1920, 1080)
+
+
 def test_clean_look_ranges():
     lk = streamer.clean_look({"layout": "weird", "share": 5, "cam_zoom": 0, "game_zoom": "x", "cam_fx": None,
                               "pip_w": 0.1, "frame": "pink", "nick": "  {\\b1}Лебіга\n  " + "x" * 40, "round": 1})
@@ -178,6 +225,21 @@ def test_nick_ass_adds_to_subtitles_or_makes_its_own():
 
 
 @needs_ffmpeg
+def test_render_with_scenes_real(tmp_path):
+    src = tmp_path / "src.mp4"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=25:d=3",
+                    "-c:v", "libx264", "-preset", "ultrafast", str(src)], check=True, timeout=60)
+    sp = streamer.with_scenes(streamer.plan(CAM, FACE, 640, 360, {"nick": "lebiga"}),
+                              [{"kind": "chat", "start": 0.5, "end": 1.5, "x": 0.5},
+                               {"kind": "cam", "start": 1.5, "end": 2.5, "cam": [0.7, 0.1, 0.24, 0.26], "face": [0.8, 0.2]}], 640, 360)
+    out = tmp_path / "v.mp4"
+    vr.render_vertical(str(src), 0, 3, str(out), vr.Layout("stream", stream=sp), streamer.nick_ass(None, sp))
+    info = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                           "-of", "csv=p=0", str(out)], capture_output=True, text=True, timeout=30).stdout.strip()
+    assert info == "1080,1920"
+
+
+@needs_ffmpeg
 @pytest.mark.parametrize("look", [{"layout": "top", "divider": True, "nick": "lebiga", "cam_zoom": 1.5},
                                   {"layout": "full", "game_zoom": 1.4},
                                   {"layout": "pip", "round": True, "frame": "gold", "pip_x": 1, "pip_y": 1},
@@ -228,7 +290,10 @@ def test_stream_api_detects_once_moves_frame_and_renders(tmp_path, monkeypatch):
         return output_path
 
     monkeypatch.setattr(streamer, "detect_webcam", fake_detect)
-    monkeypatch.setattr(vr, "detect_faces", lambda *a, **k: pytest.fail("faces are not needed for a stream"))
+    # the streamer fills the screen for 2-4.5 s of the clip
+    samples = [[i * 0.25, [[0.12, 0.83, 0.04, 0.09, 0.9]] if not 8 <= i < 18 else [[0.5, 0.45, 0.25, 0.45, 0.9]]] for i in range(20)]
+    monkeypatch.setattr(vr, "detect_faces", lambda *a, **k: {"w": 1920, "h": 1080, "samples": samples, "cuts": []})
+    monkeypatch.setattr(vr, "detect_cuts", lambda *a, **k: [])
     monkeypatch.setattr(vr, "render_vertical", fake_render)
     monkeypatch.setattr(server, "load_transcript_cache", lambda *a, **k: ([], [], "uk"))
 
@@ -240,6 +305,8 @@ def test_stream_api_detects_once_moves_frame_and_renders(tmp_path, monkeypatch):
     plan = client.get(f"/api/projects/{pid}/clips/{idx}/vertical-plan?frame=stream").json()
     assert plan["layout"]["kind"] == "stream" and plan["layout"]["stream"]["layout"] == "top"
     assert plan["src"] == {"w": 1920, "h": 1080}
+    assert [(sc["kind"], sc["start"], sc["end"]) for sc in plan["layout"]["stream"]["scenes"]] == [("chat", 2.0, 4.5)]
+    assert "на весь екран" in plan["layout"]["note"]
 
     client.patch(f"/api/projects/{pid}/clips/{idx}", json={"vertical_opts": {"frame": "stream"}})
     assert client.post(f"/api/projects/{pid}/clips/{idx}/vertical?subs=false").status_code == 200
