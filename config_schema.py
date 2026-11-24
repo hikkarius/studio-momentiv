@@ -15,6 +15,8 @@ class WhisperConfig(BaseModel):
     cpu_threads: int = Field(default=8, ge=1, le=64)
     faster_whisper: bool = True
     beam_size: int = Field(default=5, ge=1, le=10)
+    batch_size: int = Field(default=8, ge=0, le=64)
+    idle_unload_min: int = Field(default=10, ge=0, le=1440)
 
 
 class ClipsConfig(BaseModel):
@@ -44,6 +46,7 @@ class GeminiConfig(BaseModel):
         min_length=1,
     )
     rerank: bool = True
+    parallel_windows: int = Field(default=3, ge=1, le=8)
 
 
 class CacheConfig(BaseModel):

@@ -108,6 +108,15 @@ def generate_readable_project_id(filename_or_title: str) -> str:
     return f"{timestamp}_{slug}_{salt}"
 
 
+def _start_whisper_housekeeping() -> None:
+    """Loads Whisper in the background right away and unloads it after idle minutes (tests replace this)."""
+    try:
+        from state import app_state
+        app_state.start_whisper_housekeeping()
+    except Exception as e:
+        log.warning(f"Не вдалося запустити фонове завантаження Whisper: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     job_runner.set_event_loop(asyncio.get_running_loop())
@@ -123,6 +132,7 @@ async def lifespan(app: FastAPI):
         log.warning(f"Автоприбирання не вдалося: {e}")
     queue_runner.start()
     backup.start()
+    _start_whisper_housekeeping()
     log.info("AI Video Moments Studio Backend started.")
     yield
     queue_runner.stop()

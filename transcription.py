@@ -3,6 +3,7 @@ transcription.py — Whisper model singleton, audio extraction, caching, and tra
 """
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import logging
@@ -136,6 +137,253 @@ def save_transcript_cache(
         log.warning(f"Cache write error: {e}")
 
 
+# ─── Faster-Whisper passes: batched on GPU, sequential otherwise ─────────────
+
+SAMPLE_RATE = 16000
+# Batched decoding merges speech into 30 s chunks; split the result back into sentence-sized
+# segments like the sequential mode gives (median ~5 s, rarely over 12 s): Gemini prompts,
+# clip refinement and SRT all expect that shape.
+SPLIT_PAUSE_S = 0.6
+SPLIT_MAX_S = 12.0
+SPLIT_MIN_SENTENCE_S = 1.0
+_CLOSERS = "\"'»”)\\]"
+_SENTENCE_END_RE = re.compile(r"[.!?…]+[" + _CLOSERS + r"]*$")
+_SOFT_BREAK_RE = re.compile(r"[,;:–—]+[" + _CLOSERS + r"]*$")
+# A speech region (by VAD) that batched decoding left (almost) empty is decoded again sequentially.
+GAP_MIN_S = 2.0
+GAP_JOIN_S = 1.0
+GAP_MAX_REGION_S = 30.0
+GAP_MIN_COVERAGE = 0.2
+OOM_FALLBACK_BATCH = 4
+
+
+def whisper_batch_size(device: str) -> int:
+    """Batch size for this device: batched decoding only on a GPU; 0 = the old sequential mode."""
+    if device != "cuda":
+        return 0
+    try:
+        return max(0, int(CONFIG.get("whisper", {}).get("batch_size", 8) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_oom(ex: Exception) -> bool:
+    low = str(ex).lower()
+    return "out of memory" in low or "cudaerrormemoryallocation" in low
+
+
+def _report(status_cb, pct: float, msg: str) -> None:
+    if not status_cb:
+        return
+    try:
+        status_cb(pct, msg)
+    except TypeError:
+        status_cb(msg)
+
+
+def consume_segments(raw_stream, total_duration: float, status_cb=None, label: str = "Whisper"):
+    """Reads a lazy Whisper segment stream into plain dicts, reporting progress."""
+    segs: list[dict] = []
+    wrds: list[dict] = []
+    for seg in raw_stream:
+        if total_duration > 0:
+            pct = min(1.0, seg.end / total_duration)
+            _report(status_cb, pct, f"Транскрипція аудіо ({label}): {int(pct * 100)}%")
+        segs.append({"start": round(seg.start, 2), "end": round(seg.end, 2), "text": seg.text.strip()})
+        for w in seg.words or []:
+            wrds.append({"start": round(w.start, 2), "end": round(w.end, 2), "word": w.word.strip()})
+    return segs, wrds
+
+
+def _open_stream(transcribe, source, kwargs: dict, cfg_lang: str, status_cb):
+    """Starts a transcription; with language «auto» pins the detected one and restarts
+    (the stream is lazy, so nothing is decoded yet). Mutates kwargs. Returns (stream, info, lang)."""
+    stream, info = transcribe(source, **kwargs)
+    lang = info.language
+    log.info(f"Detected language (faster-whisper): {lang} (p={getattr(info, 'language_probability', '?')})")
+    if cfg_lang == AUTO and lang in INITIAL_PROMPTS:
+        kwargs["language"] = lang
+        kwargs["initial_prompt"] = INITIAL_PROMPTS[lang]
+        stream, info = transcribe(source, **kwargs)
+    elif cfg_lang == AUTO:
+        kwargs["language"] = lang
+    if status_cb:
+        status_cb(f"Мова відео: {language_label(lang)}")
+    return stream, info, lang
+
+
+def _duration(info) -> float:
+    try:
+        return float(getattr(info, "duration", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def split_segments_from_words(
+    words: list[dict],
+    pause: float = SPLIT_PAUSE_S,
+    max_len: float = SPLIT_MAX_S,
+    min_sentence: float = SPLIT_MIN_SENTENCE_S,
+) -> list[dict]:
+    """Builds natural segments from word timestamps: a new one after a pause, after the end of a
+    sentence, or before it grows past max_len (then at the last comma if there is one)."""
+    segments: list[dict] = []
+
+    def emit(ws: list[dict]) -> None:
+        if ws:
+            segments.append({
+                "start": ws[0]["start"],
+                "end": ws[-1]["end"],
+                "text": " ".join(w["word"] for w in ws if w["word"]).strip(),
+            })
+
+    cur: list[dict] = []
+    for w in words:
+        if cur:
+            last = cur[-1]
+            gap = w["start"] - last["end"]
+            sentence_done = (bool(_SENTENCE_END_RE.search(last["word"]))
+                             and last["end"] - cur[0]["start"] >= min_sentence)
+            if gap >= pause or sentence_done:
+                emit(cur)
+                cur = []
+            elif w["end"] - cur[0]["start"] > max_len:
+                # break at the last comma in the second half, else right here
+                cut = next(
+                    (i for i in range(len(cur) - 1, len(cur) // 2 - 1, -1)
+                     if _SOFT_BREAK_RE.search(cur[i]["word"])),
+                    len(cur) - 1,
+                )
+                emit(cur[: cut + 1])
+                cur = cur[cut + 1:]
+        cur.append(w)
+    emit(cur)
+    return segments
+
+
+def find_unheard_regions(
+    speech: list[tuple[float, float]],
+    words: list[dict],
+    min_len: float = GAP_MIN_S,
+    join_gap: float = GAP_JOIN_S,
+    max_region: float = GAP_MAX_REGION_S,
+    min_coverage: float = GAP_MIN_COVERAGE,
+) -> list[tuple[float, float]]:
+    """Speech regions (seconds) at least min_len long that decoding left (almost) without words.
+    A VAD piece counts as unheard when words cover less than min_coverage of its time; neighbouring
+    unheard pieces (gap <= join_gap) are joined, up to max_region seconds each."""
+    ws = sorted(words, key=lambda w: w["start"])
+    starts = [w["start"] for w in ws]
+
+    def coverage(s: float, e: float) -> float:
+        covered = 0.0
+        for w in ws[bisect.bisect_left(starts, s - 5.0): bisect.bisect_right(starts, e)]:
+            covered += max(0.0, min(e, w["end"]) - max(s, w["start"]))
+        return covered / max(1e-6, e - s)
+
+    regions: list[list[float]] = []
+    prev_unheard = False
+    for s, e in sorted(speech):
+        unheard = coverage(s, e) < min_coverage
+        if unheard and prev_unheard and s - regions[-1][1] <= join_gap and e - regions[-1][0] <= max_region:
+            regions[-1][1] = e
+        elif unheard:
+            regions.append([s, e])
+        prev_unheard = unheard
+    return [(round(s, 2), round(e, 2)) for s, e in regions if e - s >= min_len]
+
+
+def merge_refilled_words(words: list[dict], refills: dict) -> list[dict]:
+    """Puts re-decoded words into their regions (replacing the stray words batched decoding left
+    there when the new pass heard more) and returns all words in time order."""
+    out = list(words)
+    for (s, e), new in refills.items():
+        inside = [w for w in out if s - 0.2 <= w["start"] <= e + 0.2]
+        if len(new) > len(inside):
+            out = [w for w in out if not (s - 0.2 <= w["start"] <= e + 0.2)] + new
+    out.sort(key=lambda w: (w["start"], w["end"]))
+    return out
+
+
+def _speech_regions(audio, vad_parameters: Optional[dict]) -> list[tuple[float, float]]:
+    from faster_whisper.vad import VadOptions, get_speech_timestamps
+
+    params = dict(vad_parameters or {})
+    params["max_speech_duration_s"] = 30
+    return [(c["start"] / SAMPLE_RATE, c["end"] / SAMPLE_RATE)
+            for c in get_speech_timestamps(audio, VadOptions(**params))]
+
+
+def _refill_gaps(model, audio, gaps, kwargs: dict) -> dict:
+    """Decodes each gap region again with the sequential decoder (it falls back to higher
+    temperatures, which batched decoding never does)."""
+    kw = {k: v for k, v in kwargs.items() if k not in ("vad_filter", "vad_parameters")}
+    kw["vad_filter"] = False
+    refills = {}
+    for s, e in gaps:
+        piece = audio[int(s * SAMPLE_RATE): int(e * SAMPLE_RATE)]
+        stream, _info = model.transcribe(piece, **kw)
+        _segs, ws = consume_segments(stream, 0.0)
+        refills[(s, e)] = [
+            {"start": round(w["start"] + s, 2), "end": round(w["end"] + s, 2), "word": w["word"]} for w in ws
+        ]
+    return refills
+
+
+def _batched_pass(model, audio, kwargs: dict, cfg_lang: str, status_cb, batch_size: int, label: str):
+    from faster_whisper import BatchedInferencePipeline
+
+    pipe = BatchedInferencePipeline(model)
+    stream, info, lang = _open_stream(
+        lambda src, **kw: pipe.transcribe(src, batch_size=batch_size, **kw), audio, kwargs, cfg_lang, status_cb
+    )
+    _segs, words = consume_segments(stream, _duration(info), status_cb, label)
+
+    gaps = find_unheard_regions(_speech_regions(audio, kwargs.get("vad_parameters")), words)
+    if gaps:
+        refills = _refill_gaps(model, audio, gaps, kwargs)
+        before = len(words)
+        words = merge_refilled_words(words, refills)
+        log.info(
+            f"Batched Whisper left {len(gaps)} speech region(s) unheard "
+            f"({', '.join(f'{s:.0f}-{e:.0f}s' for s, e in gaps[:10])}); "
+            f"re-decoded them: {before} → {len(words)} words"
+        )
+    else:
+        log.info("Batched Whisper: no unheard speech regions")
+    return split_segments_from_words(words), words, lang
+
+
+def faster_whisper_pass(model, audio_path: str, kwargs: dict, cfg_lang: str, status_cb,
+                        batch_size: int = 0, device: str = "cpu"):
+    """One Faster-Whisper transcription. batch_size > 0: batched decoding (several 30 s chunks at
+    once, ~2.5x faster on a GPU); on CUDA out-of-memory retries with a smaller batch, then sequential.
+    Returns (segments, words, detected_lang)."""
+    kwargs = dict(kwargs)
+    label = "CUDA" if device == "cuda" else "Whisper"
+    source = audio_path
+    if batch_size > 0:
+        from faster_whisper.audio import decode_audio
+
+        audio = decode_audio(audio_path, sampling_rate=SAMPLE_RATE)
+        source = audio
+        ladder = [batch_size] + ([OOM_FALLBACK_BATCH] if batch_size > OOM_FALLBACK_BATCH else [])
+        for b in ladder:
+            try:
+                return _batched_pass(model, audio, dict(kwargs), cfg_lang, status_cb, b, label)
+            except Exception as ex:
+                if not _is_oom(ex):
+                    raise
+                log.warning(f"Batched Whisper (batch {b}) ran out of video memory: {ex}")
+                if status_cb:
+                    status_cb("Забракло відеопам'яті, розпізнаємо меншими порціями...")
+        log.warning("Batched Whisper does not fit in video memory; using the sequential mode")
+
+    stream, info, lang = _open_stream(model.transcribe, source, kwargs, cfg_lang, status_cb)
+    segments, words = consume_segments(stream, _duration(info), status_cb, label)
+    return segments, words, lang
+
+
 def transcribe_video(
     video_path: str,
     status_cb: Optional[Callable[[str], None]] = None,
@@ -160,6 +408,7 @@ def transcribe_video(
 
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         audio_path = tmp.name
+    acquired = False
 
     try:
         if status_cb:
@@ -171,6 +420,8 @@ def transcribe_video(
             status_cb("Транскрибація через Whisper...")
         log.info("Starting Whisper transcription")
 
+        app_state.whisper_acquire()
+        acquired = True
         model = get_whisper()
         engine = getattr(app_state, "_whisper_engine", "faster_whisper")
 
@@ -193,56 +444,12 @@ def transcribe_video(
                 if cfg_lang in INITIAL_PROMPTS:
                     transcribe_kwargs["initial_prompt"] = INITIAL_PROMPTS[cfg_lang]
 
-            def _consume_segments(raw_stream, tot_dur, label="Whisper"):
-                segs = []
-                wrds = []
-                for seg in raw_stream:
-                    if status_cb and tot_dur > 0:
-                        pct = min(1.0, seg.end / tot_dur)
-                        try:
-                            status_cb(pct, f"Транскрипція аудіо ({label}): {int(pct * 100)}%")
-                        except TypeError:
-                            status_cb(f"Транскрипція аудіо ({label}): {int(pct * 100)}%")
-
-                    segs.append({
-                        "start": round(seg.start, 2),
-                        "end": round(seg.end, 2),
-                        "text": seg.text.strip(),
-                    })
-                    if seg.words:
-                        for w in seg.words:
-                            wrds.append({
-                                "start": round(w.start, 2),
-                                "end": round(w.end, 2),
-                                "word": w.word.strip(),
-                            })
-                return segs, wrds
-
+            device = getattr(app_state, "whisper_device", "cpu")
             try:
-                segments_raw, info = model.transcribe(audio_path, **transcribe_kwargs)
-                detected_lang = info.language
-                log.info(
-                    f"Detected language (faster-whisper): {detected_lang} "
-                    f"(p={getattr(info, 'language_probability', '?')})"
+                segments, words, detected_lang = faster_whisper_pass(
+                    model, audio_path, transcribe_kwargs, cfg_lang, status_cb,
+                    batch_size=whisper_batch_size(device), device=device,
                 )
-                if cfg_lang == AUTO and detected_lang in INITIAL_PROMPTS:
-                    # The stream is lazy, so nothing is transcribed yet: start again with the
-                    # detected language pinned and its spelling hint (better punctuation, no drift)
-                    transcribe_kwargs["language"] = detected_lang
-                    transcribe_kwargs["initial_prompt"] = INITIAL_PROMPTS[detected_lang]
-                    segments_raw, info = model.transcribe(audio_path, **transcribe_kwargs)
-                if status_cb:
-                    status_cb(f"Мова відео: {language_label(detected_lang)}")
-
-                total_duration = getattr(info, "duration", 0.0)
-                try:
-                    total_duration = float(total_duration)
-                except (TypeError, ValueError):
-                    total_duration = 0.0
-
-                label = "CUDA" if getattr(model, "device", "") == "cuda" else "Whisper"
-                segments, words = _consume_segments(segments_raw, total_duration, label)
-
             except Exception as ex:
                 err_text = str(ex).lower()
                 if any(k in err_text for k in ("cublas", "cuda", "out of memory", "dll", "not found")):
@@ -261,10 +468,9 @@ def transcribe_video(
                         cpu_threads=cfg.get("cpu_threads", 8),
                     )
                     app_state.set_whisper_fallback(cpu_model, engine="faster_whisper")
-                    segments_raw, info = cpu_model.transcribe(audio_path, **transcribe_kwargs)
-                    detected_lang = info.language
-                    total_duration = float(getattr(info, "duration", 0.0) or 0.0)
-                    segments, words = _consume_segments(segments_raw, total_duration, "CPU")
+                    segments, words, detected_lang = faster_whisper_pass(
+                        cpu_model, audio_path, transcribe_kwargs, cfg_lang, status_cb, batch_size=0, device="cpu",
+                    )
                 else:
                     raise
         else:
@@ -296,6 +502,8 @@ def transcribe_video(
         return segments, words, detected_lang, False
 
     finally:
+        if acquired:
+            app_state.whisper_release()
         try:
             import os
             if os.path.exists(audio_path):

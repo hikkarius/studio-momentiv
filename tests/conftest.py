@@ -66,6 +66,8 @@ def isolate_test_database(tmp_path, monkeypatch):
     from backend import backup
     monkeypatch.setattr(backup, "BACKUP_DIR", isolated_root / "backups")
     monkeypatch.setattr(backup, "start", lambda: None)  # no background copies while tests run
+    # Never load the real Whisper model in the background while tests run
+    monkeypatch.setattr(server, "_start_whisper_housekeeping", lambda: None)
 
     db.init_db()
     yield test_db
