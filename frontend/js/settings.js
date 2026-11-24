@@ -1,6 +1,6 @@
 /**
- * settings.js — «Налаштування»: four sections in a side menu (Кліпи, Ключ і розпізнавання, Місце на диску,
- * Про студію). Buttons, cards, the two-thumb length slider and switches all carry data-key and save at once
+ * settings.js — «Налаштування»: five sections in a side menu (Кліпи, Ключ і розпізнавання, Місце на диску,
+ * Надійність, Про студію). Buttons, cards, the two-thumb length slider and switches all carry data-key and save at once
  * (POST /api/settings); the change applies without restarting the studio. The Gemini key is checked with Google.
  * Depends on app.js globals: showToast, escapeHtml, loadRecentProjects.
  */
@@ -38,6 +38,78 @@ const Settings = (() => {
     if (name === "disk") loadDisk();
     if (name === "ai") { showHardware(); if (keyState === "unknown" && view && view.gemini_key.set) checkSavedKey(); }
     if (name === "about") showAbout();
+    if (name === "safe") loadBackups();
+  }
+
+  // ── «Надійність»: daily database copies ───────────────────────────────────
+
+  const BK_KIND = { daily: "", manual: "зроблено вручну", "before-restore": "перед відновленням" };
+
+  function bkWhen(ts) {
+    const d = new Date(ts * 1000), today = new Date();
+    const y = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+    const t = d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
+    if (d.toDateString() === today.toDateString()) return `Сьогодні, ${t}`;
+    if (d.toDateString() === y.toDateString()) return `Вчора, ${t}`;
+    const day = d.toLocaleDateString("uk-UA", { weekday: "long", day: "numeric", month: "long" });
+    return `${day[0].toUpperCase()}${day.slice(1)}, ${t}`;
+  }
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+  }
+
+  let backups = [];
+  async function loadBackups() {
+    try {
+      const res = await fetch("/api/backups");
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      backups = data.items || [];
+      const last = backups.find((b) => b.kind !== "before-restore") || backups[0];
+      $("bkLast").textContent = last ? `Остання копія: ${bkWhen(last.created).replace(/^С/, "с").replace(/^В/, "в")}` : "Копій ще немає";
+      $("bkNote").textContent = backups.length
+        ? `Зберігаємо ${data.keep} останніх · разом ${fmtBytes(data.total_size)} · папка backups`
+        : `Перша копія зробиться сама за кілька хвилин після запуску студії`;
+      $("bkRestoreGrp").hidden = !backups.length;
+      $("bkList").innerHTML = backups.map((b) => {
+        const what = b.videos == null ? "" : `${b.videos} відео · ${b.clips} ${plural(b.clips, "кліп", "кліпи", "кліпів")}`;
+        const kind = BK_KIND[b.kind] ? ` · ${BK_KIND[b.kind]}` : "";
+        return `<li><b>${escapeHtml(bkWhen(b.created))}</b><span>${escapeHtml(what + kind)}</span>
+          <button type="button" class="btn btn-secondary btn-sm" data-restore="${escapeHtml(b.name)}">Відновити</button></li>`;
+      }).join("");
+    } catch (err) {
+      console.warn("backups", err);
+    }
+  }
+
+  async function backupNow() {
+    $("bkNow").disabled = true;
+    try {
+      const res = await fetch("/api/backups", { method: "POST" });
+      if (!res.ok) { showToast(await errorText(res), "error"); return; }
+      showToast("Копію бази збережено", "success");
+      await loadBackups();
+    } finally {
+      $("bkNow").disabled = false;
+    }
+  }
+
+  async function restoreBackup(name) {
+    const b = backups.find((x) => x.name === name);
+    if (!b) return;
+    const when = bkWhen(b.created);
+    const ok = await askConfirm(
+      `Статуси, межі й заголовки кліпів стануть такими, як були на момент копії. Зміни, зроблені після цього, зникнуть. ` +
+      `Перед цим студія сама збереже копію поточного стану, тож це можна буде скасувати.`,
+      { title: `Повернути базу до «${when}»?`, ok: "Відновити" });
+    if (!ok) return;
+    const res = await fetch(`/api/backups/${encodeURIComponent(name)}/restore`, { method: "POST" });
+    if (!res.ok) { showToast(await errorText(res), "error"); return; }
+    showToast(`Базу повернуто до «${when}»`, "success");
+    await loadBackups();
+    if (typeof loadRecentProjects === "function") loadRecentProjects();
+    if (typeof Queue !== "undefined") Queue.refresh();
   }
 
   // ── values ────────────────────────────────────────────────────────────────
@@ -547,6 +619,10 @@ const Settings = (() => {
     $("setAutoDays").addEventListener("change", onAutoClean);
     $("setKeyInput").addEventListener("keydown", (e) => { if (e.key === "Enter") saveKey(); });
     $("diskProjects").addEventListener("click", onProjectAction);
+    $("bkList").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-restore]");
+      if (b) restoreBackup(b.dataset.restore);
+    });
     ["heroClips", "heroFilter", "heroLang"].forEach((id) => {
       const el = $(id);
       if (el) el.addEventListener("change", () => { el.dataset.touched = "1"; });
@@ -559,5 +635,5 @@ const Settings = (() => {
 
   document.addEventListener("DOMContentLoaded", init);
 
-  return { open, close, setTab, saveKey, checkSavedKey, showKeyInput, update, resetAll, cleanJunk, cleanClips, openRemoveDialog, closeRemoveDialog, confirmRemove, fmtBytes, reload: load };
+  return { open, close, setTab, backupNow, saveKey, checkSavedKey, showKeyInput, update, resetAll, cleanJunk, cleanClips, openRemoveDialog, closeRemoveDialog, confirmRemove, fmtBytes, reload: load };
 })();

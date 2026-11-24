@@ -4,15 +4,21 @@ backend/queue_runner.py — Processing queue: several links / videos handled one
 One background thread takes the first waiting item, downloads it (for a link), then runs the
 same analysis as the «Знайти моменти» button. Everything lives in the queue_items table, so the
 queue survives a studio restart: items that were cut off go back to the front.
+
+When the free Gemini limit runs out, the item is not failed: it gets status 'limit' and a resume
+time (the per-day limit resets at midnight Pacific time, a per-minute one after a minute or so).
+Meanwhile the queue keeps running Whisper on the next videos, so the later analysis only needs Gemini.
 """
 from __future__ import annotations
 
+import datetime
 import logging
 import threading
+import time
 import uuid
 from typing import Any, Dict, Optional
 
-from backend import db, job_runner, storage
+from backend import db, job_runner, keep_awake, storage
 
 log = logging.getLogger("shorts_core")
 
@@ -48,8 +54,17 @@ def stop() -> None:
     _wake.set()
 
 
+def _update_keep_awake() -> None:
+    from config_loader import app_config
+    try:
+        keep_awake.set_awake(bool(app_config.studio.keep_awake) and db.queue_has_pending_work())
+    except Exception as e:
+        log.warning(f"Черга: не вдалося перевірити, чи не давати ноутбуку заснути: {e}")
+
+
 def _loop() -> None:
     while not _stop.is_set():
+        _update_keep_awake()
         try:
             item = process_next()
         except Exception as e:  # never let the worker die
@@ -58,11 +73,97 @@ def _loop() -> None:
         if item is None:
             _wake.wait(timeout=5)
             _wake.clear()
+    keep_awake.set_awake(False)
+
+
+# ─── Gemini limit pause ──────────────────────────────────────────────────────
+
+# Unknown or per-minute limit: wait longer each time it hits again in a row
+_LIMIT_BACKOFF = (60, 5 * 60, 15 * 60, 60 * 60)
+_DAILY_MARGIN = 5 * 60  # Google's reset is not to the second
+
+
+def _pacific_offset_hours(utc: datetime.datetime) -> int:
+    """UTC offset of US Pacific time (−7 in summer time, −8 otherwise), without the tz database
+    (Windows Python ships without it unless the tzdata package is installed)."""
+    y = utc.year
+
+    def nth_sunday(month: int, n: int) -> datetime.date:
+        d = datetime.date(y, month, 1)
+        d += datetime.timedelta(days=(6 - d.weekday()) % 7)
+        return d + datetime.timedelta(weeks=n - 1)
+
+    # DST: 2nd Sunday of March 02:00 PST (= 10:00 UTC) to 1st Sunday of November 02:00 PDT (= 09:00 UTC)
+    start = datetime.datetime.combine(nth_sunday(3, 2), datetime.time(10), tzinfo=datetime.timezone.utc)
+    end = datetime.datetime.combine(nth_sunday(11, 1), datetime.time(9), tzinfo=datetime.timezone.utc)
+    return -7 if start <= utc < end else -8
+
+
+def next_daily_reset(now: Optional[float] = None) -> float:
+    """Unix time of the next midnight in US Pacific time, when the free per-day limit resets."""
+    utc = datetime.datetime.fromtimestamp(now if now is not None else time.time(), tz=datetime.timezone.utc)
+    pt = utc + datetime.timedelta(hours=_pacific_offset_hours(utc))
+    midnight_pt = datetime.datetime.combine(pt.date() + datetime.timedelta(days=1), datetime.time(0),
+                                            tzinfo=datetime.timezone.utc)
+    reset = midnight_pt - datetime.timedelta(hours=_pacific_offset_hours(midnight_pt))
+    return reset.timestamp()
+
+
+def limit_resume_at(daily: bool, retry_after: Optional[float], hits: int, now: Optional[float] = None) -> float:
+    """When to try Gemini again after a limit error (hits = how many pauses in a row before this one)."""
+    now = now if now is not None else time.time()
+    if daily:
+        return next_daily_reset(now) + _DAILY_MARGIN
+    wait = _LIMIT_BACKOFF[min(hits, len(_LIMIT_BACKOFF) - 1)]
+    return now + max(wait, (retry_after or 0) + 5)
+
+
+def _limit_message(daily: bool) -> str:
+    return ("Безкоштовний ліміт Gemini на сьогодні закінчився. Мову вже розпізнано й збережено."
+            if daily else
+            "Gemini попросив перепочити: забагато запитів за хвилину. Мову вже розпізнано й збережено.")
+
+
+def _pause_on_limit(item: Dict[str, Any], err) -> bool:
+    """Puts the item on pause after a limit error. False when the user turned waiting off."""
+    from config_loader import app_config
+    if not app_config.studio.wait_for_limit:
+        return False
+    hits = int(item.get("limit_hits") or 0)
+    resume_at = limit_resume_at(err.daily, err.retry_after, hits)
+    db.pause_queue_item(item["id"], resume_at, err.daily, _limit_message(err.daily), hits=hits + 1)
+    when = datetime.datetime.fromtimestamp(resume_at).strftime("%d.%m %H:%M")
+    log.warning(f"Черга: ліміт Gemini ({'денний' if err.daily else 'хвилинний'}), продовжимо о {when}.")
+    return True
+
+
+def _prepare_while_paused(item: Dict[str, Any], project_id: str, paused_until: float) -> None:
+    """While Gemini's limit is exhausted: only transcribe, then wait with the others."""
+    item_id = item["id"]
+    db.update_queue_item(item_id, status="analyzing", progress=0.0,
+                         message="Поки чекаємо ліміт Gemini, розпізнаємо мову...")
+
+    def on_progress(frac: float, msg: str) -> None:
+        # same scale as a full analysis: speech recognition is the 15–55 % part
+        db.update_queue_item(item_id, progress=round(0.15 + 0.40 * frac, 3), message=msg)
+
+    job_runner.transcribe_only(project_id, language=item.get("language") or None, progress_cb=on_progress)
+    paused = [i for i in db.list_queue_items() if i["status"] == "limit"]
+    daily = bool(paused and paused[0].get("limit_daily"))
+    db.pause_queue_item(item_id, max(paused_until, db.queue_paused_until()), daily,
+                        "Мову вже розпізнано. Чекає ліміт Gemini.")
 
 
 def process_next() -> Optional[Dict[str, Any]]:
-    """Processes the first waiting item to the end. Returns it (final state) or None if the queue is empty."""
-    item = db.claim_next_queue_item()
+    """Processes the next item to the end. Returns it (final state) or None if there is nothing to do."""
+    from config_loader import app_config
+
+    # A paused item whose time has come goes first; while the pause lasts only Whisper runs.
+    item = db.claim_next_queue_item(due_limit_only=True)
+    paused_until = 0.0
+    if item is None:
+        paused_until = db.queue_paused_until() if app_config.studio.wait_for_limit else 0.0
+        item = db.claim_next_queue_item()
     if item is None:
         return None
     item_id = item["id"]
@@ -76,6 +177,11 @@ def process_next() -> Optional[Dict[str, Any]]:
         if not proj:
             raise RuntimeError("Відео зникло зі студії до початку обробки.")
 
+        if paused_until:
+            db.update_queue_item(item_id, project_id=project_id, title=proj.get("title") or item["title"])
+            _prepare_while_paused(item, project_id, paused_until)
+            return db.get_queue_item(item_id)
+
         db.update_queue_item(
             item_id, project_id=project_id, title=proj.get("title") or item["title"],
             status="analyzing", progress=0.0, message="Починаємо аналіз...",
@@ -88,6 +194,9 @@ def process_next() -> Optional[Dict[str, Any]]:
                                        language=item.get("language") or None)
 
         job = db.get_job(job_id) or {}
+        quota = job_runner.pop_quota_hit(job_id)
+        if job.get("status") != "completed" and quota is not None and _pause_on_limit(item, quota):
+            return db.get_queue_item(item_id)
         if job.get("status") == "completed":
             db.update_queue_item(item_id, status="done", progress=1.0, message=job.get("message") or "Готово")
         else:

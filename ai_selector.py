@@ -147,6 +147,28 @@ class GeminiUnavailableError(RuntimeError):
     """Raised when no Gemini model produced a usable answer after all retry passes."""
 
 
+class GeminiQuotaError(GeminiUnavailableError):
+    """Every model answered «limit exhausted». `daily` = the per-day limit (resets at midnight
+    Pacific time), otherwise a per-minute one; `retry_after` = seconds Google asked to wait, if any."""
+
+    def __init__(self, message: str, daily: bool = False, retry_after: Optional[float] = None):
+        super().__init__(message)
+        self.daily = daily
+        self.retry_after = retry_after
+
+
+_RETRY_DELAY_RE = re.compile(r"retry(?:_delay|delay)?['\"]?\s*[:=]?\s*['\"]?(\d+(?:\.\d+)?)s", re.IGNORECASE)
+
+
+def quota_error_from(errors: list[str]) -> GeminiQuotaError:
+    """Builds the quota error from the raw 429 texts: per-day or per-minute, and Google's retry delay."""
+    joined = " ".join(errors)
+    low = joined.lower()
+    daily = "perday" in low or "per_day" in low or "per day" in low or "requestsperday" in low
+    delays = [float(m) for m in _RETRY_DELAY_RE.findall(joined)]
+    return GeminiQuotaError(GEMINI_QUOTA_MESSAGE, daily=daily, retry_after=max(delays) if delays else None)
+
+
 GEMINI_UNAVAILABLE_MESSAGE = (
     "Google Gemini зараз перевантажений і не відповідає. "
     "Транскрипцію збережено, спробуйте ще раз через кілька хвилин."
@@ -322,6 +344,7 @@ def _call_gemini_single_window(
     last_err = ""
     total_passes = len(_RETRY_PASS_DELAYS) + 1
     error_kinds: list[str] = []
+    quota_errors: list[str] = []
 
     for pass_idx in range(total_passes):
         if error_kinds and all(k == "bad_key" for k in error_kinds):
@@ -350,6 +373,8 @@ def _call_gemini_single_window(
             except Exception as e:
                 last_err = f"{model_name}: {e}"
                 error_kinds.append(_gemini_error_kind(str(e)))
+                if error_kinds[-1] == "quota":
+                    quota_errors.append(str(e))
                 if _is_transient_error(str(e)):
                     log.info(f"⚡ Модель {model_name} тимчасово недоступна ({e}), перемикаємось на наступну...")
                 else:
@@ -368,7 +393,7 @@ def _call_gemini_single_window(
     if error_kinds and all(k == "bad_key" for k in error_kinds):
         raise GeminiUnavailableError(GEMINI_BAD_KEY_MESSAGE)
     if error_kinds and all(k == "quota" for k in error_kinds):
-        raise GeminiUnavailableError(GEMINI_QUOTA_MESSAGE)
+        raise quota_error_from(quota_errors)
     raise GeminiUnavailableError(GEMINI_UNAVAILABLE_MESSAGE)
 
 

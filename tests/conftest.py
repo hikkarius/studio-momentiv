@@ -62,6 +62,11 @@ def isolate_test_database(tmp_path, monkeypatch):
     # Never ask a real site for the video size from tests (no network); tests that need a size patch it
     monkeypatch.setattr(server, "probe_download_size", lambda url, **kw: None)
 
+    # Daily database copies go to tmp_path too
+    from backend import backup
+    monkeypatch.setattr(backup, "BACKUP_DIR", isolated_root / "backups")
+    monkeypatch.setattr(backup, "start", lambda: None)  # no background copies while tests run
+
     db.init_db()
     yield test_db
     config_loader._assign_in_place(config_loader.app_config, saved_cfg)

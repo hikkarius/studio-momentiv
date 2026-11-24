@@ -191,3 +191,28 @@ a.linkish { color: var(--orange-text); font-weight: 700; text-decoration: none; 
   .disk-notice { flex-wrap: wrap; }
   .disk-notice .btn { margin-left: 0; }
 }
+
+/* Gemini limit pause in the queue (queue.js) */
+.q-limit { display: flex; align-items: flex-start; gap: 14px; margin: 0 0 16px; padding: 14px 18px; border-radius: var(--r-lg); border: 1.5px solid rgb(var(--warn-rgb) / .6); background: rgb(var(--warn-rgb) / .10); color: var(--text-main); }
+.q-limit[hidden] { display: none; }
+.q-limit .ql-ic { font-size: var(--fs-2xl); line-height: 1; }
+.q-limit .ql-text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; font-size: var(--fs-md); line-height: 1.45; color: var(--text-muted); }
+.q-limit .ql-head { font-size: var(--fs-lg); color: var(--text-strong); }
+.q-limit .ql-text span b { color: var(--text-strong); }
+.q-limit small { margin-top: 4px; font-size: var(--fs-sm); }
+.q-limit .btn { align-self: center; flex-shrink: 0; }
+.q-item.limit { border-color: rgb(var(--warn-rgb) / .65); }
+.q-item.limit .q-over { padding-top: 34px; }
+.q-item.limit .q-thumb img { filter: saturate(.3) brightness(.3) blur(3px); transform: scale(1.06); }
+.q-count { font: 800 var(--fs-2xl) "JetBrains Mono", monospace; letter-spacing: .02em; }
+.vc-badge.warn { background: var(--warn); color: var(--black); }
+@media (max-width: 640px) { .q-limit { flex-wrap: wrap; } .q-limit .ql-text { flex-basis: calc(100% - 44px); } .q-limit .btn { margin-left: 38px; } }
+
+/* «Надійність»: list of database copies */
+.bk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.bk-list li { display: flex; align-items: center; gap: 12px; padding: 9px 4px; border-top: 1px solid rgb(var(--tint) / .08); }
+.bk-list li:first-child { border-top: 0; }
+.bk-list b { min-width: 210px; color: var(--text-strong); }
+.bk-list span { color: var(--text-muted); font-size: var(--fs-sm); }
+.bk-list .btn { margin-left: auto; flex-shrink: 0; }
+@media (max-width: 640px) { .bk-list li { flex-wrap: wrap; } .bk-list b { min-width: 0; } }

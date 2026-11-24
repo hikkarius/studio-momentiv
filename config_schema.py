@@ -62,6 +62,9 @@ class StudioConfig(BaseModel):
     default_clips: int = Field(default=0, ge=0, le=100)         # 0 = auto (by video length)
     default_filter: str = Field(default="Viral Hooks")
     cleanup_days: int = Field(default=0, ge=0, le=3650)         # delete re-creatable clip files older than N days; 0 = never
+    daily_backup: bool = True       # copy the database and transcripts to backups/ once a day, keep 7
+    keep_awake: bool = True         # Windows: do not let the laptop sleep while the queue has work
+    wait_for_limit: bool = True     # Gemini limit exhausted: pause the queue and resume, instead of failing
 
 
 class AppConfig(BaseModel):

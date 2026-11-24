@@ -88,7 +88,7 @@ def init_db():
             clips_count INTEGER NOT NULL DEFAULT 0, -- 0 = auto (by video length)
             filter_mode TEXT NOT NULL DEFAULT 'Viral Hooks',
             language TEXT NOT NULL DEFAULT '', -- '' = the language from the settings, else uk/en/auto/...
-            status TEXT NOT NULL DEFAULT 'waiting', -- waiting, downloading, analyzing, done, failed
+            status TEXT NOT NULL DEFAULT 'waiting', -- waiting, downloading, analyzing, limit, done, failed
             progress REAL NOT NULL DEFAULT 0.0,
             message TEXT NOT NULL DEFAULT '',
             error TEXT,
@@ -129,6 +129,14 @@ def init_db():
         queue_columns = [row["name"] for row in conn.execute("PRAGMA table_info(queue_items);").fetchall()]
         if "language" not in queue_columns:
             conn.execute("ALTER TABLE queue_items ADD COLUMN language TEXT NOT NULL DEFAULT '';")
+        # status 'limit' = paused until the Gemini free limit resets: resume_at (unix time),
+        # limit_daily (1 = the per-day limit), limit_hits (pauses in a row, for the back-off)
+        if "resume_at" not in queue_columns:
+            conn.execute("ALTER TABLE queue_items ADD COLUMN resume_at REAL NOT NULL DEFAULT 0;")
+        if "limit_daily" not in queue_columns:
+            conn.execute("ALTER TABLE queue_items ADD COLUMN limit_daily INTEGER NOT NULL DEFAULT 0;")
+        if "limit_hits" not in queue_columns:
+            conn.execute("ALTER TABLE queue_items ADD COLUMN limit_hits INTEGER NOT NULL DEFAULT 0;")
 
 
 def new_shelf_size(duration_sec: float) -> int:
@@ -420,7 +428,7 @@ def busy_project_ids() -> List[str]:
         rows = conn.execute(
             "SELECT project_id FROM jobs WHERE status IN ('queued', 'running') "
             "UNION SELECT project_id FROM queue_items WHERE project_id IS NOT NULL "
-            "AND status IN ('waiting', 'downloading', 'analyzing')"
+            "AND status IN ('waiting', 'limit', 'downloading', 'analyzing')"
         ).fetchall()
     return [r[0] for r in rows if r[0]]
 
@@ -537,6 +545,7 @@ def delete_project(project_id: str) -> bool:
 # ─── Processing queue ────────────────────────────────────────────────────────
 
 QUEUE_ACTIVE = ("downloading", "analyzing")
+QUEUE_PENDING = ("waiting", "limit")  # not started yet / paused until the Gemini limit resets
 QUEUE_FINISHED = ("done", "failed")
 
 
@@ -573,8 +582,9 @@ def list_queue_items() -> List[Dict[str, Any]]:
     with get_db() as conn:
         rows = conn.execute(
             "SELECT * FROM queue_items ORDER BY "
-            "CASE WHEN status IN ('downloading', 'analyzing') THEN 0 WHEN status = 'waiting' THEN 1 ELSE 2 END, "
-            "CASE WHEN status = 'waiting' THEN position ELSE -updated_at END"
+            "CASE WHEN status IN ('downloading', 'analyzing') THEN 0 WHEN status = 'limit' THEN 1 "
+            "WHEN status = 'waiting' THEN 2 ELSE 3 END, "
+            "CASE WHEN status IN ('waiting', 'limit') THEN position ELSE -updated_at END"
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -593,23 +603,82 @@ def update_queue_item(item_id: str, **fields: Any) -> None:
         conn.execute("UPDATE queue_items SET " + ", ".join(sets) + " WHERE id = ?", params)
 
 
-def claim_next_queue_item() -> Optional[Dict[str, Any]]:
-    """Atomically takes the first waiting item and marks it as started. None if nothing waits."""
+def claim_next_queue_item(due_limit_only: bool = False) -> Optional[Dict[str, Any]]:
+    """Atomically takes the next item and marks it as started. None if nothing waits.
+    A paused item ('limit') whose time has come goes first; due_limit_only = take only such an item."""
+    now = time.time()
     with get_db() as conn:
         row = conn.execute(
-            "SELECT * FROM queue_items WHERE status = 'waiting' ORDER BY position LIMIT 1"
+            "SELECT * FROM queue_items WHERE status = 'limit' AND resume_at <= ? ORDER BY position LIMIT 1", (now,)
         ).fetchone()
+        if not row and not due_limit_only:
+            row = conn.execute(
+                "SELECT * FROM queue_items WHERE status = 'waiting' ORDER BY position LIMIT 1"
+            ).fetchone()
         if not row:
             return None
         status = "downloading" if row["source_url"] and not row["project_id"] else "analyzing"
         cur = conn.execute(
             "UPDATE queue_items SET status = ?, progress = 0.0, error = NULL, updated_at = ? "
-            "WHERE id = ? AND status = 'waiting'",
-            (status, time.time(), row["id"]),
+            "WHERE id = ? AND status = ?",
+            (status, now, row["id"], row["status"]),
         )
         if not cur.rowcount:
             return None
     return get_queue_item(row["id"])
+
+
+def queue_paused_until() -> float:
+    """Unix time the queue waits for (the Gemini limit), or 0 when it is not paused."""
+    with get_db() as conn:
+        row = conn.execute("SELECT MAX(resume_at) AS r FROM queue_items WHERE status = 'limit'").fetchone()
+    r = (row["r"] if row else 0) or 0
+    return float(r) if r > time.time() else 0.0
+
+
+def pause_queue_item(item_id: str, resume_at: float, daily: bool, message: str, hits: Optional[int] = None) -> None:
+    """Puts an item on «limit» and moves every other paused item to the same resume time,
+    so after the pause they go one by one instead of hitting the limit again at once."""
+    now = time.time()
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE queue_items SET status = 'limit', resume_at = ?, limit_daily = ?, message = ?, error = NULL, "
+            "progress = 0.0, limit_hits = COALESCE(?, limit_hits), updated_at = ? WHERE id = ?",
+            (resume_at, int(daily), message, hits, now, item_id),
+        )
+        conn.execute(
+            "UPDATE queue_items SET resume_at = ?, limit_daily = ? WHERE status = 'limit' AND id != ?",
+            (resume_at, int(daily), item_id),
+        )
+
+
+def resume_queue_item_now(item_id: str) -> bool:
+    """«Спробувати зараз»: the paused item is taken at once."""
+    with get_db() as conn:
+        cur = conn.execute(
+            "UPDATE queue_items SET resume_at = 0, updated_at = ? WHERE id = ? AND status = 'limit'",
+            (time.time(), item_id),
+        )
+        return cur.rowcount > 0
+
+
+def queue_has_pending_work() -> bool:
+    """Something is running, waiting or paused in the queue (the laptop should stay awake)."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM queue_items WHERE status IN ('waiting', 'limit', 'downloading', 'analyzing') LIMIT 1"
+        ).fetchone()
+    return row is not None
+
+
+def analysis_running() -> bool:
+    """A video is being downloaded or analysed right now (queue or a single «Знайти моменти»)."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM jobs WHERE status IN ('queued', 'running') "
+            "UNION SELECT 1 FROM queue_items WHERE status IN ('downloading', 'analyzing') LIMIT 1"
+        ).fetchone()
+    return row is not None
 
 
 def requeue_interrupted_items() -> int:

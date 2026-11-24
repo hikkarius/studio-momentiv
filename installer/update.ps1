@@ -19,7 +19,7 @@ $env:UV_LINK_MODE          = "copy"
 # Що ніколи не перезаписуємо
 $Keep = @(".env", "user_settings.json", "studio_data.db", "studio_data.db-wal", "studio_data.db-shm",
           ".venv", "tools", "web_output", "web_uploads", ".transcript_cache", ".render_tmp",
-          "install.log", "update.log", "shorts_automator.log")
+          "install.log", "update.log", "shorts_automator.log", "backups")
 
 function Run($exe, [string[]]$argv) {
     $old = $ErrorActionPreference
