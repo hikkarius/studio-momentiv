@@ -306,11 +306,9 @@ def _find_webcam_once(project_id: str, source_path: str) -> bool:
             return False
         import streamer
         found = streamer.detect_webcam(source_path)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
         info = {"cam": found["cam"], "face": found["face"], "w": found["w"], "h": found["h"], "note": found["note"],
                 "auto": True, "look": streamer.clean_look(None), "use": bool(found["cam"])}  # a webcam: «Стрім» on by itself
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(info, f)
+        streamer.save_info(path, info)
         log.info(f"Webcam search for {project_id}: {'found ' + str(found['cam']) if found['cam'] else 'none'}")
         return bool(found["cam"])
     except Exception as e:  # OpenCV missing, odd video, ...: step 2 can still search on demand

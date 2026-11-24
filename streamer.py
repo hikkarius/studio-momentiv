@@ -18,8 +18,13 @@ In every layout the webcam inside the game picture is blurred, so the face is no
 """
 from __future__ import annotations
 
+import json
+import os
 import re
 import subprocess
+import threading
+import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 OUT_W, OUT_H = 1080, 1920
@@ -35,12 +40,40 @@ LOOK_DEFAULT: Dict[str, Any] = {
     "cam_fx": None, "cam_fy": None,                           # centre of the webcam crop inside its frame (None = face)
     "game_x": 0.5, "game_y": 0.5,                             # centre of the game crop
     "pip_x": 0.04, "pip_y": 0.035, "pip_w": 0.48,             # «Гра на весь екран»: the window, fractions of the phone
-    "round": False, "frame": "white", "divider": False, "nick": "",
+    "round": False, "frame": "white", "divider": False,
+    "nick": "", "nick_style": "twitch", "nick_x": None, "nick_y": None,  # nick_x/y: top-left on the phone (None = auto)
 }
 SAMPLES = 20
-NICK_TOP = (36, 48, 7)  # x, y, ASS alignment (7 = top-left, 1 = bottom-left)
+NICK_TOP = (36, 48)  # default top-left corner of the nick on the phone
+# How the nick looks: (ASS font, size in px like CSS, uppercase, padding x, padding y, icon width)
+NICK_STYLES: Dict[str, Tuple[str, int, bool, int, int, int]] = {
+    "twitch": ("Rubik Black", 42, False, 18, 8, 44),    # purple plate with a chat-bubble icon
+    "neon": ("Unbounded Black", 38, True, 12, 10, 0),     # glowing cyan
+    "pill": ("Montserrat Black", 40, False, 26, 8, 0),    # white pill, black letters
+    "bold": ("Rubik Black", 52, True, 8, 4, 0),          # yellow, black edge and shadow
+    "tape": ("Oswald SemiBold", 48, True, 20, 4, 0),      # yellow sticker, slightly tilted
+}
+# libass sizes a font by its whole height (ascent + descent), CSS by the em: ASS size = CSS size / this
+FONT_EM = {"Rubik Black": 0.653, "Unbounded Black": 0.646, "Montserrat Black": 0.64, "Oswald SemiBold": 0.588}
 
 Box = Tuple[float, float, float, float]  # x, y, w, h
+
+
+def save_info(path: str, info: Dict[str, Any]) -> None:
+    """Writes stream.json whole or not at all: a reader never sees half a file (fast clicks send several saves)."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    tmp.write_text(json.dumps(info), encoding="utf-8")
+    for attempt in range(10):
+        try:
+            os.replace(tmp, target)
+            return
+        except PermissionError:  # Windows: someone is reading the old file right now
+            if attempt == 9:
+                tmp.unlink(missing_ok=True)
+                raise
+            time.sleep(0.05)
 
 
 def _even(v: float) -> int:
@@ -234,7 +267,11 @@ def clean_look(raw: Any, base: Optional[Dict[str, Any]] = None) -> Dict[str, Any
     num("cam_fy", 0.0, 1.0, True)
     num("game_x", 0.0, 1.0)
     num("game_y", 0.0, 1.0)
-    num("pip_w", 0.25, 0.8)
+    num("pip_w", 0.25, 1.0)
+    num("nick_x", 0.0, 1.0, True)
+    num("nick_y", 0.0, 1.0, True)
+    if raw.get("nick_style") in NICK_STYLES:
+        o["nick_style"] = raw["nick_style"]
     num("pip_x", 0.0, 1.0)
     num("pip_y", 0.0, 1.0)
     if "round" in raw:
@@ -314,16 +351,23 @@ def plan(cam: Optional[Sequence[float]], face: Optional[Sequence[float]], src_w:
             if lk["divider"]:
                 divider = [0, ch - 3, OUT_W, 6]
         else:
-            gh = _even(OUT_W * H / W)
+            # the whole game, but without the strip where the webcam sits (no blurred streamer in the game)
+            gbox = frame
+            cam_l, cam_r = cam[0], cam[0] + cam[2]
+            if cam_r <= 0.4:
+                gbox = (cam_r * W + 2, 0.0, W - cam_r * W - 2, H)
+            elif cam_l >= 0.6:
+                gbox = (0.0, 0.0, cam_l * W - 2, H)
+            gh = min(_even(OUT_W * gbox[3] / gbox[2]), _even(OUT_H - ch - 260))
             bg = True
-            parts.append(part("game", _fit(W / H, frame, game_focus, lk["game_zoom"], 0.5), (0, ch, OUT_W, gh)))
+            parts.append(part("game", _fit(OUT_W / gh, gbox, game_focus, lk["game_zoom"], 0.5), (0, ch, OUT_W, gh)))
             pos = round(min(85.0, 100 * (ch + gh + 150) / OUT_H), 1)
             if lk["divider"]:
                 divider = [0, ch - 3, OUT_W, 6]
         nick_at = NICK_TOP  # top-left of the webcam: the subtitles sit on the seam
     else:  # pip
         b = PIP_BORDER if color else 0
-        pw = _even(OUT_W * lk["pip_w"])
+        pw = min(_even(OUT_W * lk["pip_w"]), OUT_W - 2 * b)
         ph = _even(pw * cb[3] / cb[2])
         ow, oh = pw + 2 * b, ph + 2 * b
         px = int(_clamp(lk["pip_x"] * OUT_W, 0, OUT_W - ow))
@@ -334,7 +378,8 @@ def plan(cam: Optional[Sequence[float]], face: Optional[Sequence[float]], src_w:
         if py < OUT_H * 0.3:
             hook_pos = round(min(80.0, 100 * (py + oh + 40) / OUT_H), 1)  # the title goes under the window
         # under the window, or above it when the window is at the bottom
-        nick_at = (px + 8, py + oh + 14, 7) if py + oh + 90 < OUT_H else (px + 8, py - 14, 1)
+        nh = nick_size(lk["nick"] or "x", lk["nick_style"])[1]
+        nick_at = (px + 8, py + oh + 14) if py + oh + 14 + nh < OUT_H - 40 else (px + 8, max(0, py - 14 - nh))
     blur = None
     if cam:
         mm = m + 4.0  # a few px around, so the overlay border goes too
@@ -342,26 +387,92 @@ def plan(cam: Optional[Sequence[float]], face: Optional[Sequence[float]], src_w:
         blur = frac((bx, by, min(W, cb[0] + cb[2] + mm) - bx, min(H, cb[1] + cb[3] + mm) - by))
     nick = None
     if lk["nick"] and nick_at:
-        nick = {"text": lk["nick"], "x": nick_at[0], "y": nick_at[1], "an": nick_at[2]}
+        nw, nh = nick_size(lk["nick"], lk["nick_style"])
+        x, y = nick_at
+        if lk["nick_x"] is not None and lk["nick_y"] is not None:
+            x, y = lk["nick_x"] * OUT_W, lk["nick_y"] * OUT_H
+        nick = {"text": lk["nick"], "style": lk["nick_style"], "w": nw, "h": nh,
+                "x": int(_clamp(x, 0, OUT_W - nw)), "y": int(_clamp(y, 0, OUT_H - nh))}
     return {"layout": layout, "bg": bg, "parts": parts, "blur": blur, "pos": pos, "hook_pos": hook_pos,
             "divider": divider, "divider_color": color or "FFFFFF", "nick": nick, "look": lk}
 
 
+def _nick_text(text: str, style: str) -> str:
+    return text.upper() if NICK_STYLES[style][2] else text
+
+
+def nick_size(text: str, style: str) -> Tuple[int, int]:
+    """Width and height (px on the 1080×1920 phone) of the nick in this style."""
+    import vertical_render
+    font, size, _, px, py, icon = NICK_STYLES.get(style) or NICK_STYLES["twitch"]
+    style = style if style in NICK_STYLES else "twitch"
+    tw = vertical_render.text_width(font, False, _nick_text(text, style), size / FONT_EM[font])
+    return int(round(tw + 2 * px + icon)), int(round(size * 1.25) + 2 * py)
+
+
+def _ass_color(rgb: str) -> str:
+    return f"&H{rgb[4:6]}{rgb[2:4]}{rgb[0:2]}&"
+
+
+def nick_events(nk: Dict[str, Any]) -> List[str]:
+    """ASS Dialogue lines that draw the nick (plate shapes + text), layers 7-9, for the whole clip."""
+    from vertical_render import rounded_rect
+    style = nk.get("style") if nk.get("style") in NICK_STYLES else "twitch"
+    font, size, _, padx, pady, icon = NICK_STYLES[style]
+    x, y, w, h = nk["x"], nk["y"], nk["w"], nk["h"]
+    text = _nick_text(nk["text"], style)
+    span = "0:00:00.00,9:59:59.00"
+
+    def shape(layer: int, path: str, color: str, extra: str = "") -> str:
+        return f"Dialogue: {layer},{span},NickShape,,0,0,0,,{{\\an7\\pos(0,0){extra}\\p1\\1c{_ass_color(color)}\\bord0\\shad0}}{path}{{\\p0}}"
+
+    fs = round(size / FONT_EM[font])
+
+    def label(layer: int, tx: float, ty: float, tags: str) -> str:  # ty is ignored: the text is centred in the plate
+        return f"Dialogue: {layer},{span},Nick,,0,0,0,,{{\\an4\\pos({tx:.0f},{y + h / 2:.0f}){tags}\\fn{font}\\fs{fs}}}{text}"
+
+    out: List[str] = []
+    if style == "twitch":
+        out.append(shape(7, rounded_rect(x, y, x + w, y + h, 14), "9146FF"))
+        ix, iy = x + padx, y + (h - 34) / 2
+        bubble = rounded_rect(ix, iy, ix + 32, iy + 26, 5) + f" m {ix + 6:.0f} {iy + 25:.0f} l {ix + 6:.0f} {iy + 34:.0f} l {ix + 15:.0f} {iy + 25:.0f}"
+        out.append(shape(8, bubble, "FFFFFF"))
+        out.append(shape(9, f"m {ix + 11:.0f} {iy + 7:.0f} l {ix + 15:.0f} {iy + 7:.0f} l {ix + 15:.0f} {iy + 17:.0f} l {ix + 11:.0f} {iy + 17:.0f} "
+                            f"m {ix + 20:.0f} {iy + 7:.0f} l {ix + 24:.0f} {iy + 7:.0f} l {ix + 24:.0f} {iy + 17:.0f} l {ix + 20:.0f} {iy + 17:.0f}", "9146FF"))
+        out.append(label(9, x + padx + icon, y + pady, "\\1c&HFFFFFF&\\bord0\\shad0"))
+    elif style == "neon":
+        out.append(label(7, x + padx, y + pady, "\\1c&HFFFFFF&\\3c&HFFE500&\\bord7\\blur14\\shad0"))
+        out.append(label(8, x + padx, y + pady, "\\1c&HFFFFFF&\\3c&HFFE500&\\bord2\\blur1\\shad0"))
+    elif style == "pill":
+        out.append(shape(7, rounded_rect(x, y + 5, x + w, y + h + 5, h / 2), "000000"))
+        out.append(shape(8, rounded_rect(x, y, x + w, y + h, h / 2), "FFFFFF"))
+        out.append(label(9, x + padx, y + pady, "\\1c&H111111&\\bord0\\shad0"))
+    elif style == "bold":
+        out.append(label(8, x + padx, y + pady, "\\i1\\1c&H00D4FF&\\3c&H000000&\\4c&H000000&\\bord4\\shad5"))
+    else:  # tape
+        org = f"\\org({x + w / 2:.0f},{y + h / 2:.0f})\\frz4"
+        out.append(shape(7, rounded_rect(x + 7, y + 7, x + w + 7, y + h + 7, 2), "111111", org))
+        out.append(shape(8, rounded_rect(x, y, x + w, y + h, 2), "FFD400", org))
+        out.append(label(9, x + padx, y + pady, org + "\\1c&H111111&\\bord0\\shad0"))
+    return out
+
+
 def nick_ass(ass_text: Optional[str], sp: Dict[str, Any]) -> Optional[str]:
-    """Adds the streamer's nick (small, all clip long) to the subtitle document, or makes one just for it."""
+    """Adds the streamer's nick (all clip long) to the subtitle document, or makes one just for it."""
     nk = sp.get("nick")
     if not nk:
         return ass_text
-    style = "Style: Nick,Rubik,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,3,2,7,0,0,0,1"
-    line = "Dialogue: 7,0:00:00.00,9:59:59.00,Nick,,0,0,0,,{\\an%d\\pos(%d,%d)}%s" % (nk["an"], nk["x"], nk["y"], nk["text"])
+    styles = ("Style: Nick,Rubik Black,44,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1\n"
+              "Style: NickShape,Arial,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1")
+    lines = "\n".join(nick_events(nk))
     if not ass_text:
         return ("[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n"
                 "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
                 "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
-                "Alignment, MarginL, MarginR, MarginV, Encoding\n" + style + "\n\n[Events]\n"
-                "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n" + line + "\n")
-    out = re.sub(r"(\[V4\+ Styles\]\nFormat:[^\n]*\n)", lambda mt: mt.group(1) + style + "\n", ass_text, count=1)
-    return out.rstrip("\n") + "\n" + line + "\n"
+                "Alignment, MarginL, MarginR, MarginV, Encoding\n" + styles + "\n\n[Events]\n"
+                "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n" + lines + "\n")
+    out = re.sub(r"(\[V4\+ Styles\]\nFormat:[^\n]*\n)", lambda mt: mt.group(1) + styles + "\n", ass_text, count=1)
+    return out.rstrip("\n") + "\n" + lines + "\n"
 
 
 # ─── 2b. Scenes inside a clip ─────────────────────────────────────────────────

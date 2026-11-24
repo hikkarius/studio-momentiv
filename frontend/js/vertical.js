@@ -24,7 +24,7 @@ const Vertical = (() => {
   ];
   let ctx = null;
   const st = { opts: null, plan: null, planKey: "", words: [], loading: false, raf: 0, saveTimer: null, pending: null, selWord: null, zipJob: null, capKey: "",
-    stream: null, streamPid: "", autoPid: "", view: "phone", drag: null, live: null, gesture: null, suppressClick: false, wheelTimer: null, spMemo: null };
+    stream: null, streamPid: "", autoPid: "", sel: null, view: "phone", drag: null, live: null, gesture: null, suppressClick: false, wheelTimer: null, spMemo: null };
 
   // What each style tile shows: one short phrase drawn in that style
   const TILE = { none: "<i>без тексту</i>", hl: "ЦЕ <i>ВОНО</i>", kar: "<i>ЦЕ</i> ВОНО", one: "ВОНО", box: "<i>Це воно</i>", gold: "ЦЕ <i>ВОНО</i>", min: "це воно" };
@@ -63,36 +63,109 @@ const Vertical = (() => {
     }).catch(() => {});
   }
 
-  /** A stream recording with a webcam switches clips nobody touched to «Стрім» by itself (once per video). */
+  /** A stream recording with a webcam switches clips nobody touched to «Стрім» by itself, and says so in a window
+   * («Схоже, це запис стріму») once per video. An older video is searched now, with the window showing the search. */
+  const SEEN_KEY = "studio-stream-seen";
+  function seenVideos() {
+    try { return JSON.parse(localStorage.getItem(SEEN_KEY) || "[]") || []; } catch (_) { return []; }
+  }
+  function markSeen(pid) {
+    try { localStorage.setItem(SEEN_KEY, JSON.stringify([...seenVideos().filter((x) => x !== pid), pid].slice(-300))); } catch (_) {}
+  }
+  const LAYOUT_NAMES = { top: "вебка зверху", full: "вебка + вся гра", pip: "гра на весь екран" };
+
   async function autoStream() {
     const pid = ctx.pid();
-    if (st.autoPid === pid) return;
+    if (st.autoPid === pid || $("edVx").hidden) return;
     st.autoPid = pid;
+    const seen = seenVideos().includes(pid) || streamVideos().includes(pid);
     let info;
     try {
       info = await ctx.api(`/api/projects/${pid}/stream?detect=false`);
-      if (!info.known) info = await ctx.api(`/api/projects/${pid}/stream`);  // an older video: search now, in the background
-    } catch (_) { return; }
-    if (ctx.pid() !== pid || !info.cam || info.use === false || streamVideos().includes(pid)) return;
+      if (!info.known) {
+        if (!seen) modalChecking();
+        info = await ctx.api(`/api/projects/${pid}/stream`);  // an older video: search now (5-15 s)
+      }
+    } catch (_) { closeModal(); return; }
+    if (ctx.pid() !== pid || !info.cam || info.use === false || seen) { closeModal(); return; }
     if (info.use !== true) {
       try {
         info = await ctx.api(`/api/projects/${pid}/stream`, {
           method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keep_cam: true, use: true }),
         });
-      } catch (_) { return; }
+      } catch (_) { closeModal(); return; }
     }
     markStreamVideo(true);
+    markSeen(pid);
     if (ctx.pid() !== pid) return;
     st.stream = info;
     st.streamPid = pid;
     const c = ctx.clip();
     if (c && !Object.keys(c.vertical_opts || {}).length && st.opts && st.opts.frame !== "stream") {
       st.opts.frame = "stream";
-      if (!$("edVx").hidden) loadPlan(true);
+      loadPlan(true);
       renderControls();
       renderNote();
     }
-    ctx.toast("Це запис стріму: знайшла вебку й увімкнула «Стрім: вебка + гра». Повернути можна у вкладці «Кадр».");
+    if (st.modalSkipped) { st.modalSkipped = false; ctx.toast("Це запис стріму: увімкнула «Стрім: вебка + гра». Повернути можна у вкладці «Кадр»."); return; }
+    modalFound(info);
+  }
+
+  function showModal(title, steps, mode) {
+    const m = $("vxStreamModal");
+    $("vxSmTitle").textContent = title;
+    $("vxSmSteps").innerHTML = steps.map(([t, wait]) => `<li class="${wait ? "wait" : ""}">${escapeText(t)}</li>`).join("");
+    $("vxSmBar").hidden = mode !== "checking";
+    $("vxSmThumb").hidden = mode !== "found";
+    ["vxSmNo", "vxSmFix", "vxSmOk"].forEach((id) => { $(id).hidden = mode !== "found"; });
+    $("vxSmSkip").hidden = mode !== "checking";
+    m.dataset.mode = mode;
+    if (m.hidden) { st.modalFocus = document.activeElement; m.hidden = false; }
+    (mode === "found" ? $("vxSmOk") : $("vxSmSkip")).focus();
+  }
+  function closeModal() {
+    const m = $("vxStreamModal");
+    clearInterval(st.modalTimer);
+    if (m.hidden) return;
+    m.hidden = true;
+    if (st.modalFocus && st.modalFocus.focus) st.modalFocus.focus();
+  }
+  function modalChecking() {
+    st.modalSkipped = false;
+    showModal("📺 Перевіряю, чи це стрім…", [["Дивлюся кадри з усього відео, шукаю вебку стрімера", true]], "checking");
+    const bar = $("vxSmBar").firstElementChild, t0 = Date.now();
+    bar.style.width = "4%";
+    clearInterval(st.modalTimer);
+    st.modalTimer = setInterval(() => { bar.style.width = `${Math.min(95, 4 + ((Date.now() - t0) / 15000) * 91)}%`; }, 500);
+  }
+  function modalFound(info) {
+    clearInterval(st.modalTimer);
+    const [x, y, w, h] = info.cam;
+    const side = x + w / 2 < 0.4 ? "зліва" : x + w / 2 > 0.6 ? "справа" : "посередині";
+    const lk = cleanLook(info.look);
+    showModal("📺 Схоже, це запис стріму", [
+      ["Переглянула 20 кадрів з усього відео"],
+      [`Знайшла вебку стрімера (${side})`],
+      [`Вертикальні кліпи: «Стрім: вебка + гра», ${LAYOUT_NAMES[lk.layout]}`],
+    ], "found");
+    const v = ctx.video(), cv = $("vxSmCanvas");
+    if (v.videoWidth) {
+      cv.width = 640;
+      cv.height = Math.round((640 * v.videoHeight) / v.videoWidth);
+      try { cv.getContext("2d").drawImage(v, 0, 0, cv.width, cv.height); } catch (_) {}
+    }
+    Object.assign($("vxSmBox").style, { left: `${x * 100}%`, top: `${y * 100}%`, width: `${w * 100}%`, height: `${h * 100}%` });
+  }
+  function modalNotStream() {
+    closeModal();
+    setStreamUse(false);
+    const c = ctx.clip();
+    if (c && !Object.keys(c.vertical_opts || {}).length && st.opts.frame === "stream") {
+      st.opts.frame = "auto";
+      loadPlan(true);
+      renderControls();
+      renderNote();
+    }
   }
 
   function writeTemplate(o) {
@@ -427,10 +500,21 @@ const Vertical = (() => {
   // ─── «Стрім: вебка + гра» ──────────────────────────────────────────────────
   const OW = 1080, OH = 1920;
   const LOOK_DEFAULT = { layout: "top", share: 0.34, cam_zoom: 1, game_zoom: 1, cam_fx: null, cam_fy: null, game_x: 0.5, game_y: 0.5,
-    pip_x: 0.04, pip_y: 0.035, pip_w: 0.48, round: false, frame: "white", divider: false, nick: "" };
+    pip_x: 0.04, pip_y: 0.035, pip_w: 0.48, round: false, frame: "white", divider: false,
+    nick: "", nick_style: "twitch", nick_x: null, nick_y: null };
   const SIZE_KEYS = ["share", "cam_zoom", "game_zoom", "cam_fx", "cam_fy", "game_x", "game_y", "pip_x", "pip_y", "pip_w"];
   const FRAME_COLORS = { none: null, white: "FFFFFF", cam: "9146FF", gold: "E6C068" };
-  const PIP_BORDER = 6, PIP_RADIUS = 28, NICK_TOP = [36, 48, 7];
+  const PIP_BORDER = 6, PIP_RADIUS = 28, NICK_TOP = [36, 48];
+  // streamer.NICK_STYLES: canvas font, size, uppercase, padding x, padding y, icon width
+  const NICK_STYLES = { twitch: ["900", "VX Rubik Black", 42, false, 18, 8, 44], neon: ["900", "VX Unbounded", 38, true, 12, 10, 0],
+    pill: ["900", "VX Montserrat", 40, false, 26, 8, 0], bold: ["900", "VX Rubik Black", 52, true, 8, 4, 0], tape: ["600", "VX Oswald", 48, true, 20, 4, 0] };
+  let measureCtx = null;
+  function nickSize(text, style) {
+    const [wt, font, size, up, px, py, icon] = NICK_STYLES[style] || NICK_STYLES.twitch;
+    measureCtx = measureCtx || document.createElement("canvas").getContext("2d");
+    measureCtx.font = `${wt} ${size}px "${font}"`;
+    return [Math.round(measureCtx.measureText(up ? text.toUpperCase() : text).width + 2 * px + icon), Math.round(size * 1.25) + 2 * py];
+  }
   const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const even = (v) => Math.max(2, Math.floor(Math.round(v) / 2) * 2);
   const r4 = (v) => Math.round(v * 10000) / 10000;
@@ -446,7 +530,8 @@ const Vertical = (() => {
     if (!["top", "full", "pip"].includes(o.layout)) o.layout = "top";
     num("share", 0.22, 0.6); num("cam_zoom", 1, 3); num("game_zoom", 1, 3);
     num("cam_fx", 0, 1, true); num("cam_fy", 0, 1, true); num("game_x", 0, 1); num("game_y", 0, 1);
-    num("pip_w", 0.25, 0.8); num("pip_x", 0, 1); num("pip_y", 0, 1);
+    num("pip_w", 0.25, 1); num("pip_x", 0, 1); num("pip_y", 0, 1); num("nick_x", 0, 1, true); num("nick_y", 0, 1, true);
+    if (!(o.nick_style in NICK_STYLES)) o.nick_style = "twitch";
     if (!(o.frame in FRAME_COLORS)) o.frame = "white";
     o.round = !!o.round; o.divider = !!o.divider;
     o.nick = String(o.nick || "").replace(/[{}\\\n\r]/g, "").trim().slice(0, 30);
@@ -493,29 +578,41 @@ const Vertical = (() => {
         parts.push(part("game", fit(OW / gh, frame, gf, lk.game_zoom, 0.5), [0, ch, OW, gh]));
         pos = Math.round(1000 * ch / OH) / 10;
       } else {
-        const gh = even(OW * H / W);
+        // the whole game without the strip where the webcam sits
+        let gbox = frame;
+        const camL = cam[0], camR = cam[0] + cam[2];
+        if (camR <= 0.4) gbox = [camR * W + 2, 0, W - camR * W - 2, H];
+        else if (camL >= 0.6) gbox = [0, 0, camL * W - 2, H];
+        const gh = Math.min(even(OW * gbox[3] / gbox[2]), even(OH - ch - 260));
         bg = true;
-        parts.push(part("game", fit(W / H, frame, gf, lk.game_zoom, 0.5), [0, ch, OW, gh]));
+        parts.push(part("game", fit(OW / gh, gbox, gf, lk.game_zoom, 0.5), [0, ch, OW, gh]));
         pos = Math.round(10 * Math.min(85, 100 * (ch + gh + 150) / OH)) / 10;
       }
       if (lk.divider) divider = [0, ch - 3, OW, 6];
       at = NICK_TOP;
     } else {
       const b = color ? PIP_BORDER : 0;
-      const pw = even(OW * lk.pip_w), ph = even(pw * cb[3] / cb[2]);
+      const pw = Math.min(even(OW * lk.pip_w), OW - 2 * b), ph = even(pw * cb[3] / cb[2]);
       const ow = pw + 2 * b, oh = ph + 2 * b;
       const px = Math.trunc(clampN(lk.pip_x * OW, 0, OW - ow)), py = Math.trunc(clampN(lk.pip_y * OH, 0, OH - oh));
       parts.push(part("game", fit(OW / OH, frame, gf, lk.game_zoom, 0.5), [0, 0, OW, OH]));
       parts.push(part("cam", fit(cb[2] / cb[3], cb, f, lk.cam_zoom), [px, py, ow, oh], b, lk.round ? PIP_RADIUS : 0));
       if (py < OH * 0.3) hookPos = Math.round(10 * Math.min(80, 100 * (py + oh + 40) / OH)) / 10;
-      at = py + oh + 90 < OH ? [px + 8, py + oh + 14, 7] : [px + 8, py - 14, 1];
+      const nh = nickSize(lk.nick || "x", lk.nick_style)[1];
+      at = py + oh + 14 + nh < OH - 40 ? [px + 8, py + oh + 14] : [px + 8, Math.max(0, py - 14 - nh)];
     }
     let blur = null;
     if (cam) {
       const mm = m + 4, bx = Math.max(0, cb[0] - mm), by = Math.max(0, cb[1] - mm);
       blur = frac([bx, by, Math.min(W, cb[0] + cb[2] + mm) - bx, Math.min(H, cb[1] + cb[3] + mm) - by]);
     }
-    const nick = lk.nick && at ? { text: lk.nick, x: at[0], y: at[1], an: at[2] } : null;
+    let nick = null;
+    if (lk.nick && at) {
+      const [nw, nh] = nickSize(lk.nick, lk.nick_style);
+      let [x, y] = at;
+      if (lk.nick_x !== null && lk.nick_y !== null) { x = lk.nick_x * OW; y = lk.nick_y * OH; }
+      nick = { text: lk.nick, style: lk.nick_style, w: nw, h: nh, x: Math.trunc(clampN(x, 0, OW - nw)), y: Math.trunc(clampN(y, 0, OH - nh)) };
+    }
     return { layout, bg, parts, blur, pos, hook_pos: hookPos, divider, divider_color: color || "FFFFFF", nick, look: lk };
   }
 
@@ -585,16 +682,43 @@ const Vertical = (() => {
       g.fillStyle = `#${sp.divider_color}`;
       g.fillRect(sp.divider[0] * k, sp.divider[1] * k, sp.divider[2] * k, sp.divider[3] * k);
     }
-    if (sp.nick) {
-      g.font = `800 ${46 * k}px Rubik, system-ui, sans-serif`;
-      g.textBaseline = sp.nick.an === 7 ? "top" : "alphabetic";
-      g.lineJoin = "round";
-      g.lineWidth = 6 * k;
-      g.strokeStyle = "#000";
-      g.fillStyle = "#fff";
-      g.strokeText(sp.nick.text, sp.nick.x * k, sp.nick.y * k);
-      g.fillText(sp.nick.text, sp.nick.x * k, sp.nick.y * k);
+    if (sp.nick) drawNick(g, sp.nick, k);
+  }
+
+  /** The nick as the render draws it (streamer.nick_events). */
+  function drawNick(g, nk, k) {
+    const [wt, font, size, up, padx, pady, icon] = NICK_STYLES[nk.style] || NICK_STYLES.twitch;
+    const text = up ? nk.text.toUpperCase() : nk.text;
+    const x = nk.x * k, y = nk.y * k, w = nk.w * k, h = nk.h * k;
+    const rr = (x0, y0, ww, hh, r, fill) => { g.fillStyle = fill; g.beginPath(); g.roundRect(x0, y0, ww, hh, r); g.fill(); };
+    g.save();
+    g.font = `${wt} ${size * k}px "${font}"`;
+    g.textBaseline = "middle";
+    const ty = y + h / 2;
+    const tx = (x0) => g.fillText(text, x0, ty);
+    if (nk.style === "twitch") {
+      rr(x, y, w, h, 14 * k, "#9146ff");
+      const ix = x + padx * k, iy = y + (h - 34 * k) / 2;
+      rr(ix, iy, 32 * k, 26 * k, 5 * k, "#fff");
+      g.beginPath(); g.moveTo(ix + 6 * k, iy + 25 * k); g.lineTo(ix + 6 * k, iy + 34 * k); g.lineTo(ix + 15 * k, iy + 25 * k); g.fill();
+      g.fillStyle = "#9146ff"; g.fillRect(ix + 11 * k, iy + 7 * k, 4 * k, 10 * k); g.fillRect(ix + 20 * k, iy + 7 * k, 4 * k, 10 * k);
+      g.fillStyle = "#fff"; tx(x + (padx + icon) * k);
+    } else if (nk.style === "neon") {
+      g.shadowColor = "#00e5ff"; g.shadowBlur = 16 * k; g.fillStyle = "#fff";
+      g.lineWidth = 4 * k; g.strokeStyle = "#00e5ff"; g.strokeText(text, x + padx * k, ty); tx(x + padx * k);
+    } else if (nk.style === "pill") {
+      rr(x, y + 5 * k, w, h, h / 2, "#000"); rr(x, y, w, h, h / 2, "#fff"); g.fillStyle = "#111"; tx(x + padx * k);
+    } else if (nk.style === "bold") {
+      g.font = `italic ${wt} ${size * k}px "${font}"`;
+      const yy = ty;
+      g.fillStyle = "#000"; g.fillText(text, x + (padx + 5) * k, yy + 5 * k);
+      g.lineJoin = "round"; g.lineWidth = 8 * k; g.strokeStyle = "#000"; g.strokeText(text, x + padx * k, yy);
+      g.fillStyle = "#ffd400"; g.fillText(text, x + padx * k, yy);
+    } else {
+      g.translate(x + w / 2, y + h / 2); g.rotate(-4 * Math.PI / 180); g.translate(-(x + w / 2), -(y + h / 2));
+      rr(x + 7 * k, y + 7 * k, w, h, 2 * k, "#111"); rr(x, y, w, h, 2 * k, "#ffd400"); g.fillStyle = "#111"; tx(x + padx * k);
     }
+    g.restore();
   }
 
   function renderStream() {
@@ -624,27 +748,40 @@ const Vertical = (() => {
     const lk = look(), hasCam = !!(st.stream && st.stream.cam), pip = lk.layout === "pip";
     $("vxLay").hidden = !hasCam;
     document.querySelectorAll("#vxLay button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === lk.layout)));
-    ["vxCamSizeRow", "vxCamZoomRow", "vxRoundRow"].forEach((id) => { $(id).hidden = !hasCam; });
     $("vxRoundRow").hidden = !hasCam || !pip;
     $("vxDivRow").hidden = !hasCam || pip;
     $("vxFrameRow").hidden = !hasCam || (!pip && !lk.divider);
     $("vxFrameLbl").textContent = pip ? "Рамка вікна" : "Колір лінії";
-    $("vxPipRow").hidden = !hasCam || !pip;
-    const size = $("vxCamSize");
-    if (pip) { size.min = 25; size.max = 80; } else { size.min = 22; size.max = 60; }
-    $("vxCamSizeLbl").textContent = pip ? "Розмір вікна з вебкою" : "Розмір вебки";
-    const set = (el, v) => { if (document.activeElement !== el || !st.live) el.value = v; };
-    set(size, Math.round((pip ? lk.pip_w : lk.share) * 100));
-    set($("vxCamZoom"), Math.round(lk.cam_zoom * 100));
-    set($("vxGameZoom"), Math.round(lk.game_zoom * 100));
-    const sp = curSp(), cam = sp && sp.parts.find((p) => p.role === "cam");
-    const corner = cam ? (cam.dst[1] + cam.dst[3] / 2 < OH / 2 ? "t" : "b") + (cam.dst[0] + cam.dst[2] / 2 < OW / 2 ? "l" : "r") : "";
-    document.querySelectorAll("#vxPipCorner button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === corner)));
     document.querySelectorAll("#vxCamRound button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.v === "1") === lk.round)));
     document.querySelectorAll("#vxCamFrame button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === lk.frame)));
+    document.querySelectorAll("#vxNickStyle button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === lk.nick_style)));
     $("vxCamDiv").checked = lk.divider;
     if (document.activeElement !== $("vxNick")) $("vxNick").value = lk.nick;
     $("vxLookOwn").checked = !!st.opts.stream_look;
+    renderSel();
+  }
+
+  /** The box with handles over the selected picture on the phone (click the webcam or the game). */
+  function renderSel() {
+    const el = $("vxSel");
+    const sp = curSp();
+    const part = sp && st.sel && st.view === "phone" ? sp.parts.find((p) => p.role === st.sel) : null;
+    el.hidden = !part || (!ctx.video().paused && !st.gesture);
+    if (el.hidden) return;
+    const [x, y, w, h] = part.dst;
+    Object.assign(el.style, { left: `${(x / OW) * 100}%`, top: `${(y / OH) * 100}%`, width: `${(w / OW) * 100}%`, height: `${(h / OH) * 100}%` });
+    el.classList.toggle("game", part.role === "game");
+    const lk = look();
+    $("vxSelName").textContent = part.role === "cam" ? (sp.layout === "pip" ? "Вікно з вебкою" : "Вебка") : "Гра";
+    $("vxSelPct").textContent = part.role === "cam" && sp.layout === "pip" ? `${Math.round((w / OW) * 100)}% ширини`
+      : `${Math.round((part.role === "cam" ? lk.cam_zoom : lk.game_zoom) * 100)}%`;
+  }
+
+  /** «↺» on the box: the selected picture as at first (styling and the other picture stay). */
+  function resetSel() {
+    const d = LOOK_DEFAULT;
+    if (st.sel === "cam") commitLook({ cam_zoom: 1, cam_fx: null, cam_fy: null, share: d.share, pip_x: d.pip_x, pip_y: d.pip_y, pip_w: d.pip_w });
+    else if (st.sel === "game") commitLook({ game_zoom: 1, game_x: 0.5, game_y: 0.5 });
   }
 
   /** While dragging a slider or a picture: preview only. */
@@ -665,13 +802,16 @@ const Vertical = (() => {
     }
     if (st.stream) st.stream = { ...st.stream, look: lk }; // show it right away; the server answer replaces it
     afterLook();
+    const seq = (st.lookSeq = (st.lookSeq || 0) + 1);
     try {
-      st.stream = await ctx.api(`/api/projects/${ctx.pid()}/stream`, {
+      const got = await ctx.api(`/api/projects/${ctx.pid()}/stream`, {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keep_cam: true, look: lk }),
       });
+      if (seq !== st.lookSeq) return; // a newer change is on its way: its answer wins
+      st.stream = got;
       st.streamPid = ctx.pid();
     } catch (e) {
-      ctx.toast("Не вдалося зберегти вигляд стріму: " + e.message, true);
+      if (seq === st.lookSeq) ctx.toast("Не вдалося зберегти вигляд стріму: " + e.message, true);
     }
     afterLook();
   }
@@ -687,13 +827,6 @@ const Vertical = (() => {
     st.opts.stream_look = on ? look() : null;
     save();
     renderStream();
-  }
-
-  function pipCorner(v) {
-    const sp = curSp(), cam = sp && sp.parts.find((p) => p.role === "cam");
-    if (!cam) return;
-    const [, , ow, oh] = cam.dst;
-    commitLook({ pip_x: v[1] === "l" ? 0.04 : (OW - 0.04 * OW - ow) / OW, pip_y: v[0] === "t" ? 0.035 : (OH - 0.035 * OH - oh) / OH });
   }
 
   /** Puts the webcam frame and the game area over the 16:9 picture (percentages of the frame). */
@@ -794,25 +927,32 @@ const Vertical = (() => {
   }
 
   // ─── Direct manipulation on the phone ──────────────────────────────────────
+  // Click the webcam or the game → a box with handles. A corner: bigger / smaller (the window in «Гра на весь екран»,
+  // the zoom elsewhere); inside: move what is shown; the edge between webcam and game: the webcam's height; the nick: drag it.
+  const HANDLE = 48;  // px of the 1080×1920 phone around a corner handle
+
   /** What is under the pointer on the phone (1080×1920 coordinates). */
   function phoneHit(x, y) {
     const sp = curSp();
     if (!sp || st.view !== "phone") return null;
     const cam = sp.parts.find((p) => p.role === "cam"), game = sp.parts.find((p) => p.role === "game");
-    const inside = (p) => p && x >= p.dst[0] && x <= p.dst[0] + p.dst[2] && y >= p.dst[1] && y <= p.dst[1] + p.dst[3];
-    if (cam && sp.layout !== "pip" && Math.abs(y - cam.dst[3]) < 45) return { mode: "seam", part: cam };
-    if (cam && sp.layout === "pip") {
-      const [px, py, pw, ph] = cam.dst;
-      const right = px + pw / 2 < OW / 2, down = py + ph / 2 < OH / 2;  // the handle is the inner corner
-      const hx = right ? px + pw : px, hy = down ? py + ph : py;
-      if (Math.abs(x - hx) < 60 && Math.abs(y - hy) < 60) return { mode: "pipsize", part: cam, right, down };
-      if (inside(cam)) return { mode: "pipmove", part: cam };
+    const inside = (r) => r && x >= r[0] && x <= r[0] + r[2] && y >= r[1] && y <= r[1] + r[3];
+    const nk = sp.nick;
+    if (nk && inside([nk.x - 10, nk.y - 10, nk.w + 20, nk.h + 20])) return { mode: "nick" };
+    const sel = st.sel && sp.parts.find((p) => p.role === st.sel);
+    if (sel) {
+      const [px, py, pw, ph] = sel.dst;
+      for (const [h, hx, hy] of [["nw", px, py], ["ne", px + pw, py], ["sw", px, py + ph], ["se", px + pw, py + ph]]) {
+        if (Math.abs(x - hx) < HANDLE && Math.abs(y - hy) < HANDLE) return { mode: "corner", h, part: sel };
+      }
     }
-    if (inside(cam)) return { mode: "cam", part: cam };
-    if (inside(game)) return { mode: "game", part: game };
+    if (cam && sp.layout !== "pip" && Math.abs(y - cam.dst[3]) < 30) return { mode: "seam", part: cam };
+    if (cam && sp.layout === "pip" && inside(cam.dst)) return { mode: "pipmove", part: cam };
+    if (inside(cam && cam.dst)) return { mode: "cam", part: cam };
+    if (inside(game && game.dst)) return { mode: "game", part: game };
     return null;
   }
-  const CURSOR = { seam: "ns-resize", pipsize: "nwse-resize", pipmove: "move", cam: "grab", game: "grab" };
+  const CURSOR = { seam: "ns-resize", corner: "nwse-resize", pipmove: "move", cam: "grab", game: "grab", nick: "move" };
   function phoneXY(e) {
     const r = $("vxCanvas").getBoundingClientRect();
     return [((e.clientX - r.left) / r.width) * OW, ((e.clientY - r.top) / r.height) * OH];
@@ -822,15 +962,23 @@ const Vertical = (() => {
     if (e.button !== 0 || !streamOn()) return;
     const [x0, y0] = phoneXY(e);
     const hit = phoneHit(x0, y0);
-    if (!hit) return;
+    const before = st.sel;
+    if (!hit) { st.sel = null; renderSel(); return; }
+    if (hit.part) st.sel = hit.part.role;
+    const picked = st.sel !== before;  // the first click only selects; a click on the selected picture plays/pauses
+    renderSel();
     const ph = $("vxPhone");
     try { ph.setPointerCapture(e.pointerId); } catch (_) {}
-    const p = hit.part, lk = look(), cam = st.stream.cam;
-    const [sx, sy, sw, sh] = p.src;
-    const start = {
-      fx: cam ? (sx + sw / 2 - cam[0]) / cam[2] : 0.5, fy: cam ? (sy + sh * 0.45 - cam[1]) / cam[3] : 0.5,
-      gx: sx + sw / 2, gy: sy + sh / 2, dst: [...p.dst],
-    };
+    const sp = curSp(), lk = look(), cam = st.stream.cam;
+    const p = hit.part;
+    const start = { dst: p ? [...p.dst] : null, src: p ? [...p.src] : null, nick: sp.nick ? [sp.nick.x, sp.nick.y, sp.nick.w, sp.nick.h] : null,
+      zoom: p ? (p.role === "cam" ? lk.cam_zoom : lk.game_zoom) : 1 };
+    if (p) {
+      const [sx, sy, sw, sh] = p.src;
+      start.fx = cam ? (sx + sw / 2 - cam[0]) / cam[2] : 0.5;
+      start.fy = cam ? (sy + sh * 0.45 - cam[1]) / cam[3] : 0.5;
+      start.gx = sx + sw / 2; start.gy = sy + sh / 2;
+    }
     st.gesture = { moved: false };
     const move = (ev) => {
       const [x, y] = phoneXY(ev);
@@ -838,16 +986,28 @@ const Vertical = (() => {
       if (!st.gesture.moved && Math.hypot(dx, dy) < 12) return;
       st.gesture.moved = true;
       ph.style.cursor = hit.mode === "cam" || hit.mode === "game" ? "grabbing" : CURSOR[hit.mode];
-      const [px, py, pw, phh] = start.dst;
-      if (hit.mode === "seam") liveLook({ share: clampN(y / OH, 0.22, 0.6) });
-      else if (hit.mode === "cam") liveLook({ cam_fx: clampN(start.fx - (dx / pw) * sw / cam[2], 0, 1), cam_fy: clampN(start.fy - (dy / phh) * sh / cam[3], 0, 1) });
-      else if (hit.mode === "game") liveLook({ game_x: clampN(start.gx - (dx / pw) * sw, 0, 1), game_y: clampN(start.gy - (dy / phh) * sh, 0, 1) });
-      else if (hit.mode === "pipmove") liveLook({ pip_x: clampN(px + dx, 0, OW - pw) / OW, pip_y: clampN(py + dy, 0, OH - phh) / OH });
-      else if (hit.mode === "pipsize") {
-        const b = (p.border || 0) * 2;
-        const ow = clampN(pw + (hit.right ? dx : -dx), OW * 0.25 + b, OW * 0.8 + b);
+      const [px, py, pw, phh] = start.dst || [0, 0, 1, 1];
+      if (hit.mode === "nick") {
+        const [nx, ny, nw, nh] = start.nick;
+        liveLook({ nick_x: clampN(nx + dx, 0, OW - nw) / OW, nick_y: clampN(ny + dy, 0, OH - nh) / OH });
+      } else if (hit.mode === "seam") liveLook({ share: clampN(y / OH, 0.22, 0.6) });
+      else if (hit.mode === "cam") {
+        const [, , sw, sh] = start.src;
+        liveLook({ cam_fx: clampN(start.fx - (dx / pw) * sw / cam[2], 0, 1), cam_fy: clampN(start.fy - (dy / phh) * sh / cam[3], 0, 1) });
+      } else if (hit.mode === "game") {
+        const [, , sw, sh] = start.src;
+        liveLook({ game_x: clampN(start.gx - (dx / pw) * sw, 0, 1), game_y: clampN(start.gy - (dy / phh) * sh, 0, 1) });
+      } else if (hit.mode === "pipmove") liveLook({ pip_x: clampN(px + dx, 0, OW - pw) / OW, pip_y: clampN(py + dy, 0, OH - phh) / OH });
+      else if (hit.mode === "corner" && p.role === "cam" && sp.layout === "pip") {
+        const b = (p.border || 0) * 2, east = hit.h.includes("e"), south = hit.h.includes("s");
+        const ow = clampN(pw + (east ? dx : -dx), OW * 0.25 + b, OW);
         const oh = b + (ow - b) * (phh - b) / (pw - b);
-        liveLook({ pip_w: (ow - b) / OW, pip_x: (hit.right ? px : px + pw - ow) / OW, pip_y: (hit.down ? py : py + phh - oh) / OH });
+        liveLook({ pip_w: (ow - b) / OW, pip_x: clampN(east ? px : px + pw - ow, 0, OW - ow) / OW, pip_y: clampN(south ? py : py + phh - oh, 0, OH - oh) / OH });
+      } else if (hit.mode === "corner") {
+        // a corner pulled away from the middle of the picture zooms in, towards it zooms out
+        const cx = px + pw / 2, cy = py + phh / 2;
+        const z = clampN(start.zoom * Math.hypot(x - cx, y - cy) / Math.max(1, Math.hypot(x0 - cx, y0 - cy)), 1, 3);
+        liveLook({ [p.role === "cam" ? "cam_zoom" : "game_zoom"]: Math.round(z * 100) / 100 });
       }
     };
     const up = () => {
@@ -857,12 +1017,13 @@ const Vertical = (() => {
       ph.style.cursor = "";
       const moved = st.gesture && st.gesture.moved;
       st.gesture = null;
+      if (moved || picked) st.suppressClick = true;
       if (moved) {
-        st.suppressClick = true;
         const lk2 = st.live;
         st.live = null;
         if (lk2) commitLook(lk2);
       }
+      renderSel();
     };
     ph.addEventListener("pointermove", move);
     ph.addEventListener("pointerup", up);
@@ -873,15 +1034,19 @@ const Vertical = (() => {
     if (st.gesture) return;
     const ph = $("vxPhone");
     const hit = streamOn() && e.buttons === 0 ? phoneHit(...phoneXY(e)) : null;
-    ph.style.cursor = hit ? CURSOR[hit.mode] : "";
+    let c = hit ? CURSOR[hit.mode] : "";
+    if (hit && hit.mode === "corner") c = hit.h === "nw" || hit.h === "se" ? "nwse-resize" : "nesw-resize";
+    if (hit && (hit.mode === "cam" || hit.mode === "game") && hit.part.role !== st.sel) c = "pointer";
+    ph.style.cursor = c;
   }
 
   /** Mouse wheel over the webcam or the game: zoom (kept 0.5 s after the last notch). */
   function phoneWheel(e) {
     if (!streamOn()) return;
     const hit = phoneHit(...phoneXY(e));
-    if (!hit) return;
+    if (!hit || !hit.part) return;
     e.preventDefault();
+    st.sel = hit.part.role;
     const key = hit.part.role === "cam" ? "cam_zoom" : "game_zoom";
     const lk = look();
     liveLook({ [key]: clampN(Math.round((lk[key] + (e.deltaY < 0 ? 0.1 : -0.1)) * 100) / 100, 1, 3) });
@@ -981,28 +1146,37 @@ const Vertical = (() => {
   function onShow() {
     if ($("edVx").hidden || !ctx.clip()) return;
     if (!st.opts) onClip();
+    autoStream();
     loadPlan();
     startLoop();
   }
 
   function attach(context) {
     ctx = context;
+    // the nick is measured with the same fonts the render uses: load them before the first measure
+    if (document.fonts && document.fonts.load) {
+      Promise.all(Object.values(NICK_STYLES).map(([wt, font, size]) => document.fonts.load(`${wt} ${size}px "${font}"`).catch(() => null)))
+        .then(() => { st.spMemo = null; st.fontsReady = true; });
+    }
     $("vxStyle").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setOpt("style", b.dataset.v); });
     $("vxFrame").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setOpt("frame", b.dataset.v); });
     $("vxLay").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) commitLook({ layout: b.dataset.v }); });
-    const sizeKey = () => (look().layout === "pip" ? "pip_w" : "share");
-    $("vxCamSize").addEventListener("input", (e) => liveLook({ [sizeKey()]: Number(e.target.value) / 100 }));
-    $("vxCamSize").addEventListener("change", (e) => commitLook({ [sizeKey()]: Number(e.target.value) / 100 }));
-    [["vxCamZoom", "cam_zoom"], ["vxGameZoom", "game_zoom"]].forEach(([id, k]) => {
-      $(id).addEventListener("input", (e) => liveLook({ [k]: Number(e.target.value) / 100 }));
-      $(id).addEventListener("change", (e) => commitLook({ [k]: Number(e.target.value) / 100 }));
-    });
-    $("vxPipCorner").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) pipCorner(b.dataset.v); });
     $("vxCamRound").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) commitLook({ round: b.dataset.v === "1" }); });
     $("vxCamFrame").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) commitLook({ frame: b.dataset.v }); });
     $("vxCamDiv").addEventListener("change", (e) => commitLook({ divider: e.target.checked }));
     $("vxNick").addEventListener("input", (e) => liveLook({ nick: e.target.value }));
     $("vxNick").addEventListener("change", (e) => commitLook({ nick: e.target.value }));
+    $("vxSmOk").addEventListener("click", closeModal);
+    $("vxSmNo").addEventListener("click", modalNotStream);
+    $("vxSmFix").addEventListener("click", () => { closeModal(); document.querySelector("#vxTabs button[data-t='frame']")?.click(); setView("frame"); });
+    $("vxSmSkip").addEventListener("click", () => { st.modalSkipped = true; closeModal(); });
+    $("vxStreamModal").addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") { e.preventDefault(); if ($("vxStreamModal").dataset.mode === "checking") st.modalSkipped = true; closeModal(); }
+    });
+    $("vxNickStyle").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) commitLook({ nick_style: b.dataset.v }); });
+    $("vxSelReset").addEventListener("click", (e) => { e.stopPropagation(); resetSel(); });
+    $("vxSelReset").addEventListener("pointerdown", (e) => e.stopPropagation());
     $("vxNick").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); e.stopPropagation(); });
     $("vxLookOwn").addEventListener("change", (e) => setOwnLook(e.target.checked));
     $("vxLookReset").addEventListener("click", () => {
@@ -1074,6 +1248,7 @@ const Vertical = (() => {
       $("vxPlay").textContent = paused ? "▶" : "❚❚";
       $("vxPlay").setAttribute("aria-label", paused ? "Грати" : "Пауза");
       $("vxPhone").classList.toggle("playing", !paused);
+      renderSel();
     };
     ctx.video().addEventListener("play", onPlay);
     ctx.video().addEventListener("pause", onPlay);

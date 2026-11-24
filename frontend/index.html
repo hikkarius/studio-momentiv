@@ -697,6 +697,8 @@
                   <div class="vx-cap" id="vxCap"></div>
                   <div class="vx-bigplay" id="vxBigPlay" aria-hidden="true">▶</div>
                   <div class="vx-busy" id="vxBusy" hidden>Шукаю обличчя…</div>
+                  <div class="vx-sel" id="vxSel" hidden><i data-h="nw"></i><i data-h="ne"></i><i data-h="sw"></i><i data-h="se"></i>
+                    <div class="vx-selchip" id="vxSelChip"><span id="vxSelName">Вебка</span> <b id="vxSelPct">100%</b> <button type="button" id="vxSelReset" title="Як було">↺</button></div></div>
                 </div>
               </div>
               <div class="vx-playrow">
@@ -757,20 +759,7 @@
                     <button type="button" data-v="pip"><i class="m"><s class="g" style="flex:1"></s><s class="c pip"></s></i>Гра на весь екран</button>
                   </div>
                   <div class="vx-look" id="vxLook">
-                    <div class="vx-row" id="vxCamSizeRow"><label class="vx-lbl" for="vxCamSize" id="vxCamSizeLbl">Розмір вебки</label>
-                      <div class="vx-range"><span>менше</span><input type="range" id="vxCamSize" min="22" max="60" step="1" value="34"><span>більше</span></div></div>
-                    <div class="vx-row" id="vxCamZoomRow"><label class="vx-lbl" for="vxCamZoom">Наближення вебки</label>
-                      <div class="vx-range"><span>уся</span><input type="range" id="vxCamZoom" min="100" max="300" step="5" value="100"><span>ближче</span></div></div>
-                    <div class="vx-row"><label class="vx-lbl" for="vxGameZoom">Наближення гри</label>
-                      <div class="vx-range"><span>уся</span><input type="range" id="vxGameZoom" min="100" max="300" step="5" value="100"><span>ближче</span></div></div>
-                    <div class="vx-row" id="vxPipRow"><div class="vx-lbl">Де вікно з вебкою</div>
-                      <div class="vx-seg vx-corner" id="vxPipCorner">
-                        <button type="button" data-v="tl" title="Угорі зліва">↖</button>
-                        <button type="button" data-v="tr" title="Угорі справа">↗</button>
-                        <button type="button" data-v="bl" title="Унизу зліва">↙</button>
-                        <button type="button" data-v="br" title="Унизу справа">↘</button>
-                      </div></div>
-                    <p class="vx-hint">Або прямо на телефоні: тягни межу між вебкою й грою, коліщатко миші наближує, перетягування зсуває картинку.</p>
+                    <p class="vx-hint" id="vxLookHint"><b>Клікни по вебці або по грі на телефоні</b>: з'явиться рамка. Тягни кут, щоб збільшити чи зменшити, тягни всередині, щоб посунути. Коліщатко миші теж наближує.</p>
                     <div class="vx-row" id="vxRoundRow"><div class="vx-lbl">Кути вікна</div>
                       <div class="vx-seg" id="vxCamRound">
                         <button type="button" data-v="0">Прямі кути</button>
@@ -786,6 +775,13 @@
                     <label class="vx-check vx-switch" id="vxDivRow"><input type="checkbox" id="vxCamDiv"> Лінія між вебкою й грою</label>
                     <div class="vx-row"><label class="vx-lbl" for="vxNick">Нік стрімера на відео</label>
                       <input type="text" id="vxNick" maxlength="30" placeholder="наприклад, @lebiga" autocomplete="off"></div>
+                    <div class="vx-nicks" id="vxNickStyle" role="group" aria-label="Вигляд ніку">
+                      <button type="button" data-v="twitch"><span class="vx-nkp"><span class="nk-twitch">nick</span></span><b>Плашка Twitch</b></button>
+                      <button type="button" data-v="neon"><span class="vx-nkp"><span class="nk-neon">NICK</span></span><b>Неон</b></button>
+                      <button type="button" data-v="pill"><span class="vx-nkp"><span class="nk-pill">nick</span></span><b>Біла пігулка</b></button>
+                      <button type="button" data-v="bold"><span class="vx-nkp"><span class="nk-bold">NICK</span></span><b>Жирний з тінню</b></button>
+                      <button type="button" data-v="tape"><span class="vx-nkp"><span class="nk-tape">NICK</span></span><b>Стрічка</b></button>
+                    </div>
                     <div class="vx-lookfoot">
                       <label class="vx-check"><input type="checkbox" id="vxLookOwn"> Лише для цього кліпу</label>
                       <button type="button" class="ed-btn sm" id="vxLookReset" title="Розміри й наближення як спочатку">↺ Як було</button>
@@ -924,5 +920,19 @@
   <script src="/js/queue.js"></script>
   <script src="/js/settings.js"></script>
   <script src="/js/welcome.js"></script>
+<div class="vx-modal modal-backdrop" id="vxStreamModal" role="dialog" aria-modal="true" aria-labelledby="vxSmTitle" hidden>
+  <div class="vx-modal-box">
+    <h3 id="vxSmTitle">📺 Перевіряю, чи це стрім…</h3>
+    <ul class="vx-sm-steps" id="vxSmSteps"></ul>
+    <div class="vx-sm-bar" id="vxSmBar"><i></i></div>
+    <div class="vx-sm-thumb" id="vxSmThumb" hidden><canvas id="vxSmCanvas" width="640" height="360"></canvas><div class="vx-sm-box" id="vxSmBox"><span>ВЕБКА</span></div></div>
+    <div class="vx-sm-btns">
+      <button type="button" class="ed-btn" id="vxSmNo">Це не стрім</button>
+      <button type="button" class="ed-btn" id="vxSmFix">Поправити рамку</button>
+      <button type="button" class="ed-btn primary" id="vxSmOk">Продовжити</button>
+      <button type="button" class="ed-btn" id="vxSmSkip">Пропустити</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

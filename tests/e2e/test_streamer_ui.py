@@ -35,10 +35,14 @@ def test_stream_mode_card_layouts_and_dragging(page, studio, project, monkeypatc
     keep_first_clip()
     open_editor(page, studio)
     page.click("#edMode button[data-m='vx']")
+    # a stream recording: the webcam is found, «Стрім» switches on by itself and a window says so
+    page.locator("#vxStreamModal").wait_for(state="visible")
+    page.wait_for_function("document.getElementById('vxSmTitle').textContent.includes('Схоже, це запис стріму')", timeout=20000)
+    assert "зліва" in page.locator("#vxSmSteps").inner_text() and page.locator("#vxSmThumb").is_visible()
+    page.click("#vxSmOk")
+    assert page.locator("#vxStreamModal").is_hidden()
     vx_tab(page, "frame")
-    # a stream recording: the webcam is found and «Стрім» switches on by itself
     page.wait_for_function("Vertical.state().layout === 'stream' && !!Vertical.state().cam", timeout=20000)
-    assert "запис стріму" in page.locator("#edToast").inner_text()
     assert page.locator("#vxFrame button[data-v='stream']").get_attribute("aria-pressed") == "true"
     assert page.locator("#vxStream").is_visible()
     assert "Вебку знайдено" in page.locator("#vxCamSt").inner_text()
@@ -83,17 +87,18 @@ def test_stream_mode_card_layouts_and_dragging(page, studio, project, monkeypatc
     page.wait_for_function("Vertical.state().layout !== 'stream'", timeout=20000)
     assert page.locator("#vxStream").is_hidden() and page.locator("#vxPhone").is_visible()
     page.wait_for_function("fetch('/api/projects/%s/stream?detect=false').then((r) => r.json()).then((s) => s.use === false)" % PROJECT_ID)
-    # opening the video again does not switch it back
+    # opening the video again does not switch it back, and the window is not shown twice
     open_editor(page, studio)
     page.click("#edMode button[data-m='vx']")
     page.wait_for_timeout(800)
     assert page.evaluate("Vertical.state().opts.frame") != "stream"
+    assert page.locator("#vxStreamModal").is_hidden()
     assert page.errors == []
 
 
 def test_stream_choice_is_remembered_per_video(page, studio, project, monkeypatch):
     monkeypatch.setattr(streamer, "detect_webcam",
-                        lambda source, **k: {"cam": CAM, "face": None, "w": 320, "h": 180, "note": ""})
+                        lambda source, **k: {"cam": None, "face": None, "w": 320, "h": 180, "note": "Вебку не знайдено."})
     keep_first_clip()
     open_editor(page, studio)
     page.click("#edMode button[data-m='vx']")
@@ -109,7 +114,13 @@ def test_stream_choice_is_remembered_per_video(page, studio, project, monkeypatc
 
 def _same_plan(js, py):
     assert js["layout"] == py["layout"] and js["bg"] == py["bg"] and js["divider"] == py["divider"]
-    assert js["pos"] == py["pos"] and js["hook_pos"] == py["hook_pos"] and js["nick"] == py["nick"]
+    assert js["pos"] == py["pos"] and js["hook_pos"] == py["hook_pos"]
+    if py["nick"]:  # the width comes from the browser's own font metrics: a few px apart is fine
+        for key in ("text", "style", "y"):
+            assert js["nick"][key] == py["nick"][key]
+        assert abs(js["nick"]["x"] - py["nick"]["x"]) <= 12 and abs(js["nick"]["w"] - py["nick"]["w"]) <= 12
+    else:
+        assert js["nick"] is None
     for a, b in zip(js["parts"], py["parts"]):
         assert a["role"] == b["role"] and a["radius"] == b["radius"] and a["color"] == b["color"]
         assert all(abs(x - y) <= 2 for x, y in zip(a["dst"], b["dst"])), (a, b)
@@ -123,61 +134,101 @@ def test_stream_sizes_zoom_phone_drag_and_styling(page, studio, project, monkeyp
     keep_first_clip()
     open_editor(page, studio)
     page.click("#edMode button[data-m='vx']")
+    page.wait_for_function("document.getElementById('vxSmTitle').textContent.includes('Схоже')", timeout=20000)
+    page.click("#vxSmOk")
     vx_tab(page, "frame")
-    page.click("#vxFrame button[data-v='stream']")
     page.wait_for_function("Vertical.state().layout === 'stream' && !!Vertical.state().cam", timeout=20000)
+    page.wait_for_timeout(300)
     look = lambda: page.evaluate("Vertical.state().look")  # noqa: E731
     saved = lambda: json.loads(server._stream_path(PROJECT_ID).read_text(encoding="utf-8"))["look"]  # noqa: E731
 
-    # sliders: the phone follows at once, the video keeps it
-    page.locator("#vxCamSize").fill("50")
-    page.wait_for_function("Vertical.state().stream.parts[0].dst[3] === 960")
-    page.wait_for_function("Vertical.state().look.share === 0.5")
-    page.locator("#vxGameZoom").fill("200")
-    page.wait_for_function("Vertical.state().look.game_zoom === 2")
-    assert saved()["share"] == 0.5 and saved()["game_zoom"] == 2
+    box = page.locator("#vxCanvas").bounding_box()
+    k = box["height"] / 1920
+    at = lambda x, y: (box["x"] + x * k, box["y"] + y * k)  # noqa: E731  phone px → screen
+
+    # a click on the webcam selects it (a box with handles), it does not start the video
+    page.mouse.click(*at(540, 300))
+    assert page.locator("#vxSel").is_visible() and "Вебка" in page.locator("#vxSelName").inner_text()
+    assert page.evaluate("document.getElementById('vxPhone').classList.contains('playing')") is False
+    # pulling a corner away from the middle zooms the webcam in
+    ch = page.evaluate("Vertical.state().stream.parts[0].dst[3]")
+    page.mouse.move(*at(1076, ch - 4))
+    page.mouse.down()
+    page.mouse.move(*at(1076 + 200, ch + 200), steps=6)
+    page.mouse.up()
+    page.wait_for_function("Vertical.state().look.cam_zoom > 1.2")
+    page.wait_for_timeout(300)
+    assert saved()["cam_zoom"] > 1.2
+    assert "%" in page.locator("#vxSelPct").inner_text()
+    # «↺» on the box: the webcam as at first
+    page.click("#vxSelReset")
+    page.wait_for_function("Vertical.state().look.cam_zoom === 1")
+
+    # the game: click selects it, the wheel zooms it
+    page.mouse.click(*at(540, 1400))
+    page.wait_for_function("document.getElementById('vxSel').classList.contains('game')")
+    page.mouse.move(*at(540, 1400))
+    page.mouse.wheel(0, -100)
+    page.mouse.wheel(0, -100)
+    page.wait_for_function("Vertical.state().look.game_zoom >= 1.15")
+    page.wait_for_timeout(800)
+    assert saved()["game_zoom"] >= 1.15
+
+    # the edge between webcam and game sets the webcam's height
+    ch = page.evaluate("Vertical.state().stream.parts[0].dst[3]")
+    page.mouse.move(*at(300, ch))
+    page.mouse.down()
+    page.mouse.move(*at(300, ch + 250), steps=5)
+    page.mouse.up()
+    page.wait_for_function(f"Math.abs(Vertical.state().look.share - {(ch + 250) / 1920:.3f}) < 0.02")
 
     # the preview twin draws exactly what the server will render
+    page.wait_for_function("document.fonts.status === 'loaded'")
     for lk in ({"layout": "top", "divider": True, "frame": "gold", "nick": "lebiga", "cam_zoom": 1.7, "cam_fx": 0.2, "cam_fy": 0.3},
-               {"layout": "full", "share": 0.3, "game_zoom": 1.3, "game_x": 0.8},
-               {"layout": "pip", "pip_w": 0.6, "pip_x": 1, "pip_y": 1, "round": True, "frame": "none"}):
+               {"layout": "full", "share": 0.3, "game_zoom": 1.3, "game_x": 0.8, "nick": "lebiga", "nick_style": "tape"},
+               {"layout": "pip", "pip_w": 1.0, "pip_x": 1, "pip_y": 0.4, "round": True, "frame": "none"},
+               {"layout": "pip", "pip_w": 0.6, "pip_x": 1, "pip_y": 1, "nick": "lebiga", "nick_style": "neon"}):
         full = {**streamer.LOOK_DEFAULT, **lk}
         js = page.evaluate("(lk) => Vertical.twin(lk)", full)
         _same_plan(js, streamer.plan(CAM, [0.17, 0.78], 320, 180, full))
 
-    # dragging the seam between webcam and game on the phone
-    box = page.locator("#vxCanvas").bounding_box()
-    k = box["height"] / 1920
-    seam_y = box["y"] + 960 * k
-    page.mouse.move(box["x"] + box["width"] / 2, seam_y)
-    page.mouse.down()
-    page.mouse.move(box["x"] + box["width"] / 2, seam_y - 300 * k, steps=5)
-    page.mouse.up()
-    page.wait_for_function("Math.abs(Vertical.state().look.share - 0.344) < 0.02")
-    # the wheel over the game zooms it
-    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + 1500 * k)
-    page.mouse.wheel(0, -100)
-    page.mouse.wheel(0, -100)
-    page.wait_for_function("Vertical.state().look.game_zoom >= 2.15")
-    page.wait_for_timeout(800)
-    assert saved()["game_zoom"] >= 2.15
-    assert page.evaluate("document.getElementById('vxPhone').classList.contains('playing')") is False  # a drag is not a click
-
-    # the window layout: corner buttons, styling controls
+    # «Гра на весь екран»: drag the window anywhere, pull its corner to the full width
     page.click("#vxLay button[data-v='pip']")
     page.wait_for_function("Vertical.state().stream.layout === 'pip'")
-    assert page.locator("#vxPipRow").is_visible() and page.locator("#vxRoundRow").is_visible()
-    assert page.locator("#vxDivRow").is_hidden()
-    page.click("#vxPipCorner button[data-v='br']")
-    page.wait_for_function("(() => { const c = Vertical.state().stream.parts[1].dst; return c[0] + c[2] > 1000 && c[1] + c[3] > 1800; })()")
+    assert page.locator("#vxRoundRow").is_visible() and page.locator("#vxDivRow").is_hidden()
+    c = page.evaluate("Vertical.state().stream.parts[1].dst")
+    page.mouse.click(*at(c[0] + c[2] / 2, c[1] + c[3] / 2))
+    page.mouse.move(*at(c[0] + c[2] / 2, c[1] + c[3] / 2))
+    page.mouse.down()
+    page.mouse.move(*at(c[0] + c[2] / 2, c[1] + c[3] / 2 + 600), steps=5)
+    page.mouse.up()
+    page.wait_for_function(f"Vertical.state().stream.parts[1].dst[1] > {c[1] + 500}")
+    c = page.evaluate("Vertical.state().stream.parts[1].dst")
+    page.mouse.move(*at(c[0] + c[2] - 2, c[1] + c[3] - 2))
+    page.mouse.down()
+    page.mouse.move(*at(1300, c[1] + c[3] + 200), steps=6)
+    page.mouse.up()
+    page.wait_for_function("Vertical.state().stream.parts[1].dst[2] >= 1070")
+    assert "ширини" in page.locator("#vxSelPct").inner_text()
+
+    # styling and the nick: pick a style, drag the nick
     page.click("#vxCamRound button[data-v='1']")
     page.click("#vxCamFrame button[data-v='gold']")
     page.fill("#vxNick", "lebiga")
     page.press("#vxNick", "Enter")
-    page.wait_for_function("Vertical.state().stream.nick && Vertical.state().stream.nick.text === 'lebiga'")
+    page.click("#vxNickStyle button[data-v='tape']")
+    page.wait_for_function("Vertical.state().stream.nick && Vertical.state().stream.nick.style === 'tape'")
+    nk = page.evaluate("Vertical.state().stream.nick")
+    page.mouse.move(*at(nk["x"] + nk["w"] / 2, nk["y"] + nk["h"] / 2))
+    page.mouse.down()
+    to_y = 300 if nk["y"] > 900 else 1500  # wherever there is room
+    page.mouse.move(*at(nk["x"] + nk["w"] / 2 + 100, to_y), steps=5)
+    page.mouse.up()
+    page.wait_for_function(f"Math.abs(Vertical.state().stream.nick.y + Vertical.state().stream.nick.h / 2 - {to_y}) < 30")
     page.wait_for_timeout(300)
     s = saved()
     assert s["round"] is True and s["frame"] == "gold" and s["nick"] == "lebiga" and s["layout"] == "pip"
+    assert s["nick_style"] == "tape" and abs(s["nick_y"] * 1920 + nk["h"] / 2 - to_y) < 30
 
     # one clip on its own: the video's look stays
     page.check("#vxLookOwn")

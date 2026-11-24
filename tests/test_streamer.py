@@ -2,6 +2,7 @@
 tests/test_streamer.py — «Стрім: вебка + гра»: finding the webcam rectangle, the three layouts,
 the ffmpeg graph (a real tiny render of each layout) and the /stream API.
 """
+import json
 import shutil
 import subprocess
 import uuid
@@ -111,8 +112,13 @@ def test_plan_share_game_x_and_other_layouts():
     assert _inside(edge["parts"][1]["src"])
 
     full = streamer.plan(CAM, FACE, 1920, 1080, {"layout": "full"})
-    assert full["bg"] and full["parts"][1]["src"] == [0, 0, 1, 1] and full["parts"][1]["dst"][2:] == [1080, 608]
-    assert full["pos"] > 100 * (full["parts"][0]["dst"][3] + 608) / 1920
+    # the whole game without the strip where the webcam sits (left here): no blurred streamer in the game
+    g = full["parts"][1]
+    assert full["bg"] and g["src"][0] >= CAM[0] + CAM[2] and g["src"][0] + g["src"][2] == pytest.approx(1.0, abs=1e-3)
+    assert g["src"][3] == pytest.approx(1.0, abs=1e-3) and g["dst"][2] == 1080 and g["dst"][3] > 608
+    assert full["pos"] > 100 * (full["parts"][0]["dst"][3] + g["dst"][3]) / 1920
+    mid = streamer.plan([0.4, 0.05, 0.2, 0.25], None, 1920, 1080, {"layout": "full"})["parts"][1]
+    assert mid["src"] == pytest.approx([0, 0, 1, 1], abs=0.002) and mid["dst"][3] == 608  # a webcam in the middle: nothing to cut, it is blurred
 
     pip = streamer.plan(CAM, FACE, 1920, 1080, {"layout": "pip"})
     game, cam = pip["parts"]
@@ -201,21 +207,38 @@ def test_plan_zoom_pan_window_and_styling():
     cam = pip["parts"][1]
     assert cam["dst"][2] == 648 + 12 and cam["dst"][0] + cam["dst"][2] == 1080 and cam["dst"][1] + cam["dst"][3] == 1920
     assert cam["radius"] > 0 and cam["color"] == "E6C068" and pip["hook_pos"] is None
-    assert pip["nick"]["text"] == "lebiga" and pip["nick"]["an"] == 1 and pip["nick"]["y"] < cam["dst"][1]  # above a bottom window
+    nk = pip["nick"]
+    assert nk["text"] == "lebiga" and nk["style"] == "twitch" and nk["y"] + nk["h"] < cam["dst"][1]  # above a bottom window
     up = streamer.plan(CAM, FACE, 1920, 1080, {"layout": "pip", "nick": "x"})
-    assert up["nick"]["an"] == 7 and up["nick"]["y"] > up["parts"][1]["dst"][1] + up["parts"][1]["dst"][3]
+    assert up["nick"]["y"] > up["parts"][1]["dst"][1] + up["parts"][1]["dst"][3]
+    # the window can be as wide as the phone; the nick can be moved anywhere and stays on the phone
+    wide = streamer.plan(CAM, FACE, 1920, 1080, {"layout": "pip", "pip_w": 1.0, "pip_y": 0.4, "nick": "lebiga", "nick_x": 0.9, "nick_y": 0.5})
+    assert wide["parts"][1]["dst"][0] == 0 and wide["parts"][1]["dst"][2] == 1080
+    assert wide["nick"]["x"] + wide["nick"]["w"] == 1080 and wide["nick"]["y"] == 960
     plain = streamer.plan(CAM, FACE, 1920, 1080, {"layout": "pip", "frame": "none"})
     assert plain["parts"][1]["border"] == 0 and plain["parts"][1]["color"] is None
 
     top = streamer.plan(CAM, FACE, 1920, 1080, {"divider": True, "frame": "cam", "nick": "lebiga"})
     ch = top["parts"][0]["dst"][3]
     assert top["divider"] == [0, ch - 3, 1080, 6] and top["divider_color"] == "9146FF"
-    assert top["nick"] == {"text": "lebiga", "x": 36, "y": 48, "an": 7}
+    assert (top["nick"]["x"], top["nick"]["y"], top["nick"]["style"]) == (36, 48, "twitch")
     assert base["divider"] is None and base["nick"] is None
 
 
+@pytest.mark.parametrize("style", list(streamer.NICK_STYLES))
+def test_nick_styles_draw_plates_and_text(style):
+    sp = streamer.plan(CAM, FACE, 1920, 1080, {"nick": "lebiga", "nick_style": style})
+    nk = sp["nick"]
+    w, h = streamer.nick_size("lebiga", style)
+    assert (nk["w"], nk["h"]) == (w, h) and w > h > 40
+    ev = streamer.nick_events(nk)
+    text = [e for e in ev if ",Nick," in e]
+    assert text and all(("LEBIGA" if streamer.NICK_STYLES[style][2] else "lebiga") in e for e in text)
+    assert (style in ("neon", "bold")) == (not any("NickShape" in e for e in ev))  # these two have no plate
+
+
 def test_nick_ass_adds_to_subtitles_or_makes_its_own():
-    sp = {"nick": {"text": "lebiga", "x": 36, "y": 600, "an": 1}}
+    sp = streamer.plan(CAM, FACE, 1920, 1080, {"nick": "lebiga"})
     own = streamer.nick_ass(None, sp)
     assert "Style: Nick" in own and "lebiga" in own and "[Events]" in own
     subs = vr.build_ass([{"word": "привіт", "start": 0, "end": 1}], 2, "hl", 70)
@@ -241,7 +264,9 @@ def test_render_with_scenes_real(tmp_path):
 
 @needs_ffmpeg
 @pytest.mark.parametrize("look", [{"layout": "top", "divider": True, "nick": "lebiga", "cam_zoom": 1.5},
-                                  {"layout": "full", "game_zoom": 1.4},
+                                  {"layout": "full", "game_zoom": 1.4, "nick": "lebiga", "nick_style": "tape"},
+                                  {"layout": "top", "nick": "lebiga", "nick_style": "neon"},
+                                  {"layout": "pip", "pip_w": 1.0, "nick": "lebiga", "nick_style": "pill"},
                                   {"layout": "pip", "round": True, "frame": "gold", "pip_x": 1, "pip_y": 1},
                                   {"layout": "pip", "frame": "none"}, None])
 def test_render_each_layout_real(tmp_path, look):
@@ -396,3 +421,35 @@ def test_webcam_search_after_analysis_never_fails_the_job(tmp_path, monkeypatch)
     job_runner._find_webcam_once(pid, str(tmp_path / "stream.mp4"))
     job_runner._find_webcam_once(pid, str(tmp_path / "missing.mp4"))
     assert client.get(f"/api/projects/{pid}/stream?detect=false").json() == {"known": False}
+
+
+def test_quick_look_changes_never_fail_or_search_again(tmp_path, monkeypatch):
+    """Fast clicks send several saves at once: each must succeed, none may see half a file and search again."""
+    from concurrent.futures import ThreadPoolExecutor
+    pid, _ = _project(tmp_path)
+    calls = {"detect": 0}
+
+    def fake_detect(source, **k):
+        calls["detect"] += 1
+        return {"cam": CAM, "face": FACE, "w": 1920, "h": 1080, "note": ""}
+
+    monkeypatch.setattr(streamer, "detect_webcam", fake_detect)
+    client.get(f"/api/projects/{pid}/stream")
+    styles = list(streamer.NICK_STYLES) * 8
+
+    def put(s):
+        return client.put(f"/api/projects/{pid}/stream", json={"keep_cam": True, "look": {"nick": "lebiga", "nick_style": s}}).status_code
+
+    with ThreadPoolExecutor(8) as ex:
+        codes = list(ex.map(put, styles))
+    assert set(codes) == {200} and calls["detect"] == 1
+    info = client.get(f"/api/projects/{pid}/stream").json()
+    assert info["look"]["nick"] == "lebiga" and info["cam"] == CAM
+    assert not list(server._stream_path(pid).parent.glob("*.tmp"))
+
+
+def test_save_info_is_whole(tmp_path):
+    p = tmp_path / "a" / "stream.json"
+    streamer.save_info(str(p), {"cam": CAM})
+    streamer.save_info(str(p), {"cam": None})
+    assert json.loads(p.read_text(encoding="utf-8")) == {"cam": None} and [f.name for f in p.parent.iterdir()] == ["stream.json"]

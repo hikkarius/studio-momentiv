@@ -1229,7 +1229,10 @@ def _stream_info(project_id: str, proj: Dict[str, Any], redetect: bool = False) 
         raise HTTPException(status_code=404, detail="Вихідне відео не знайдено на диску.")
     with _get_slice_path_lock(str(path)):
         if path.exists() and not redetect:
-            return json.loads(path.read_text(encoding="utf-8"))
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                pass  # unreadable even under the lock: search again, keeping nothing
         old = {}
         if path.exists():
             try:
@@ -1245,7 +1248,7 @@ def _stream_info(project_id: str, proj: Dict[str, Any], redetect: bool = False) 
             raise HTTPException(status_code=500, detail=f"Не вдалося знайти вебку: {e}")
         info = {"cam": found["cam"], "face": found["face"], "w": found["w"], "h": found["h"], "note": found["note"],
                 "auto": True, "look": _stream_look(old), "use": old.get("use")}
-        path.write_text(json.dumps(info), encoding="utf-8")
+        streamer.save_info(str(path), info)
         return info
 
 
@@ -1323,7 +1326,17 @@ def _stream_public(info: Dict[str, Any]) -> Dict[str, Any]:
 def set_stream_info(project_id: str, payload: StreamCamRequest):
     """The user moved the webcam frame (or switched it off with cam=null) or changed the look (sizes, zoom, styling)."""
     proj = _get_project(project_id)
-    info = dict(_stream_info(project_id, proj))
+    first = _stream_info(project_id, proj)  # searched once before the first change
+    path = _stream_path(project_id)
+    with _get_slice_path_lock(str(path)):  # quick clicks: one change at a time, each over the last one
+        try:
+            info = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            info = dict(first)
+        return _change_stream_info(project_id, info, payload)
+
+
+def _change_stream_info(project_id: str, info: Dict[str, Any], payload: StreamCamRequest) -> Dict[str, Any]:
     info["look"] = _stream_look(info)
     if not payload.keep_cam:
         cam = streamer.clean_cam(payload.cam)
@@ -1338,7 +1351,7 @@ def set_stream_info(project_id: str, payload: StreamCamRequest):
     info.pop("game_x", None)
     if payload.use is not None:
         info["use"] = payload.use
-    _stream_path(project_id).write_text(json.dumps(info), encoding="utf-8")
+    streamer.save_info(str(_stream_path(project_id)), info)
     return info
 
 
