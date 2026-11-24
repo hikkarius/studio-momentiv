@@ -39,7 +39,6 @@ class GeminiConfig(BaseModel):
         default_factory=lambda: [
             "gemini-3.1-flash-lite",
             "gemini-3.5-flash-lite",
-            "gemini-flash-lite-latest",
             "gemini-3.5-flash",
         ],
         min_length=1,

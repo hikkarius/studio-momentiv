@@ -190,6 +190,55 @@ def _is_transient_error(err_str: str) -> bool:
     return any(m.lower() in low for m in _TRANSIENT_MARKERS)
 
 
+# JSON schemas for Gemini structured output: the model must return exactly this shape,
+# so a stray quote or a cut-off sentence in "reason" no longer breaks parsing.
+_CLIPS_SCHEMA: dict = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "start": {"type": "number"},
+            "end": {"type": "number"},
+            "title": {"type": "string"},
+            "category": {"type": "string", "enum": ["content", "intro", "outro", "ad"]},
+            "hook": {"type": "integer"},
+            "emotion": {"type": "integer"},
+            "standalone": {"type": "integer"},
+            "value": {"type": "integer"},
+            "reason": {"type": "string"},
+            "hook_text": {"type": "string"},
+            "caption": {"type": "string"},
+            "hashtags": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": [
+            "start", "end", "title", "category", "hook", "emotion", "standalone", "value",
+            "reason", "hook_text", "caption", "hashtags",
+        ],
+    },
+}
+
+_RERANK_SCHEMA: dict = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {"n": {"type": "integer"}, "score": {"type": "integer"}},
+        "required": ["n", "score"],
+    },
+}
+
+
+def _json_config(schema: dict, temperature: float):
+    """generate_content config: JSON that follows the schema, no automatic function calling."""
+    from google.genai import types
+
+    return types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_json_schema=schema,
+        temperature=temperature,
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    )
+
+
 def _call_gemini_single_window(
     client,
     segments: list[dict],
@@ -201,8 +250,6 @@ def _call_gemini_single_window(
     target_len: Optional[float] = None,
 ) -> list[dict]:
     """Sends a single chunk of transcript segments to Gemini and returns parsed clips."""
-    from google.genai import types
-
     transcript_lines = [f"[{s['start']}s - {s['end']}s]: {s['text']}" for s in segments]
     transcript_text = "\n".join(transcript_lines)
 
@@ -293,10 +340,7 @@ def _call_gemini_single_window(
                 response = client.models.generate_content(
                     model=model_name,
                     contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        temperature=0.3,
-                    ),
+                    config=_json_config(_CLIPS_SCHEMA, temperature=0.3),
                 )
                 raw_text = (response.text or "").strip() if response else ""
                 if not raw_text:
@@ -441,7 +485,6 @@ def rerank_clips(
     if len(clips) < 2:
         return clips
     try:
-        from google.genai import types
         if client is None:
             client = get_gemini_client()
         filter_hint = FILTER_INSTRUCTIONS.get(resolve_filter_mode(filter_mode), "")
@@ -464,7 +507,7 @@ def rerank_clips(
                 response = client.models.generate_content(
                     model=model_name,
                     contents=prompt,
-                    config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2),
+                    config=_json_config(_RERANK_SCHEMA, temperature=0.2),
                 )
                 data = json.loads(_strip_fences((response.text or "").strip()))
                 if isinstance(data, dict):

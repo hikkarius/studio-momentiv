@@ -15,6 +15,9 @@ from utils import GpuCapabilities
 
 log = logging.getLogger("shorts_core")
 
+# One Gemini request may take this long (ms): a long transcript window needs 1-2 minutes.
+GEMINI_TIMEOUT_MS: int = 120_000
+
 
 class AppState:
     """
@@ -149,8 +152,9 @@ class AppState:
                 return self._gemini_client
 
             from google import genai
-            log.info("Initializing new Gemini API client with 45s request timeout")
-            self._gemini_client = genai.Client(api_key=key, http_options={"timeout": 45000})
+            # 45 s was too short: Google cut long transcript windows with 504 DEADLINE_EXCEEDED.
+            log.info(f"Initializing new Gemini API client with {GEMINI_TIMEOUT_MS // 1000}s request timeout")
+            self._gemini_client = genai.Client(api_key=key, http_options={"timeout": GEMINI_TIMEOUT_MS})
             self._cached_api_key = key
             return self._gemini_client
 
