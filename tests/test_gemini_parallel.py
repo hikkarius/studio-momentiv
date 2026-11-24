@@ -7,7 +7,7 @@ import time
 import pytest
 
 import ai_selector
-from ai_selector import GeminiQuotaError, analyze_and_find_clips
+from ai_selector import GeminiIncompleteError, GeminiQuotaError, analyze_and_find_clips
 from config_loader import app_config
 
 
@@ -93,10 +93,11 @@ def test_daily_limit_is_not_retried_and_reaches_the_queue(monkeypatch, sleeps):
         raise GeminiQuotaError("day", daily=True)
 
     monkeypatch.setattr(ai_selector, "_call_gemini_single_window", fake_window)
-    with pytest.raises(GeminiQuotaError) as exc:
+    with pytest.raises(GeminiIncompleteError) as exc:
         analyze_and_find_clips(client=object(), segments=_segments(), count=75)
-    assert exc.value.daily is True
-    assert sleeps == []
+    assert exc.value.daily is True and not exc.value.overloaded
+    assert isinstance(exc.value.cause, GeminiQuotaError)
+    assert sleeps == []  # no second round for a limit either
 
 
 def test_per_minute_limit_that_never_lifts_gives_up(monkeypatch, sleeps):
@@ -105,6 +106,7 @@ def test_per_minute_limit_that_never_lifts_gives_up(monkeypatch, sleeps):
 
     monkeypatch.setattr(ai_selector, "_call_gemini_single_window", fake_window)
     monkeypatch.setattr(app_config.gemini, "parallel_windows", 1)
-    with pytest.raises(GeminiQuotaError):
+    with pytest.raises(GeminiIncompleteError) as exc:
         analyze_and_find_clips(client=object(), segments=_segments(), count=75)
+    assert exc.value.daily is False and not exc.value.overloaded
     assert sleeps == [30.0, 60.0] * 5  # two pauses per window, then the queue takes over

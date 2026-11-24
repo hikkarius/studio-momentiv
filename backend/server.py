@@ -1394,6 +1394,8 @@ def get_queue():
         # Gemini limit pause: when the queue goes on by itself, and whether it is the per-day limit
         "paused_until": db.queue_paused_until(),
         "limit_daily": bool(paused and paused[0].get("limit_daily")),
+        # '' = Gemini limit, 'overload' = Google's servers were overloaded
+        "limit_reason": (paused[0].get("limit_reason") or "") if paused else "",
         "keep_awake": keep_awake.is_active(),
     }
 

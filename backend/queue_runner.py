@@ -124,17 +124,46 @@ def _limit_message(daily: bool) -> str:
             "Gemini попросив перепочити: забагато запитів за хвилину. Мову вже розпізнано й збережено.")
 
 
+# Google's servers overloaded (503/504 even after a second round): wait longer each time in a row
+_OVERLOAD_BACKOFF = (3 * 60, 10 * 60, 30 * 60, 60 * 60)
+
+
+def _overload_message(err, resume_at: float) -> str:
+    when = datetime.datetime.fromtimestamp(resume_at).strftime("%H:%M")
+    done, total = len(getattr(err, "done", {}) or {}), int(getattr(err, "total", 0) or 0)
+    part = f"Проаналізовано {done} з {total} частин відео, їх збережено. " if done and total > 1 else ""
+    return f"Сервери Google перевантажені. {part}Доробимо решту автоматично о {when}."
+
+
 def _pause_on_limit(item: Dict[str, Any], err) -> bool:
-    """Puts the item on pause after a limit error. False when the user turned waiting off."""
+    """Puts the item on pause after a limit error or Google overload. False when the user turned
+    waiting off (then the item fails with the job's honest message)."""
     from config_loader import app_config
     if not app_config.studio.wait_for_limit:
         return False
     hits = int(item.get("limit_hits") or 0)
+    if getattr(err, "overloaded", False):
+        resume_at = time.time() + _OVERLOAD_BACKOFF[min(hits, len(_OVERLOAD_BACKOFF) - 1)]
+        db.pause_queue_item(item["id"], resume_at, False, _overload_message(err, resume_at),
+                            hits=hits + 1, reason="overload")
+        log.warning(f"Черга: Google перевантажений, продовжимо о "
+                    f"{datetime.datetime.fromtimestamp(resume_at).strftime('%d.%m %H:%M')}.")
+        return True
     resume_at = limit_resume_at(err.daily, err.retry_after, hits)
-    db.pause_queue_item(item["id"], resume_at, err.daily, _limit_message(err.daily), hits=hits + 1)
+    db.pause_queue_item(item["id"], resume_at, err.daily, _limit_message(err.daily), hits=hits + 1, reason="")
     when = datetime.datetime.fromtimestamp(resume_at).strftime("%d.%m %H:%M")
     log.warning(f"Черга: ліміт Gemini ({'денний' if err.daily else 'хвилинний'}), продовжимо о {when}.")
     return True
+
+
+def _warm_whisper() -> None:
+    """Starts loading the Whisper model in the background unless it is already loaded."""
+    try:
+        from state import app_state
+        if getattr(app_state, "_whisper", None) is None:
+            app_state.preload_whisper_async()
+    except Exception as e:
+        log.debug(f"Whisper warm-up skipped: {e}")
 
 
 def _prepare_while_paused(item: Dict[str, Any], project_id: str, paused_until: float) -> None:
@@ -151,7 +180,7 @@ def _prepare_while_paused(item: Dict[str, Any], project_id: str, paused_until: f
     paused = [i for i in db.list_queue_items() if i["status"] == "limit"]
     daily = bool(paused and paused[0].get("limit_daily"))
     db.pause_queue_item(item_id, max(paused_until, db.queue_paused_until()), daily,
-                        "Мову вже розпізнано. Чекає ліміт Gemini.")
+                        "Мову вже розпізнано. Чекає на Gemini.")
 
 
 def process_next() -> Optional[Dict[str, Any]]:
@@ -160,12 +189,16 @@ def process_next() -> Optional[Dict[str, Any]]:
 
     # A paused item whose time has come goes first; while the pause lasts only Whisper runs.
     item = db.claim_next_queue_item(due_limit_only=True)
+    resumed = item is not None  # back from a pause: its transcript is cached, only Gemini is left
     paused_until = 0.0
     if item is None:
         paused_until = db.queue_paused_until() if app_config.studio.wait_for_limit else 0.0
         item = db.claim_next_queue_item()
     if item is None:
         return None
+    if not resumed:
+        # a new video will need Whisper soon: load it now, while the audio downloads
+        _warm_whisper()
     item_id = item["id"]
     try:
         project_id = item["project_id"]

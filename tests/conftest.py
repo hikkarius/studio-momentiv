@@ -75,6 +75,11 @@ def isolate_test_database(tmp_path, monkeypatch):
     monkeypatch.setattr(backup, "start", lambda: None)  # no background copies while tests run
     # Never load the real Whisper model in the background while tests run
     monkeypatch.setattr(server, "_start_whisper_housekeeping", lambda: None)
+    from state import app_state as _app_state
+    monkeypatch.setattr(_app_state, "preload_whisper_async", lambda: None)
+    # Gemini's second round for unanswered windows waits 90 s in real life; not in tests
+    import ai_selector
+    monkeypatch.setattr(ai_selector, "_SECOND_ROUND_WAIT", 0.0)
 
     db.init_db()
     yield test_db

@@ -200,7 +200,10 @@ const Queue = (() => {
         active = data.active;
         disk = data.disk || null;
         renderDisk();
-        pause = { until: data.paused_until || 0, daily: !!data.limit_daily, awake: !!data.keep_awake };
+        pause = {
+          until: data.paused_until || 0, daily: !!data.limit_daily, awake: !!data.keep_awake,
+          overload: data.limit_reason === "overload",
+        };
         onChanges();
         render();
       }
@@ -229,7 +232,7 @@ const Queue = (() => {
         } else if (it.status === "limit" && before !== "analyzing") {
           /* a video transcribed during the pause: no toast */
         } else if (it.status === "limit") {
-          showToast(`Ліміт Gemini: «${it.title}» продовжиться ${whenText(it.resume_at)}`);
+          showToast(`${pause.overload ? "Google перевантажений" : "Ліміт Gemini"}: «${it.title}» продовжиться ${whenText(it.resume_at)}`);
         }
       }
       if (!before && it.status !== "waiting") refreshVideos = true;
@@ -248,10 +251,10 @@ const Queue = (() => {
     downloading: "⏳ Обробляється",
     analyzing: "⏳ Обробляється",
     failed: "Не вдалося",
-    limit: "⏸ Чекає ліміт Gemini",
+    limit: "⏸ Чекає на Gemini",
   };
   const SHOWN = ["limit", "waiting", "downloading", "analyzing", "failed"];
-  let pause = { until: 0, daily: false, awake: false };
+  let pause = { until: 0, daily: false, awake: false, overload: false };
 
   // ── Gemini limit pause ────────────────────────────────────────────────────
 
@@ -291,10 +294,14 @@ const Queue = (() => {
     const paused = shown.filter((i) => i.status === "limit");
     if (!paused.length || !pause.until) { box.hidden = true; box.innerHTML = ""; return; }
     const more = shown.some((i) => i.status === "waiting");
-    const head = pause.daily ? "Безкоштовний ліміт Gemini на сьогодні закінчився" : "Gemini попросив перепочити";
-    const why = pause.daily
-      ? `Нічого не втрачено. Студія сама продовжить <b>${escapeHtml(whenText(pause.until))}</b>, коли Google оновить ліміт.`
-      : `Забагато запитів за хвилину (так буває з безкоштовним ключем). Студія сама продовжить <b>${escapeHtml(whenText(pause.until))}</b>.`;
+    const when = `<b>${escapeHtml(whenText(pause.until))}</b>`;
+    const head = pause.overload ? "Сервери Google перевантажені"
+      : pause.daily ? "Безкоштовний ліміт Gemini на сьогодні закінчився" : "Gemini попросив перепочити";
+    const why = pause.overload
+      ? `Це не через ключ: Google зараз не встигає відповідати всім. Готові частини збережено, студія сама доробить решту ${when}.`
+      : pause.daily
+        ? `Нічого не втрачено. Студія сама продовжить ${when}, коли Google оновить ліміт.`
+        : `Забагато запитів за хвилину (так буває з безкоштовним ключем). Студія сама продовжить ${when}.`;
     box.innerHTML = `
       <span class="ql-ic" aria-hidden="true">⏸</span>
       <div class="ql-text">
@@ -302,7 +309,7 @@ const Queue = (() => {
         <span>${why}${more ? "<br>А поки розпізнає мову в наступних відео, щоб потім усе пішло швидше." : ""}</span>
         ${pause.awake ? `<small>☕ Ноутбук не засне, доки черга не закінчиться. Екран може згаснути.</small>` : ""}
       </div>
-      <button type="button" class="btn btn-secondary btn-sm" onclick="Settings.open('ai')">Замінити ключ</button>`;
+      ${pause.overload ? "" : `<button type="button" class="btn btn-secondary btn-sm" onclick="Settings.open('ai')">Замінити ключ</button>`}`;
     box.hidden = false;
   }
   let lastIds = "";
@@ -367,11 +374,11 @@ const Queue = (() => {
       let meta = "";
       const pIndex = paused.indexOf(it);
       if (it.status === "limit") {
-        if (pIndex > 0) badge = `⏸ Після ліміту · ${pIndex + 1}-е`;
-        meta = it.message || "Чекає ліміт Gemini";
+        if (pIndex > 0) badge = `⏸ Після паузи · ${pIndex + 1}-е`;
+        meta = it.message || "Чекає на Gemini";
       } else if (it.status === "waiting" && paused.length) {
         badge = `У черзі · ${paused.length + wIndex + 1}-е`;
-        meta = "Поки чекаємо ліміт, студія розпізнає мову";
+        meta = "Поки чекаємо на Gemini, студія розпізнає мову";
       } else if (it.status === "waiting") {
         badge = wIndex === 0 ? (running ? "У черзі · наступне" : "Зараз почнемо") : `У черзі · ${wIndex + 1}-е`;
         meta = it.clips_count ? `Чекає своєї черги · ${it.clips_count} кліпів` : "Чекає своєї черги";

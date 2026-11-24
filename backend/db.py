@@ -137,6 +137,9 @@ def init_db():
             conn.execute("ALTER TABLE queue_items ADD COLUMN limit_daily INTEGER NOT NULL DEFAULT 0;")
         if "limit_hits" not in queue_columns:
             conn.execute("ALTER TABLE queue_items ADD COLUMN limit_hits INTEGER NOT NULL DEFAULT 0;")
+        # why it waits: '' = Gemini limit, 'overload' = Google's servers were overloaded
+        if "limit_reason" not in queue_columns:
+            conn.execute("ALTER TABLE queue_items ADD COLUMN limit_reason TEXT NOT NULL DEFAULT '';")
 
 
 def new_shelf_size(duration_sec: float) -> int:
@@ -636,19 +639,23 @@ def queue_paused_until() -> float:
     return float(r) if r > time.time() else 0.0
 
 
-def pause_queue_item(item_id: str, resume_at: float, daily: bool, message: str, hits: Optional[int] = None) -> None:
+def pause_queue_item(item_id: str, resume_at: float, daily: bool, message: str, hits: Optional[int] = None,
+                     reason: Optional[str] = None) -> None:
     """Puts an item on «limit» and moves every other paused item to the same resume time,
-    so after the pause they go one by one instead of hitting the limit again at once."""
+    so after the pause they go one by one instead of hitting the limit again at once.
+    reason: '' = Gemini limit, 'overload' = Google overloaded; None keeps the current one."""
     now = time.time()
     with get_db() as conn:
         conn.execute(
             "UPDATE queue_items SET status = 'limit', resume_at = ?, limit_daily = ?, message = ?, error = NULL, "
-            "progress = 0.0, limit_hits = COALESCE(?, limit_hits), updated_at = ? WHERE id = ?",
-            (resume_at, int(daily), message, hits, now, item_id),
+            "progress = 0.0, limit_hits = COALESCE(?, limit_hits), limit_reason = COALESCE(?, limit_reason), "
+            "updated_at = ? WHERE id = ?",
+            (resume_at, int(daily), message, hits, reason, now, item_id),
         )
         conn.execute(
-            "UPDATE queue_items SET resume_at = ?, limit_daily = ? WHERE status = 'limit' AND id != ?",
-            (resume_at, int(daily), item_id),
+            "UPDATE queue_items SET resume_at = ?, limit_daily = ?, limit_reason = COALESCE(?, limit_reason) "
+            "WHERE status = 'limit' AND id != ?",
+            (resume_at, int(daily), reason, item_id),
         )
 
 

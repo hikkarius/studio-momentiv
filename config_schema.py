@@ -47,6 +47,7 @@ class GeminiConfig(BaseModel):
     )
     rerank: bool = True
     parallel_windows: int = Field(default=3, ge=1, le=8)
+    thinking_level: str = Field(default="minimal", pattern=r"^(|minimal|low|medium|high)$")
 
 
 class CacheConfig(BaseModel):
