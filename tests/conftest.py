@@ -61,6 +61,13 @@ def isolate_test_database(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "_RENDER_TMP", isolated_root / "render_tmp")
     # Never ask a real site for the video size from tests (no network); tests that need a size patch it
     monkeypatch.setattr(server, "probe_download_size", lambda url, **kw: None)
+    # Nor download a link's audio track (the queue then falls back to the video-only path)
+    import utils
+
+    def _no_audio_download(url, output_dir, **kw):
+        raise RuntimeError("no network in tests")
+
+    monkeypatch.setattr(utils, "download_audio_from_url", _no_audio_download)
 
     # Daily database copies go to tmp_path too
     from backend import backup

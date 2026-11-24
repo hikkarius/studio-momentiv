@@ -384,6 +384,11 @@ def faster_whisper_pass(model, audio_path: str, kwargs: dict, cfg_lang: str, sta
     return segments, words, lang
 
 
+def resolve_language(language: Optional[str] = None) -> str:
+    """The language choice for Whisper: the one given, else the one from the settings."""
+    return (language or CONFIG.get("whisper", {}).get("language") or "uk").strip().lower()
+
+
 def transcribe_video(
     video_path: str,
     status_cb: Optional[Callable[[str], None]] = None,
@@ -399,13 +404,24 @@ def transcribe_video(
     status_cb(msg) is called with human-readable progress strings.
     language: Whisper code ("uk", "en", ...) or "auto"; None = the language from the settings.
     """
-    cfg_lang = (language or CONFIG.get("whisper", {}).get("language") or "uk").strip().lower()
+    cfg_lang = resolve_language(language)
     cached = load_transcript_cache_for(video_path, cfg_lang)
     if cached:
         if status_cb:
             status_cb("✅ Транскрипцію знайдено у кеші — Whisper пропущено!")
         return (*cached, True)
 
+    segments, words, detected_lang = transcribe_media(video_path, cfg_lang, status_cb)
+    save_transcript_cache(video_path, segments, words, detected_lang, requested=cfg_lang)
+    return segments, words, detected_lang, False
+
+
+def transcribe_media(
+    video_path: str,
+    cfg_lang: str,
+    status_cb: Optional[Callable[[str], None]] = None,
+) -> tuple[list[dict], list[dict], str]:
+    """Whisper on any audio or video file, without the cache. Returns (segments, words, detected_lang)."""
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         audio_path = tmp.name
     acquired = False
@@ -498,8 +514,7 @@ def transcribe_video(
                             "word": w["word"].strip(),
                         })
 
-        save_transcript_cache(video_path, segments, words, detected_lang, requested=cfg_lang)
-        return segments, words, detected_lang, False
+        return segments, words, detected_lang
 
     finally:
         if acquired:

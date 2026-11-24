@@ -219,7 +219,7 @@ def _download(item: Dict[str, Any]) -> Optional[str]:
         db.update_queue_item(item_id, progress=round(frac, 3), message=msg)
 
     try:
-        project, reused = server.ingest_url(item["source_url"], progress_cb=on_progress)
+        project, reused = download_audio_first(item["source_url"], on_progress, item.get("language") or None)
     except storage.NotEnoughSpaceError:
         raise
     except ValueError as e:
@@ -235,6 +235,92 @@ def _download(item: Dict[str, Any]) -> Optional[str]:
         )
         return None
     return project["id"]
+
+
+def download_audio_first(url: str, on_progress, language: Optional[str] = None):
+    """Downloads the link's audio first (seconds), then the video in a parallel thread while
+    Whisper transcribes the audio; the transcript is cached under the final video file, so the
+    analysis skips Whisper. Any problem with the audio falls back to the old way (Whisper runs on
+    the video later); a failed video download fails the item as before. Returns ingest_url's result."""
+    import shutil
+    import transcription
+    from backend import server
+    from utils import download_audio_from_url
+
+    on_progress(0.0, "Дізнаюсь розмір відео…")
+    size = server.probe_download_size(url)
+    # The audio track (~60 MB per hour) fits in the disk reserve kept on top of the video size
+    storage.ensure_space(server.UPLOADS_DIR, size)
+
+    audio_dir = server.UPLOADS_DIR / f"temp_audio_{uuid.uuid4().hex[:8]}"
+    try:
+        on_progress(0.0, "Завантажуємо звук, щоб одразу почати розпізнавання...")
+        try:
+            audio_path = download_audio_from_url(url, str(audio_dir))
+        except Exception as e:
+            log.warning(f"Черга: звук окремо не завантажився ({_short_error(e)}), качаємо відео як раніше.")
+            return server.ingest_url(url, progress_cb=on_progress)
+
+        lock = threading.Lock()
+        progress = {"video": 0.0, "whisper": None}
+
+        def report() -> None:
+            v, w = progress["video"], progress["whisper"]
+            msg = f"Завантаження відео: {v * 100:.0f}%"
+            msg += " · мову вже розпізнано" if w is not None and w >= 1.0 else (
+                f" · розпізнавання мови: {w * 100:.0f}%" if w is not None else " · розпізнаємо мову...")
+            try:
+                on_progress(v, msg)
+            except Exception:
+                pass
+
+        def video_cb(frac: float, _msg: str) -> None:
+            with lock:
+                progress["video"] = max(progress["video"], float(frac))
+                report()
+
+        def whisper_cb(*args) -> None:
+            if len(args) >= 2 and isinstance(args[0], (int, float)):
+                with lock:
+                    progress["whisper"] = max(0.0, min(1.0, float(args[0])))
+                    report()
+
+        outcome: Dict[str, Any] = {}
+
+        def fetch_video() -> None:
+            try:
+                outcome["result"] = server.ingest_url(url, progress_cb=video_cb, space_checked=True)
+            except BaseException as e:  # handed to the queue thread below
+                outcome["error"] = e
+
+        video_thread = threading.Thread(target=fetch_video, name="VideoDownload", daemon=True)
+        video_thread.start()
+
+        cfg_lang = transcription.resolve_language(language)
+        transcript = None
+        t0 = time.monotonic()
+        try:
+            with job_runner._analyze_lock:
+                transcript = transcription.transcribe_media(audio_path, cfg_lang, whisper_cb)
+            log.info(f"Черга: мову розпізнано зі звуку за {time.monotonic() - t0:.0f} с, поки качалося відео.")
+            with lock:
+                progress["whisper"] = 1.0
+                report()
+        except Exception as e:
+            log.warning(f"Черга: не вдалося розпізнати звук заздалегідь ({e}); розпізнаємо з відео.")
+
+        video_thread.join()
+        if "error" in outcome:
+            raise outcome["error"]
+        project, reused = outcome["result"]
+        if transcript and transcript[0]:
+            segments, words, lang = transcript
+            video_path = project["source_path"]
+            if transcription.load_transcript_cache_for(video_path, cfg_lang) is None:
+                transcription.save_transcript_cache(video_path, segments, words, lang, requested=cfg_lang)
+        return project, reused
+    finally:
+        shutil.rmtree(audio_dir, ignore_errors=True)
 
 
 def _short_error(e: Exception) -> str:

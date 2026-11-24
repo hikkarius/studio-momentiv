@@ -365,11 +365,12 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
     }
 
 
-def ingest_url(url: str, progress_cb=None) -> tuple[Dict[str, Any], bool]:
+def ingest_url(url: str, progress_cb=None, space_checked: bool = False) -> tuple[Dict[str, Any], bool]:
     """
     Downloads a video by URL into UPLOADS_DIR and creates its project.
     Returns (project, reused); reused=True when the same video was already in the studio.
     Raises ValueError for a bad link and other exceptions for download failures.
+    space_checked=True: the caller already made sure the disk has room (skips the size probe).
     """
     url = url.strip()
     if not (url.startswith("http://") or url.startswith("https://")):
@@ -377,9 +378,10 @@ def ingest_url(url: str, progress_cb=None) -> tuple[Dict[str, Any], bool]:
 
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     # Ask the site how big the video is and stop before downloading it onto a full disk
-    if progress_cb is not None:
-        progress_cb(0.0, "Дізнаюсь розмір відео…")
-    storage.ensure_space(UPLOADS_DIR, probe_download_size(url))
+    if not space_checked:
+        if progress_cb is not None:
+            progress_cb(0.0, "Дізнаюсь розмір відео…")
+        storage.ensure_space(UPLOADS_DIR, probe_download_size(url))
     staging_temp_id = uuid.uuid4().hex[:8]
     temp_dir = str(UPLOADS_DIR / f"temp_url_{staging_temp_id}")
     os.makedirs(temp_dir, exist_ok=True)

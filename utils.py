@@ -463,6 +463,41 @@ def estimate_download_size(info: dict) -> Optional[int]:
     return total or None
 
 
+# Audio track only: the same m4a stream the video download merges in, so timestamps match
+_YTDLP_AUDIO_FORMAT = ["-f", "bestaudio[acodec^=mp4a]/bestaudio[ext=m4a]/bestaudio"]
+
+
+def download_audio_from_url(url: str, output_dir: str, timeout: int = 1800) -> str:
+    """Downloads only the audio of a link (a few MB, seconds) so Whisper can start while the
+    video is still downloading. Same URL checks and output containment as the video download."""
+    url = _checked_url(url)
+    os.makedirs(output_dir, exist_ok=True)
+    cmd = [
+        sys.executable, "-m", "yt_dlp",
+        *_YTDLP_AUDIO_FORMAT,
+        "-o", os.path.join(output_dir, "%(id)s.audio.%(ext)s"),
+        "--no-playlist",
+        "--print", "after_move:filepath",
+        "--",
+        url,
+    ]
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        check=True, timeout=timeout, env=env,
+    )
+    lines = [ln for ln in result.stdout.strip().splitlines() if ln.strip()]
+    if not lines:
+        raise RuntimeError("yt-dlp did not return an audio file path.")
+    path = os.path.normpath(lines[-1])
+    if not Path(path).resolve().is_relative_to(Path(output_dir).resolve()):
+        raise ValueError(f"Downloaded audio {path!r} resolved outside output directory {output_dir!r}")
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        raise RuntimeError(f"Downloaded audio does not exist or is empty: {path}")
+    log.info(f"Audio downloaded → {path}")
+    return path
+
+
 def download_from_url_with_title(
     url: str,
     output_dir: str = "web_uploads",
