@@ -278,10 +278,15 @@ def test_playhead_stays_inside_the_clip(page, studio, project):
         page.keyboard.press("ArrowLeft")
     page.wait_for_function("Math.abs(Editor.state().time - 30) < 0.3")  # and at the start (30 s)
 
-    # moving the end bracket later lets the playhead reach further
-    page.evaluate("document.getElementById('edVideo').currentTime = 51.0")
-    page.wait_for_function("Math.abs(Editor.state().time - 51) < 0.2")
-    page.keyboard.press("]")
+    # moving the end bracket later lets the playhead reach further.
+    # Drag the bracket, as a person does: the editor never lets the playhead stand past the end,
+    # so setting currentTime = 51 and pressing «]» raced its clamp and failed on a slow machine.
+    handle = page.locator("#edTrack .hd[data-h='end']").bounding_box()
+    hy = handle["y"] + handle["height"] / 2
+    page.mouse.move(handle["x"] + handle["width"] / 2, hy)
+    page.mouse.down()
+    page.mouse.move(handle["x"] + handle["width"] / 2 + track["width"] * 0.08, hy, steps=5)
+    page.mouse.up()
     assert wait_for(page, lambda: clip(2)["end_sec"] > 50.7)
     new_end = clip(2)["end_sec"]
     page.evaluate("document.getElementById('edVideo').currentTime = 40.0")
