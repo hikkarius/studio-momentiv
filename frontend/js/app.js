@@ -1048,6 +1048,45 @@ const Layers = (() => {
 })();
 
 /**
+ * Was the focused element reached with the keyboard? (Tab, arrows, or a re-render right after a key.)
+ * Then Space and the arrows belong to it. After a mouse click they keep their editor job (play, next clip).
+ * :focus-visible can't tell: Chromium turns it on for the clicked button at the first key press.
+ */
+const keyboardFocus = (() => {
+  let byKey = true;
+  const set = new WeakSet();
+  document.addEventListener("keydown", () => { byKey = true; }, true);
+  document.addEventListener("pointerdown", () => { byKey = false; }, true);
+  document.addEventListener("focusin", (e) => { if (byKey) set.add(e.target); else set.delete(e.target); }, true);
+  return (el) => !!el && set.has(el);
+})();
+
+/**
+ * Tabs move with the arrow keys (and Home/End), as in any tab bar: the next tab gets the focus and opens.
+ * One listener for every [role="tablist"] in the studio, ahead of the editor's own arrow hotkeys.
+ */
+document.addEventListener("keydown", (e) => {
+  const tab = e.target.closest?.('[role="tab"]');
+  const list = tab?.closest('[role="tablist"]');
+  // after a mouse click the arrows keep their usual job (in the editor: next clip, seek)
+  if (!list || !keyboardFocus(tab) || e.ctrlKey || e.metaKey || e.altKey) return;
+  const vertical = list.getAttribute("aria-orientation") === "vertical";
+  const keys = { Home: "first", End: "last", [vertical ? "ArrowDown" : "ArrowRight"]: 1, [vertical ? "ArrowUp" : "ArrowLeft"]: -1 };
+  // the step rail and narrow screens lay some lists out the other way: accept both arrow pairs
+  Object.assign(keys, vertical ? { ArrowRight: 1, ArrowLeft: -1 } : { ArrowDown: 1, ArrowUp: -1 });
+  const k = keys[e.key];
+  if (!k) return;
+  const tabs = [...list.querySelectorAll('[role="tab"]')].filter((t) => !t.disabled && !t.hidden && t.offsetParent !== null);
+  const i = tabs.indexOf(tab);
+  const next = k === "first" ? tabs[0] : k === "last" ? tabs[tabs.length - 1] : tabs[(i + k + tabs.length) % tabs.length];
+  e.preventDefault();
+  e.stopPropagation();
+  if (!next || next === tab) return;
+  next.focus();
+  next.click();
+}, true);
+
+/**
  * A failed video in two short lines: what happened and what to do. The full text hides under «Детальніше».
  * Gemini's own messages (ai_selector.py) get their short form; anything else shows its first sentence.
  */

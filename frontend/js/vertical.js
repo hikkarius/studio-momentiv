@@ -189,7 +189,20 @@ const Vertical = (() => {
   }
 
   // ─── Controls ──────────────────────────────────────────────────────────────
-  function renderControls() {
+  /** Runs a re-render that rebuilds buttons with innerHTML and puts the keyboard back on the same button
+   * (same data-v, else the same place in its group), so picking a style with Enter does not drop it to <body>. */
+  function holdFocus(render) {
+    const a = document.activeElement;
+    const box = a && a !== document.body ? a.parentElement?.closest("[id]") : null;
+    const v = a?.dataset?.v;
+    const i = box ? [...box.querySelectorAll(a.tagName)].indexOf(a) : -1;
+    render();
+    if (!box || a.isConnected || !box.isConnected) return;
+    const same = v !== undefined ? [...box.querySelectorAll("[data-v]")].find((b) => b.dataset.v === v) : null;
+    (same || box.querySelectorAll(a.tagName)[i])?.focus({ preventScroll: true });
+  }
+  function renderControls() { holdFocus(renderControlsNow); }
+  function renderControlsNow() {
     const o = st.opts;
     $("vxStyle").innerHTML = STYLES.map((s) => `<button type="button" data-v="${s.id}" aria-pressed="${s.id === o.style}">` +
       `<span class="vx-tile vx-t-${s.id}" aria-hidden="true">${TILE[s.id]}</span><b>${s.name}</b></button>`).join("");

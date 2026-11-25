@@ -7,6 +7,9 @@
   padding: 0;
 }
 
+/* Keyboard focus: the same ring everywhere (home, settings, first run, editor). The mouse shows none. */
+:focus-visible { outline: 2px solid var(--focus-color); outline-offset: var(--focus-offset); }
+
 body {
   background-color: var(--bg-main);
   color: var(--text-main);
@@ -1055,7 +1058,7 @@ body {
 .videos-head h2 span { font-family: "JetBrains Mono", monospace; font-size: var(--fs-sm); }
 .videos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
 .video-card { position: relative; display: block; padding: 0; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--r-md); overflow: hidden; transition: border-color .15s, transform .15s; }
-.video-card:hover { border-color: var(--accent-orange); transform: translateY(-2px); }
+@media (hover: hover) { .video-card:hover { border-color: var(--accent-orange); transform: translateY(-2px); } } /* a tap on a phone does not leave the card lifted */
 .video-card .history-item-left { display: flex; flex-direction: column; align-items: stretch; gap: 0; cursor: pointer; padding: 0; }
 .tabs-nav[hidden] { display: none; }
 .video-card .history-thumb-wrap { width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 0; position: relative; background: var(--black); }
@@ -1186,7 +1189,7 @@ body:not(.home-empty) .home-how { display: none !important; }
 .err-sum > span { color: var(--text-main); font-size: var(--fs-sm); }
 .err-more { font-size: var(--fs-sm); color: var(--text-muted); }
 .err-more summary { cursor: pointer; width: max-content; text-decoration: underline; text-underline-offset: 2px; }
-.err-more summary:focus-visible { outline: 2px solid var(--accent-orange); outline-offset: 2px; border-radius: 2px; }
+.err-more summary:focus-visible { outline: 2px solid var(--focus-color); outline-offset: var(--focus-offset); border-radius: 2px; }
 .err-more span { display: block; margin-top: 4px; overflow-wrap: anywhere; }
 .q-item.failed .video-card-meta { color: inherit; }
 .video-card .vc-acts { padding: 0 14px 14px; margin-top: -4px; }

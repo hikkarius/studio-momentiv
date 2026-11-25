@@ -128,7 +128,7 @@ const Home = (() => {
     const go = () => openCard(p, st);
     left.addEventListener("click", go);
     // a failed card has its own «Ще раз / Видалити» buttons, so it is not a button itself (no nested controls)
-    if (st !== "failed") left.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+    if (st !== "failed") left.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
     el.querySelector(".vc-dots").addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(el); });
     el.querySelector(".err-more")?.addEventListener("click", (e) => e.stopPropagation()); // «Детальніше» only opens the text
     el.querySelector(".vc-acts")?.addEventListener("click", async (e) => {
@@ -175,7 +175,11 @@ const Home = (() => {
     if (on) menu.querySelector("button")?.focus();
   }
   function closeMenus() {
+    // the keyboard was inside a menu (Esc or a pick): it goes back to that card's «⋯»
+    const inside = document.activeElement?.closest?.(".vc-menu");
+    const dots = inside?.parentElement.querySelector(".vc-dots");
     document.querySelectorAll(".vc-menu").forEach((m) => { m.hidden = true; });
+    if (dots && dots.isConnected) dots.focus({ preventScroll: true });
     document.querySelectorAll(".vc-dots").forEach((b) => b.setAttribute("aria-expanded", "false"));
     document.querySelectorAll(".menu-open").forEach((c) => c.classList.remove("menu-open"));
   }
@@ -254,7 +258,29 @@ const Home = (() => {
       render();
     }));
     document.addEventListener("click", (e) => { if (!e.target.closest(".vc-menu, .vc-dots")) closeMenus(); });
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { closeMenus(); return; }
+      const m = e.target.closest?.(".vc-menu");
+      if (!m || !["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+      e.preventDefault();
+      const items = [...m.querySelectorAll("button:not(:disabled)")];
+      const i = items.indexOf(e.target);
+      const n = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+      items[n]?.focus();
+    });
+    // Tab out of an open menu closes it (it is not left hanging over the next card)
+    document.addEventListener("focusout", (e) => {
+      const m = e.target.closest?.(".vc-menu");
+      if (!m) return;
+      setTimeout(() => { // the new focus is known only after this event (none when Tab leaves the page)
+        const card = m.parentElement;
+        const a = document.activeElement;
+        if (m.hidden || m.contains(a) || a === card.querySelector(".vc-dots") || m.matches(":hover")) return; // a mouse click inside it
+        m.hidden = true;
+        card.classList.remove("menu-open");
+        card.querySelector(".vc-dots")?.setAttribute("aria-expanded", "false");
+      });
+    });
     load();
   }
 
