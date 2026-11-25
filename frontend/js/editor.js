@@ -25,6 +25,15 @@ const Editor = (() => {
   const clip = () => st.clips[st.cur];
   const video = () => $("edVideo");
   const len = (c) => c.end_sec - c.start_sec;
+  const isStory = (c) => !!c && c.kind === "story";
+  const inParts = (c) => isStory(c) && c.story_view === "parts";
+  const durLabel = (s) => (s >= 60 ? fmtS(s) : `${Math.round(s)} с`);
+  /** Where «Частина 2» of a story starts: the saved cut, or the middle until the studio sends one. */
+  const splitOf = (c) => {
+    const s = Number(c.split_sec);
+    return Number.isFinite(s) && s > c.start_sec + 1 && s < c.end_sec - 1 ? s : (c.start_sec + c.end_sec) / 2;
+  };
+  const STORY_PART_MIN = 15;
 
   function toast(msg, err = false) {
     const t = $("edToast");
@@ -97,9 +106,9 @@ const Editor = (() => {
       li.setAttribute("aria-current", String(i === st.cur));
       li.title = c.title || "";
       li.innerHTML = `<div class="ed-th"><img src="/api/projects/${pid()}/clips/${c.clip_index}/thumbnail?s=${Math.round(c.start_sec * 10)}" alt="" draggable="false" loading="lazy" onerror="this.remove()">
-          <span class="ed-num">№${c.num}</span><span class="ed-dur">${Math.round(len(c))} с</span>${TIER[c.tier] || ""}${r === "keep" ? '<span class="ed-ok" title="В роботі">✓</span>' : ""}</div>
+          <span class="ed-num">№${c.num}</span><span class="ed-dur">${durLabel(len(c))}</span>${TIER[c.tier] || ""}${r === "keep" ? '<span class="ed-ok" title="В роботі">✓</span>' : ""}</div>
         <div class="ed-rb"><div class="ed-rt">${esc(c.title)}</div>
-        <div class="ed-rm"><span>${fmtS(c.start_sec)}${r === "drop" ? " · не беру" : ""}</span><span class="s" title="Місце серед кліпів цього відео (ШІ дав ${esc(c.virality_score)})">★ ${esc(scoreOf(c))}</span></div></div>`;
+        <div class="ed-rm"><span>${isStory(c) ? `<span class="ed-story-chip" title="Довга історія">📖 ${inParts(c) ? "×2" : "ціла"}</span>` : fmtS(c.start_sec)}${r === "drop" ? " · не беру" : ""}</span><span class="s" title="Місце серед кліпів цього відео (ШІ дав ${esc(c.virality_score)})">★ ${esc(scoreOf(c))}</span></div></div>`;
       // step 2 with nothing in work: a clip opens on step 1, where it can be taken «В роботі»
       const pick = () => { if (vxEmpty()) setMode("table"); select(i); };
       li.addEventListener("click", pick);
@@ -191,7 +200,7 @@ const Editor = (() => {
     if (document.activeElement !== $("edClipTitle")) $("edClipTitle").textContent = c.title || "";
     $("edScore").innerHTML = c.virality_score != null ? `<span title="Місце серед кліпів цього відео: 99 найкращий, 40 найслабший. ШІ дав ${esc(c.virality_score)}">оцінка ШІ <b>★ ${esc(scoreOf(c))}</b></span>` : "";
     $("edPromote").hidden = !(c.reserve && !c.review_status);
-    $("vxNo").textContent = `№${c.num} · ${Math.round(len(c))} с`;
+    $("vxNo").textContent = `№${c.num} · ${durLabel(len(c))}${inParts(c) ? " · 2 частини" : ""}`;
     $("vxClipNo").textContent = c.title || "";
     ["edStatus", "vxStatus"].forEach((id) => {
       const b = $(id);
@@ -202,6 +211,7 @@ const Editor = (() => {
     const sig = (c.signals || []).filter((k) => SIGNALS[k])
       .map((k) => `<span class="ed-sig" title="${esc(SIGNALS[k][1])}">${esc(SIGNALS[k][0])}</span>`).join("");
     $("edWhy").innerHTML = (sig ? `<span class="ed-sigs">${sig}</span>` : "") + (c.reason ? `<b>Чому:</b> ${esc(c.reason)}` : "");
+    renderStory(c);
     $("edStartTc").textContent = fmt(c.start_sec);
     $("edEndTc").textContent = fmt(c.end_sec);
     renderPauses();
@@ -211,6 +221,33 @@ const Editor = (() => {
     if (!document.querySelector('#edVx .vx-pane[data-t="post"]').hidden) renderPostHook();
 
     renderTc();
+  }
+
+  /** «📖 Довга історія»: the «Ціла | 2 частини» switch above the video. */
+  function renderStory(c) {
+    $("edStory").hidden = !isStory(c);
+    if (!isStory(c)) return;
+    const cut = splitOf(c);
+    $("edStoryWhole").textContent = `${fmtS(len(c))} одним кліпом`;
+    $("edStoryParts").textContent = `${fmtS(cut - c.start_sec)} + ${fmtS(c.end_sec - cut)}`;
+    $("edStoryView").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === (inParts(c) ? "parts" : "whole"))));
+    $("edStoryNote").textContent = inParts(c) ? "Тягни ✂ на доріжці, щоб змінити місце розрізу" : "Shorts і TikTok беруть до 3 хв";
+  }
+
+  async function setStory(fields, c = clip()) {
+    if (!isStory(c)) return;
+    Object.assign(c, fields);
+    renderDetails();
+    renderTrack();
+    renderList();
+    try {
+      const d = await api(`/api/projects/${pid()}/clips/${c.clip_index}/story`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields.story_view ? { view: fields.story_view } : { split_sec: fields.split_sec }),
+      });
+      if (d && d.clip) { c.split_sec = d.clip.split_sec; c.story_view = d.clip.story_view; }
+      if (clip() === c) { renderDetails(); renderTrack(); }
+      if (typeof Vertical !== "undefined" && clip() === c) Vertical.onClip();
+    } catch (e) { toast("Не вдалося зберегти: " + e.message, true); }
   }
 
   function renderTc(t = video().currentTime) {
@@ -389,6 +426,12 @@ const Editor = (() => {
     h += `<div class="shade" style="left:0;width:${p(c.start_sec)}%"></div><div class="shade" style="left:${p(c.end_sec)}%;right:0"></div>`;
     h += `<div class="hd" data-h="start" style="left:${p(c.start_sec)}%" title="Тягни: початок кліпу"><em>${fmt(c.start_sec)}</em></div>`;
     h += `<div class="hd" data-h="end" style="left:${p(c.end_sec)}%" title="Тягни: кінець кліпу"><em>${fmt(c.end_sec)}</em></div>`;
+    if (inParts(c)) {
+      const cut = splitOf(c);
+      h += `<div class="split" style="left:${p(cut)}%" title="Тягни: де закінчується «Частина 1» і починається «Частина 2»"><em>✂ розріз</em></div>`;
+      h += `<div class="partlab" style="left:${(p(Math.max(lo, c.start_sec)) + p(cut)) / 2}%">Частина 1 · ${fmtS(cut - c.start_sec)}</div>`;
+      h += `<div class="partlab" style="left:${(p(cut) + p(Math.min(hi, c.end_sec))) / 2}%">Частина 2 · ${fmtS(c.end_sec - cut)}</div>`;
+    }
     h += `<div class="zph" id="edZph"></div>`;
     hidePhraseCard(true);
     T.innerHTML = h;
@@ -804,6 +847,12 @@ const Editor = (() => {
     closePop();
     hidePhraseCard(true);
     $("edTrack").setPointerCapture(e.pointerId);
+    if (e.target.closest(".split")) {
+      video().pause();
+      st.drag = { which: "split" };
+      $("edTrack").classList.add("dragging");
+      return;
+    }
     const h = e.target.closest(".hd");
     if (h) {
       video().pause();
@@ -834,6 +883,13 @@ const Editor = (() => {
     if (!st.drag || !c) return;
     st.drag.lastX = x;
     const t = trackTime({ clientX: x });
+    if (st.drag.which === "split") {
+      c.split_sec = Math.max(c.start_sec + STORY_PART_MIN, Math.min(c.end_sec - STORY_PART_MIN, t));
+      renderStory(c);
+      renderTrack();
+      seek(c.split_sec);
+      return;
+    }
     if (st.drag.which === "start") setBounds(Math.min(t, c.end_sec - MIN_LEN), c.end_sec, { save: false });
     else setBounds(c.start_sec, Math.max(t, c.start_sec + MIN_LEN), { save: false });
     seek(st.drag.which === "start" ? c.start_sec : Math.max(c.start_sec, c.end_sec - 1));
@@ -852,6 +908,13 @@ const Editor = (() => {
     const which = st.drag.which;
     if (st.drag.raf) cancelAnimationFrame(st.drag.raf);
     st.drag = null;
+    if (which === "split") {
+      // the cut lands in the pause before the nearest word, so neither part chops a word
+      const j = st.words.findIndex((w) => w.start >= c.split_sec - 0.6);
+      const cut = j > 0 && Math.abs(st.words[j].start - c.split_sec) < 0.6 ? startAt(j) : c.split_sec;
+      setStory({ split_sec: Math.round(Math.max(c.start_sec + STORY_PART_MIN, Math.min(c.end_sec - STORY_PART_MIN, cut)) * 100) / 100 });
+      return;
+    }
     if (which === "start") setBounds(snap("start", c.start_sec), c.end_sec);
     else setBounds(c.start_sec, snap("end", c.end_sec));
   }
@@ -1070,7 +1133,7 @@ const Editor = (() => {
     if (!c) return;
     const cuts = cutsOf(c);
     const rm = removedOf(c);
-    $("edLen").textContent = cuts.length ? `${Math.round(len(c))} с → ${fmt1(len(c) - rm)} с` : `${Math.round(len(c))} с`;
+    $("edLen").textContent = cuts.length ? `${durLabel(len(c))} → ${fmt1(len(c) - rm)} с` : durLabel(len(c));
     const btn = $("edPauses");
     btn.classList.toggle("on", cuts.length > 0);
     btn.textContent = cuts.length ? `✓ Паузи прибрано · −${fmt1(rm)} с` : "✂ Прибрати паузи";
@@ -1095,8 +1158,21 @@ const Editor = (() => {
            <span class="hint">· клік по ✂ повертає паузу</span><button type="button" class="link" data-a="all">↶ Повернути все</button>`
         : `<span class="hint">${PAUSE_MODES[mode].hint}</span>`);
     $("edMp4Lab").textContent = cuts.length ? "⬇ Кліп 16:9 · без пауз" : "⬇ Кліп 16:9 · MP4";
-    $("edMp4Info").innerHTML = cuts.length ? `${fmt1(len(c) - rm)} с` : `${Math.round(len(c))} с<span class="q"> · оригінальна якість</span>`;
+    $("edMp4Info").innerHTML = cuts.length ? `${fmt1(len(c) - rm)} с` : `${durLabel(len(c))}<span class="q"> · оригінальна якість</span>`;
     $("edMp4Raw").hidden = !cuts.length;
+    // a story: «Ціла історія», or one button per part
+    const parts = inParts(c);
+    $("edMp4").hidden = parts;
+    $("edMp4Parts").hidden = !parts;
+    $("edMp4Whole").hidden = !parts;
+    if (isStory(c) && !parts) $("edMp4Lab").textContent = cuts.length ? "⬇ Ціла історія 16:9 · без пауз" : "⬇ Ціла історія 16:9 · MP4";
+    if (parts) {
+      const cut = splitOf(c);
+      const rmIn = (a, b) => cuts.reduce((s, [x, y]) => s + (x >= a && y <= b ? y - x : 0), 0);
+      const durs = [cut - c.start_sec - rmIn(c.start_sec, cut), c.end_sec - cut - rmIn(cut, c.end_sec)];
+      $("edMp4Parts").querySelectorAll("small").forEach((el, k) => { el.textContent = fmtS(durs[k]); });
+      $("edMp4WholeBtn").textContent = `⬇ ціла історія ${fmtS(len(c) - rm)}`;
+    }
   }
 
   /** What each tempo would cut in this clip (one request, nothing saved): shown on the tempo buttons. */
@@ -1336,7 +1412,7 @@ const Editor = (() => {
       const keptCount = () => st.clips.filter((c) => c.review_status === "keep").length;
       const clips = () => st.clips;
       const openClip = (clipIndex) => { const i = st.clips.findIndex((c) => c.clip_index === clipIndex); if (i >= 0) select(i); };
-      Vertical.attach({ clip, pid, api, patch, toast, download, video, seek, togglePlay, postText, copy, keptCount, clips, openClip });
+      Vertical.attach({ clip, pid, api, patch, toast, download, video, seek, togglePlay, postText, copy, keptCount, clips, openClip, splitOf });
     }
     document.addEventListener("keydown", onKey);
     document.addEventListener("pointerdown", (e) => { if (st.pop && !e.target.closest(".ed-pop")) closePop(); });
@@ -1481,11 +1557,33 @@ const Editor = (() => {
     $("edCopyPost").addEventListener("click", () => copy(postText()));
     $("edCopyShorts").addEventListener("click", () => copy(shortsTitle()));
     $("edMp4").addEventListener("click", () => { toast("Готуємо відео…"); download(`/api/projects/${pid()}/clips/${clip().clip_index}/download`); });
-    $("edSrt").addEventListener("click", () => download(`/api/projects/${pid()}/clips/${clip().clip_index}/export-srt`));
+    $("edMp4WholeBtn").addEventListener("click", () => $("edMp4").click());
+    $("edMp4Parts").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-part]");
+      if (!b) return;
+      toast("Готуємо відео…");
+      download(`/api/projects/${pid()}/clips/${clip().clip_index}/download?part=${b.dataset.part}`);
+    });
+    $("edStoryView").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-v]");
+      if (b && clip() && clip().story_view !== b.dataset.v) setStory({ story_view: b.dataset.v });
+    });
+    $("edSrt").addEventListener("click", () => {
+      const c = clip();
+      if (!inParts(c)) { download(`/api/projects/${pid()}/clips/${c.clip_index}/export-srt`); return; }
+      download(`/api/projects/${pid()}/clips/${c.clip_index}/export-srt?part=1`);
+      setTimeout(() => download(`/api/projects/${pid()}/clips/${c.clip_index}/export-srt?part=2`), 800);
+    });
     document.querySelectorAll("#edMode button").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.m)));
     document.querySelectorAll("#edSort button").forEach((b) => b.addEventListener("click", () => setSort(b.dataset.s)));
     $("edGoVx").addEventListener("click", () => setMode("vx"));
-    $("vxMp4").addEventListener("click", () => $("edMp4").click());
+    $("vxMp4").addEventListener("click", () => {
+      const c = clip();
+      if (!inParts(c)) { $("edMp4").click(); return; }
+      toast("Готуємо обидві частини…");
+      download(`/api/projects/${pid()}/clips/${c.clip_index}/download?part=1`);
+      setTimeout(() => download(`/api/projects/${pid()}/clips/${c.clip_index}/download?part=2`), 800);
+    });
     $("vxSrt").addEventListener("click", () => $("edSrt").click());
     $("vxCopyPost").addEventListener("click", () => copy(postText()));
     $("vxCopyShorts").addEventListener("click", () => copy(shortsTitle()));

@@ -179,7 +179,7 @@ const Home = (() => {
       const mode = await askSearchAgain(p, p.reviewed_count || 0);
       if (!mode) return;
       if (mode === "compare") { Compare.open(p, { onClose: () => load() }); return; }
-      try { await Queue.addProject(p.id, { search_mode: mode }); } catch (err) { showToast(err.message, "error"); }
+      try { await Queue.addProject(p.id, { search_mode: mode, stories: askSearchAgain.stories || "" }); } catch (err) { showToast(err.message, "error"); }
       return;
     }
     if (!(await askConfirm(`Поставити «${p.title}» в чергу на пошук моментів?`, { ok: "↻ Так, ще раз" }))) return;
@@ -237,6 +237,7 @@ const Home = (() => {
     const s = $("heroSearch");
     const search = s && s.value === "experimental" ? "🧪 експериментальний пошук" : "📼 класичний пошук";
     const chips = [filter, search, `кліпи ${defaults.min}–${defaults.max} с`, count, `мова: ${lang}`];
+    if ($("heroStories") && $("heroStories").value === "on") chips.push("📖 + історії до 3 хв");
     $("heroHint").innerHTML = chips.map((t) => `<span class="home-chip">${escapeHtml(t)}</span>`).join("");
     fitDropHint();
   }
@@ -282,7 +283,7 @@ const Home = (() => {
     initDrop();
     renderOpts();
     window.addEventListener("resize", fitDropHint);
-    ["heroFilter", "heroClips", "heroLang", "heroSearch"].forEach((id) => $(id)?.addEventListener("change", renderOpts));
+    ["heroFilter", "heroClips", "heroLang", "heroSearch", "heroStories"].forEach((id) => $(id)?.addEventListener("change", renderOpts));
     $("homeOptsEdit").addEventListener("click", () => {
       const panel = $("homeOptsPanel");
       panel.hidden = !panel.hidden;

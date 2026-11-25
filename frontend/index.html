@@ -94,6 +94,12 @@
             <option value="50">50</option><option value="75">75</option><option value="100">100</option>
           </select>
         </label>
+        <label class="hero-opt" title="Крім коротких кліпів ШІ шукає ще 1–3 цілі історії по 1–3 хв: з початком, поворотом і фіналом">Довгі історії
+          <select id="heroStories" class="input-select">
+            <option value="on">📖 Шукати, до 3 хв</option>
+            <option value="off">Не шукати</option>
+          </select>
+        </label>
         <label class="hero-opt">Мова відео
           <select id="heroLang" class="input-select" title="Мова, якою говорять у відео. Субтитри, заголовки й описи будуть цією мовою.">
             <option value="uk">Українська</option>
@@ -406,6 +412,13 @@
             </div>
           </div>
           <div class="set-grp">
+            <h4>Довгі історії</h4>
+            <div class="set-box">
+              <label class="set-line set-switch-line"><span class="set-l"><b>📖 Шукати довгі історії</b><small>Крім коротких кліпів ШІ шукає ще 1–3 цілі історії по 1–3 хв: з початком, поворотом і фіналом. Історію можна скачати цілою або двома частинами.</small></span>
+                <input type="checkbox" class="set-switch" data-key="studio.find_stories" role="switch"></label>
+            </div>
+          </div>
+          <div class="set-grp">
             <h4>Скільки кліпів шукати</h4>
             <div class="set-box">
               <div class="set-line">
@@ -658,6 +671,14 @@
             <span class="ed-hscore" id="edScore"></span>
           </div>
           <div class="ed-why" id="edWhy"></div>
+          <div class="ed-story" id="edStory" hidden>
+            <span class="ed-story-tag">📖 Довга історія</span>
+            <div class="ed-sort ed-story-seg" id="edStoryView" role="group" aria-label="Як віддати історію">
+              <button type="button" data-v="whole" aria-pressed="true">Ціла<small id="edStoryWhole"></small></button>
+              <button type="button" data-v="parts" aria-pressed="false">2 частини<small id="edStoryParts"></small></button>
+            </div>
+            <span class="ed-small" id="edStoryNote"></span>
+          </div>
           <div class="ed-screen paused" id="edScreen" title="Клік: грати або пауза">
             <video id="edVideo" preload="metadata" playsinline></video>
             <div class="ed-bigplay" aria-hidden="true">▶</div>
@@ -694,6 +715,11 @@
         <section class="ed-panel ed-side" aria-label="Кліп">
           <div class="ed-cap">Скачати цей кліп</div>
           <button class="ed-bigdl" id="edMp4" type="button"><span id="edMp4Lab">⬇ Кліп 16:9 · MP4</span> <small id="edMp4Info"></small></button>
+          <div class="ed-dlparts" id="edMp4Parts" hidden>
+            <button class="ed-bigdl" type="button" data-part="1"><span>⬇ Частина 1 · 16:9</span> <small></small></button>
+            <button class="ed-bigdl" type="button" data-part="2"><span>⬇ Частина 2 · 16:9</span> <small></small></button>
+          </div>
+          <div class="ed-dlwhole ed-small" id="edMp4Whole" hidden>або <button type="button" class="link" id="edMp4WholeBtn">⬇ ціла історія</button> · у 9:16 кожна частина отримає напис «Частина 1/2»</div>
           <button class="ed-btn ed-rawdl" id="edMp4Raw" type="button" hidden title="Той самий кліп з усіма паузами, без перекодування: для монтажу в CapCut">⬇ Без вирізів · оригінал</button>
           <div class="ed-dl2">
             <button class="ed-btn" id="edSrt" type="button">💬 Субтитри SRT</button>
@@ -766,6 +792,7 @@
               <div class="vx-phone" id="vxPhone" role="button" tabindex="0" aria-label="Попередній вигляд вертикального кліпу. Клік: грати або пауза">
                   <canvas id="vxCanvas" width="360" height="640"></canvas>
                   <div class="vx-hook" id="vxHook" hidden></div>
+                  <div class="vx-part" id="vxPart" hidden></div>
                   <div class="vx-cap" id="vxCap"></div>
                   <div class="vx-bigplay" id="vxBigPlay" aria-hidden="true">▶</div>
                   <div class="vx-busy" id="vxBusy" hidden>Шукаю обличчя…</div>

@@ -569,8 +569,10 @@ def _call_gemini_single_window(
     max_chars: int = _MAX_TRANSCRIPT_CHARS,
     overload: Optional["_OverloadWatch"] = None,
     strong: Optional[list[tuple[str, int]]] = None,
+    story: bool = False,
 ) -> list[dict]:
     """Sends a single chunk of transcript segments to Gemini and returns parsed clips.
+    story: look for whole long stories (min_len…max_len, usually 60–180 s) instead of short moments.
     gate: shared with the other parallel windows (a 503/429 here makes all of them hold off).
     overload: shared by the windows of one analysis; once Google is clearly down, stop asking."""
     transcript_lines = [f"[{s['start']}s - {s['end']}s]: {s['text']}" for s in segments]
@@ -623,7 +625,24 @@ def _call_gemini_single_window(
                 "першими й бери, якщо там справді є момент, з підводкою за кілька секунд до реакції. "
                 "Не копіюй позначки в 'hook_text' і не обирай кліп лише через позначку.\n"
             )
-    if experimental:
+    if story:
+        scope = "УСЬОГО відео" if max_chars >= EXPERIMENTAL_MAX_CHARS else "фрагмента відео"
+        count_rule = (
+            f"- Кількість: ДО {count} ЦІЛИХ ІСТОРІЙ. Якщо справжньої історії немає, поверни порожній масив []: "
+            "не вигадуй і не склеюй випадкові шматки.\n"
+            "- Історія — це розповідь з початком (зав'язка: хто, де, що сталося), поворотом або кульмінацією "
+            "і фіналом (розв'язка, панчлайн або висновок). Наприклад: випадок з життя, пригода, конфлікт, "
+            "кумедна ситуація, шлях до успіху чи провалу.\n"
+            "- Береш історію ЦІЛОЮ: від першого речення розповіді до розв'язки. Не обривай перед фіналом: "
+            "заради нього глядач і дивиться до кінця.\n"
+            "- Упорядкуй масив від найсильнішої історії до найслабшої."
+        )
+        length_hint = "  Історії бувають різної довжини: не розтягуй коротку і не обрізай довгу."
+        hook_rule = (
+            "\nПОЧАТОК: 'start' — перше речення самої історії, яке одразу інтригує (не розгін «ну», «отже», "
+            "не попередня тема). 'hook_text' — ДОСЛІВНО перші 5-8 слів історії з транскрипції.\n"
+        )
+    elif experimental:
         scope = "УСЬОГО відео" if max_chars >= EXPERIMENTAL_MAX_CHARS else "фрагмента відео"
         count_rule = (
             f"- Кількість фрагментів: ДО {count}. Бери лише справді сильні моменти: краще менше, ніж слабкі.\n"
@@ -641,6 +660,16 @@ def _call_gemini_single_window(
         scope = "фрагмента відео"
         count_rule = f"- Кількість фрагментів: рівно {count}"
         hook_rule = ""
+    goal = (
+        "Шукай ДОВГІ ІСТОРІЇ, які дивляться до кінця: інтрига з перших секунд, напруга росте, сильний фінал.\n"
+        "Кожна історія має бути САМОДОСТАТНЬОЮ: зрозумілою без решти відео, починатися з початку речення й "
+        "закінчуватися завершеною фразою. Історії НЕ повинні перетинатися між собою."
+        if story else
+        "Обирай НАЙВІРУСНІШІ моменти: сильний хук у перші 1-3 секунди, емоція, несподіванка,\n"
+        "суперечлива думка, смішний або цінний інсайт. Кожен кліп має бути САМОДОСТАТНІМ:\n"
+        "зрозумілим без решти відео, починатися з початку речення й закінчуватися завершеною фразою\n"
+        "(не обривай речення). Кліпи НЕ повинні перетинатися між собою."
+    )
 
     prompt = f"""\
 Ти — топ-продюсер вертикального контенту (Shorts/Reels/TikTok).
@@ -653,10 +682,7 @@ def _call_gemini_single_window(
 {length_hint}
 - Стиль вибору: {filter_hint}
 
-Обирай НАЙВІРУСНІШІ моменти: сильний хук у перші 1-3 секунди, емоція, несподіванка,
-суперечлива думка, смішний або цінний інсайт. Кожен кліп має бути САМОДОСТАТНІМ:
-зрозумілим без решти відео, починатися з початку речення й закінчуватися завершеною фразою
-(не обривай речення). Кліпи НЕ повинні перетинатися між собою.
+{goal}
 НЕ обирай вступ і привітання, прощання, заклики підписатися та рекламні інтеграції;
 якщо такий фрагмент усе ж потрапив у список, познач його відповідною категорією.
 {hook_rule}
@@ -680,7 +706,8 @@ def _call_gemini_single_window(
 [{{"start": 10.0, "end": 42.5, "title": "ГОЛОВНА ПОМИЛКА", "category": "content", "hook": 8, "emotion": 6, "standalone": 9, "value": 7, "reason": "Розповідає про фатальну помилку підприємців і чим вона закінчилась.", "hook_text": "Найбільша помилка, якої припускаються майже всі...", "caption": "Головна помилка, якої припускаються майже всі! Дивіться до кінця.", "hashtags": ["#shorts", "#помилки", "#інсайти", "#тренди"]}}]
 """
     if strong:
-        clips, used = _ask_strong(client, strong, prompt, _CLIPS_SCHEMA, 0.3, _parse_clips_json)
+        parse = (lambda t: [] if _strip_fences(t).strip() == "[]" else _parse_clips_json(t)) if story else _parse_clips_json
+        clips, used = _ask_strong(client, strong, prompt, _CLIPS_SCHEMA, 0.3, parse)
         if clips is not None:
             return [{**c, "_model": used} for c in clips]
 
@@ -765,7 +792,10 @@ def _call_gemini_single_window(
             continue
 
         try:
-            clips = _parse_clips_json(raw_text)
+            if story and _strip_fences(raw_text).strip() == "[]":
+                clips = []  # no real story in this video: a fine answer, nothing is made up
+            else:
+                clips = _parse_clips_json(raw_text)
             log.info(f"Response successfully received and parsed from {model_name}")
             overload.answered()
             return [{**c, "_model": model_name} for c in clips]
@@ -1103,6 +1133,54 @@ def find_clips_experimental(
         r = rubric_score(c)
         if r is not None:
             c["score"] = r
+    return found
+
+
+def find_stories(
+    client=None,
+    segments: Optional[list[dict]] = None,
+    count: int = 3,
+    min_len: int = 60,
+    max_len: int = 180,
+    filter_mode: str = FilterMode.VIRAL_HOOKS,
+    detected_lang: str = "uk",
+    strong: Optional[list[tuple[str, int]]] = None,
+) -> list[dict]:
+    """
+    «Довгі історії»: Gemini reads the whole video and returns up to `count` whole stories (min_len…max_len s)
+    with a beginning, a turn and an ending. Zero is a fine answer: nothing is made up. Raises
+    GeminiUnavailableError only when Google did not answer at all (the caller decides whether that matters).
+    """
+    if client is None:
+        client = get_gemini_client()
+    segments = segments or []
+    if not segments:
+        return []
+    count = max(1, int(count))
+    windows = _overlapping_windows(segments, EXPERIMENTAL_MAX_CHARS, EXPERIMENTAL_OVERLAP_SEC)
+    found: list[dict] = []
+    gemini_error: Optional[GeminiUnavailableError] = None
+    answered = False
+    for i, win in enumerate(windows):
+        try:
+            found.extend(_call_gemini_single_window(
+                client=client, segments=win, count=count, min_len=min_len, max_len=max_len,
+                filter_mode=filter_mode, detected_lang=detected_lang, experimental=True,
+                max_chars=EXPERIMENTAL_MAX_CHARS, strong=strong, story=True,
+            ))
+            answered = True
+        except GeminiUnavailableError as e:
+            gemini_error = e
+            log.warning(f"Stories window {i + 1} failed: Gemini unavailable")
+        except Exception as e:
+            log.warning(f"Stories window {i + 1} failed: {e}")
+    if not answered and gemini_error is not None:
+        raise gemini_error
+    for c in found:
+        r = rubric_score(c)
+        if r is not None:
+            c["score"] = r
+    log.info(f"Stories: Gemini found {len(found)} in {len(windows)} window(s).")
     return found
 
 

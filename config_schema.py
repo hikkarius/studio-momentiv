@@ -25,6 +25,10 @@ class ClipsConfig(BaseModel):
     default_max_len: int = Field(default=60, ge=10, le=600)
     max_count: int = Field(default=100, ge=1, le=1000)
     max_overlap_sec: float = Field(default=2.0, ge=0, le=600)
+    # «Довгі історії»: whole stories longer than a usual clip (Shorts and TikTok take up to 3 min)
+    story_min_len: int = Field(default=60, ge=30, le=600)
+    story_max_len: int = Field(default=180, ge=60, le=600)
+    max_stories: int = Field(default=3, ge=1, le=10)
 
     @model_validator(mode="after")
     def validate_lengths(self) -> ClipsConfig:
@@ -78,6 +82,7 @@ class StudioConfig(BaseModel):
     daily_backup: bool = True       # copy the database and transcripts to backups/ once a day, keep 7
     keep_awake: bool = True         # Windows: do not let the laptop sleep while the queue has work
     wait_for_limit: bool = True     # Gemini limit exhausted: pause the queue and resume, instead of failing
+    find_stories: bool = True       # also look for 1–3 whole long stories (1–3 min) besides the short clips
 
 
 class AppConfig(BaseModel):

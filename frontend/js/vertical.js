@@ -484,6 +484,13 @@ const Vertical = (() => {
     const el = $("vxCap");
     const s = styleOf(st.opts.style);
     $("vxHook").hidden = !(st.opts.hook && (st.opts.hook_full || t < 3));
+    // a long story in «2 частини»: each part gets «Частина N/2» in the corner (the render draws it the same)
+    const c = ctx.clip();
+    const parts = c && c.kind === "story" && c.story_view === "parts";
+    const pl = parts ? `Частина ${c.start_sec + t < ctx.splitOf(c) ? 1 : 2}/2` : "";
+    const pe = $("vxPart");
+    if (pe.hidden !== !parts) pe.hidden = !parts;
+    if (pe.textContent !== pl) pe.textContent = pl;
     if (s.id === "none") { el.innerHTML = ""; return; }
     const words = st.words.filter((w) => w.word);
     const cs = chunks(words, s.chunk, s.chars);
@@ -1336,9 +1343,15 @@ const Vertical = (() => {
     try {
       if (!Object.keys(c.vertical_opts || {}).length) save();  // a clip nobody touched: render what the phone shows
       await flush();
-      await ctx.api(`/api/projects/${ctx.pid()}/clips/${c.clip_index}/vertical?subs=${subs}`, { method: "POST" });
-      ctx.download(`/api/projects/${ctx.pid()}/clips/${c.clip_index}/vertical?subs=${subs}`);
-      ctx.toast("Готово, скачую");
+      // a long story in «2 частини» gives two files
+      const parts = c.kind === "story" && c.story_view === "parts" ? [1, 2] : [0];
+      for (const p of parts) {
+        const q = `subs=${subs}${p ? `&part=${p}` : ""}`;
+        if (p) btn.innerHTML = `⏳ Частина ${p} з 2…`;
+        await ctx.api(`/api/projects/${ctx.pid()}/clips/${c.clip_index}/vertical?${q}`, { method: "POST" });
+        ctx.download(`/api/projects/${ctx.pid()}/clips/${c.clip_index}/vertical?${q}`);
+      }
+      ctx.toast(parts.length > 1 ? "Готово, скачую обидві частини" : "Готово, скачую");
     } catch (e) {
       ctx.toast("Не вдалося зібрати відео: " + e.message, true);
     } finally {
@@ -1768,7 +1781,13 @@ const Vertical = (() => {
       if (!b) return;
       if (b.dataset.open) openFromList(Number(b.dataset.open));
       else if (b.dataset.hook) openFromList(Number(b.dataset.hook), "hook");
-      else if (b.dataset.dl) ctx.download(`/api/projects/${ctx.pid()}/clips/${b.dataset.dl}/vertical?subs=true`);
+      else if (b.dataset.dl) {
+        const c = ctx.clips().find((x) => x.clip_index === Number(b.dataset.dl));
+        if (c && c.kind === "story" && c.story_view === "parts") {
+          ctx.download(`/api/projects/${ctx.pid()}/clips/${b.dataset.dl}/vertical?subs=true&part=1`);
+          setTimeout(() => ctx.download(`/api/projects/${ctx.pid()}/clips/${b.dataset.dl}/vertical?subs=true&part=2`), 800);
+        } else ctx.download(`/api/projects/${ctx.pid()}/clips/${b.dataset.dl}/vertical?subs=true`);
+      }
     });
     loadTemplates();
     $("vxIdeaList").addEventListener("click", (e) => { const b = e.target.closest("button[data-i]"); if (b) pickIdea(Number(b.dataset.i)); });

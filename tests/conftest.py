@@ -90,6 +90,8 @@ def isolate_test_database(tmp_path, monkeypatch):
     # the remembered daily limits live in tmp_path; the per-minute limiter is off unless a test turns it on
     monkeypatch.setattr(ai_selector, "QUOTA_STATE_PATH", isolated_root / "gemini_quota_state.json")
     monkeypatch.setattr(config_loader.app_config.gemini, "max_rpm_per_model", 0)
+    # «Довгі історії» are on by default: the analysis tests never ask Gemini for them (tests of stories patch this)
+    monkeypatch.setattr(job_runner, "find_stories", lambda **kw: [])
 
     db.init_db()
     yield test_db
