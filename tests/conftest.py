@@ -60,6 +60,30 @@ def isolate_test_database(tmp_path, monkeypatch):
     monkeypatch.setattr(transcription, "transcript_cache_dir", _test_cache_dir)
     monkeypatch.setattr(storage, "_RENDER_TMP", isolated_root / "render_tmp")
     monkeypatch.setattr(server, "_fetch_chat", lambda url, dest: 0)  # never download a real chat replay
+    # Never ask a real site for the video size from tests (no network); tests that need a size patch it
+    monkeypatch.setattr(server, "probe_download_size", lambda url, **kw: None)
+    # Nor download a link's audio track (the queue then falls back to the video-only path)
+    import utils
+
+    def _no_audio_download(url, output_dir, **kw):
+        raise RuntimeError("no network in tests")
+
+    monkeypatch.setattr(utils, "download_audio_from_url", _no_audio_download)
+
+    # Daily database copies go to tmp_path too
+    from backend import backup
+    monkeypatch.setattr(backup, "BACKUP_DIR", isolated_root / "backups")
+    monkeypatch.setattr(backup, "start", lambda: None)  # no background copies while tests run
+    # Never load the real Whisper model in the background while tests run
+    monkeypatch.setattr(server, "_start_whisper_housekeeping", lambda: None)
+    from state import app_state as _app_state
+    monkeypatch.setattr(_app_state, "preload_whisper_async", lambda: None)
+    # Gemini's second round for unanswered windows waits 90 s in real life; not in tests
+    import ai_selector
+    monkeypatch.setattr(ai_selector, "_SECOND_ROUND_WAIT", 0.0)
+    # the remembered daily limits live in tmp_path; the per-minute limiter is off unless a test turns it on
+    monkeypatch.setattr(ai_selector, "QUOTA_STATE_PATH", isolated_root / "gemini_quota_state.json")
+    monkeypatch.setattr(config_loader.app_config.gemini, "max_rpm_per_model", 0)
 
     db.init_db()
     yield test_db

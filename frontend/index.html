@@ -98,6 +98,12 @@
         <span class="home-opts-note">Це для наступних відео. Довжину кліпів і мову за замовчуванням змінюй у <button type="button" class="linkish" onclick="Settings.open()">Налаштуваннях</button>.</span>
       </div>
 
+      <div class="disk-notice" id="diskNotice" role="status" hidden>
+        <span class="disk-notice-ic" aria-hidden="true"></span>
+        <div class="disk-notice-text"><b id="diskNoticeHead"></b><small id="diskNoticeSub"></small></div>
+        <button type="button" class="btn btn-sm" id="diskNoticeBtn" onclick="Settings.open('disk')">Звільнити місце</button>
+      </div>
+
       <ol class="home-how home-hero-only">
         <li><i>1</i><b>Додай відео</b>Посилання або файл, від 10 хвилин до 3 годин.</li>
         <li><i>2</i><b>Зачекай</b>Студія розпізнає мову і знайде моменти. Можна закрити вкладку, поки студія запущена.</li>
@@ -164,6 +170,7 @@
           <button type="button" data-s="old" aria-pressed="false">Старі</button>
         </div>
       </div>
+      <div class="q-limit" id="queueLimit" role="status" hidden></div>
       <div class="videos-grid" id="videosGrid">
         <ol class="queue-cards" id="queueList" aria-label="Черга обробки"></ol>
         <div class="video-cards" id="historyList"></div>
@@ -344,6 +351,7 @@
         <button type="button" role="tab" data-tab="clips" aria-selected="true"><i aria-hidden="true">✂</i>Кліпи</button>
         <button type="button" role="tab" data-tab="ai" aria-selected="false"><i aria-hidden="true">✨</i>Ключ і розпізнавання<span class="set-dot" id="setKeyDot" hidden></span></button>
         <button type="button" role="tab" data-tab="disk" aria-selected="false"><i aria-hidden="true">💾</i>Місце на диску</button>
+        <button type="button" role="tab" data-tab="safe" aria-selected="false"><i aria-hidden="true">🛡</i>Надійність</button>
         <button type="button" role="tab" data-tab="about" aria-selected="false"><i aria-hidden="true">ℹ</i>Про студію</button>
         </div>
         <span class="settings-nav-note">Зміни зберігаються одразу</span>
@@ -487,6 +495,33 @@
           <div class="set-grp">
             <h4>Відео за розміром</h4>
             <ul class="disk-projects set-box" id="diskProjects"></ul>
+          </div>
+        </div>
+
+        <div class="settings-body" data-panel="safe" data-title="Надійність" hidden>
+          <div class="set-grp">
+            <h4>Копія бази щодня</h4>
+            <div class="set-box">
+              <label class="set-line set-switch-line"><span class="set-l"><b>Робити копію щодня</b><small>Відео, кліпи, статуси, межі, заголовки й розпізнаний текст. Самі відеофайли не копіюються: вони великі.</small></span>
+                <input type="checkbox" class="set-switch" data-key="studio.daily_backup" role="switch"></label>
+              <div class="set-line">
+                <div class="set-l"><b id="bkLast">Копій ще немає</b><small id="bkNote">Зберігаємо 7 останніх · папка backups</small></div>
+                <button type="button" class="btn btn-secondary" id="bkNow" onclick="Settings.backupNow()">Зробити копію зараз</button>
+              </div>
+            </div>
+          </div>
+          <div class="set-grp" id="bkRestoreGrp" hidden>
+            <h4>Повернути все як було</h4>
+            <div class="set-box"><ul class="bk-list" id="bkList"></ul></div>
+          </div>
+          <div class="set-grp">
+            <h4>Довгі черги</h4>
+            <div class="set-box">
+              <label class="set-line set-switch-line"><span class="set-l"><b>Не давати ноутбуку заснути, поки працює черга</b><small>Екран може згаснути, а обробка йде далі. Коли черга закінчиться, ноутбук засинає як звичайно.</small></span>
+                <input type="checkbox" class="set-switch" data-key="studio.keep_awake" role="switch"></label>
+              <label class="set-line set-switch-line"><span class="set-l"><b>Коли ліміт Gemini закінчився, чекати й продовжити самостійно</b><small>Інакше відео в черзі стане «Не вдалося», і треба буде натиснути «Ще раз».</small></span>
+                <input type="checkbox" class="set-switch" data-key="studio.wait_for_limit" role="switch"></label>
+            </div>
           </div>
         </div>
 

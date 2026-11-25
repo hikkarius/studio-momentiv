@@ -1469,7 +1469,7 @@ body:not(.home-empty) .home-how { display: none !important; }
 @media (prefers-reduced-motion: reduce) { .q-bar.busy i { animation: none; } .q-bar i { transition: none; } }
 .q-steps { display: flex; gap: 4px 10px; flex-wrap: wrap; font-size: var(--fs-xs) !important; justify-content: center; font-size: var(--fs-sm); font-weight: 600; color: rgb(255 255 255 / .65); }
 .q-steps .ok { color: rgb(255 255 255 / .85); } .q-steps .now { color: var(--white); }
-.q-actions { display: flex; gap: 8px; margin-top: 4px; }
+.q-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .q-item .q-thumb { cursor: default; }
 
 /* Drop a file anywhere */

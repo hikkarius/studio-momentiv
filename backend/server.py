@@ -31,7 +31,7 @@ import subtitles_generator
 import reactions
 import streamer
 import vertical_render
-from backend import app_update, db, job_runner, queue_runner, storage, support_report
+from backend import app_update, backup, db, job_runner, keep_awake, queue_runner, storage, support_report
 from clip_refiner import trim_silence
 from constants import resolve_filter_mode
 from state import app_state
@@ -39,6 +39,7 @@ from transcription import load_transcript_cache
 from languages import is_supported, language_choices
 from utils import (
     download_from_url_with_title,
+    probe_download_size,
     extract_clip_slice,
     find_duplicate_video,
     generate_video_thumbnail,
@@ -110,6 +111,15 @@ def generate_readable_project_id(filename_or_title: str) -> str:
     return f"{timestamp}_{slug}_{salt}"
 
 
+def _start_whisper_housekeeping() -> None:
+    """Loads Whisper in the background right away and unloads it after idle minutes (tests replace this)."""
+    try:
+        from state import app_state
+        app_state.start_whisper_housekeeping()
+    except Exception as e:
+        log.warning(f"Не вдалося запустити фонове завантаження Whisper: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     job_runner.set_event_loop(asyncio.get_running_loop())
@@ -124,9 +134,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.warning(f"Автоприбирання не вдалося: {e}")
     queue_runner.start()
+    backup.start()
+    _start_whisper_housekeeping()
     log.info("AI Video Moments Studio Backend started.")
     yield
     queue_runner.stop()
+    backup.stop()
 
 
 _slice_lock = threading.Lock()
@@ -257,10 +270,14 @@ def get_health():
 
 
 @app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(request: Request, file: UploadFile = File(...)):
     """Handles video file upload with extension/size validation, automatic deduplication, and safe persistence."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="Файл не вибрано.")
+    try:
+        storage.ensure_space(UPLOADS_DIR, int(request.headers.get("content-length") or 0))
+    except storage.NotEnoughSpaceError as e:
+        raise HTTPException(status_code=507, detail=str(e))
 
     raw_filename = os.path.basename(file.filename)
     safe_filename = re.sub(r'[\x00-\x1f\\/:*?"<>|]', '_', raw_filename).strip('. ')
@@ -354,17 +371,23 @@ async def upload_file(file: UploadFile = File(...)):
 _fetch_chat = reactions.fetch_chat  # tests replace it: no network
 
 
-def ingest_url(url: str, progress_cb=None) -> tuple[Dict[str, Any], bool]:
+def ingest_url(url: str, progress_cb=None, space_checked: bool = False) -> tuple[Dict[str, Any], bool]:
     """
     Downloads a video by URL into UPLOADS_DIR and creates its project.
     Returns (project, reused); reused=True when the same video was already in the studio.
     Raises ValueError for a bad link and other exceptions for download failures.
+    space_checked=True: the caller already made sure the disk has room (skips the size probe).
     """
     url = url.strip()
     if not (url.startswith("http://") or url.startswith("https://")):
         raise ValueError("Некоректний URL.")
 
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    # Ask the site how big the video is and stop before downloading it onto a full disk
+    if not space_checked:
+        if progress_cb is not None:
+            progress_cb(0.0, "Дізнаюсь розмір відео…")
+        storage.ensure_space(UPLOADS_DIR, probe_download_size(url))
     staging_temp_id = uuid.uuid4().hex[:8]
     temp_dir = str(UPLOADS_DIR / f"temp_url_{staging_temp_id}")
     os.makedirs(temp_dir, exist_ok=True)
@@ -437,6 +460,8 @@ def upload_from_url(payload: UrlUploadRequest):
         raise HTTPException(status_code=400, detail="Некоректний URL.")
     try:
         project, reused = ingest_url(url)
+    except storage.NotEnoughSpaceError as e:
+        raise HTTPException(status_code=507, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Некоректне посилання: {e}")
     except Exception as e:
@@ -1567,8 +1592,23 @@ def trim_clip_silence(project_id: str, clip_index: int):
 @app.get("/api/queue")
 def get_queue():
     items = [queue_runner.public_item(i) for i in db.list_queue_items()]
-    active = any(i["status"] in db.QUEUE_ACTIVE or i["status"] == "waiting" for i in items)
-    return {"items": items, "active": active}
+    active = any(i["status"] in db.QUEUE_ACTIVE or i["status"] in db.QUEUE_PENDING for i in items)
+    paused = [i for i in items if i["status"] == "limit"]
+    return {
+        "items": items, "active": active, "disk": storage.disk_status(UPLOADS_DIR),
+        # Gemini limit pause: when the queue goes on by itself, and whether it is the per-day limit
+        "paused_until": db.queue_paused_until(),
+        "limit_daily": bool(paused and paused[0].get("limit_daily")),
+        # '' = Gemini limit, 'overload' = Google's servers were overloaded
+        "limit_reason": (paused[0].get("limit_reason") or "") if paused else "",
+        "keep_awake": keep_awake.is_active(),
+    }
+
+
+@app.get("/api/disk")
+def get_disk():
+    """Free space for the home page notice and the check before sending files."""
+    return {**storage.disk_status(UPLOADS_DIR), "reserve": storage.SPACE_RESERVE_BYTES}
 
 
 @app.post("/api/queue")
@@ -1582,7 +1622,7 @@ def add_to_queue(payload: QueueAddRequest):
         raise HTTPException(status_code=400, detail="Додайте хоча б одне посилання або відео.")
 
     busy = {i["project_id"] for i in db.list_queue_items()
-            if i["project_id"] and (i["status"] == "waiting" or i["status"] in db.QUEUE_ACTIVE)}
+            if i["project_id"] and (i["status"] in db.QUEUE_PENDING or i["status"] in db.QUEUE_ACTIVE)}
     added = []
     for url in dict.fromkeys(urls):
         added.append(db.add_queue_item(queue_runner.new_item_id(), source_url=url, title=url,
@@ -1628,6 +1668,15 @@ def retry_queue_item(item_id: str):
     return {"item": new}
 
 
+@app.post("/api/queue/{item_id}/resume")
+def resume_queue_item(item_id: str):
+    """«Спробувати зараз» on an item paused by the Gemini limit."""
+    if not db.resume_queue_item_now(item_id):
+        raise HTTPException(status_code=409, detail="Це відео не чекає ліміт Gemini.")
+    queue_runner.notify()
+    return {"item": db.get_queue_item(item_id)}
+
+
 @app.post("/api/queue/{item_id}/move")
 def move_queue_item(item_id: str, payload: QueueMoveRequest):
     if not db.move_queue_item(item_id, payload.direction):
@@ -1659,7 +1708,7 @@ _EDITABLE_SETTINGS = {
     "whisper": {"model", "language"},
     "clips": {"default_min_len", "default_max_len", "max_overlap_sec"},
     "gemini": {"rerank"},
-    "studio": {"default_clips", "default_filter", "cleanup_days"},
+    "studio": {"default_clips", "default_filter", "cleanup_days", "daily_backup", "keep_awake", "wait_for_limit"},
 }
 
 
@@ -1812,6 +1861,31 @@ def start_self_update():
     app_update.start_update()
     app_update.exit_soon(1.5)
     return {"ok": True, "message": "Студія закривається і оновлюється. Вона відкриється сама за кілька хвилин."}
+
+
+# ─── Backups («Налаштування → Надійність») ───────────────────────────────────
+
+@app.get("/api/backups")
+def get_backups():
+    items = backup.list_backups()
+    return {"items": items, "keep": backup.KEEP, "total_size": sum(b["size"] for b in items)}
+
+
+@app.post("/api/backups")
+def make_backup():
+    try:
+        return {"item": backup.create_backup("manual")}
+    except Exception as e:
+        log.exception(f"Копія бази не вдалася: {e}")
+        raise HTTPException(status_code=500, detail=f"Не вдалося зробити копію: {e}")
+
+
+@app.post("/api/backups/{name}/restore")
+def restore_backup(name: str):
+    try:
+        return backup.restore_backup(name)
+    except backup.BackupError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @app.post("/api/settings/reset")

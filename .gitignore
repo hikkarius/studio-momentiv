@@ -37,6 +37,7 @@ ENV/
 
 # Налаштування, змінені в студії (екран «Налаштування»)
 user_settings.json
+gemini_quota_state.json
 
 # Файли для друзів (інсталятор): ці .bat треба комітити
 !Встановити.bat
@@ -46,3 +47,6 @@ user_settings.json
 tools/
 install.log
 update.log
+
+# Щоденні копії бази («Налаштування → Надійність»)
+backups/

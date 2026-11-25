@@ -3,14 +3,19 @@ ai_selector.py — Gemini AI clip selection, prompt engineering, context chunkin
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
+import random
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Optional
 
-from config_loader import CANDIDATE_MODELS, get_gemini_client
+from config_loader import CANDIDATE_MODELS, app_config, get_gemini_client
 from clip_refiner import rubric_score
 from constants import FILTER_INSTRUCTIONS, FilterMode, resolve_filter_mode
 from languages import language_name
@@ -147,6 +152,28 @@ class GeminiUnavailableError(RuntimeError):
     """Raised when no Gemini model produced a usable answer after all retry passes."""
 
 
+class GeminiQuotaError(GeminiUnavailableError):
+    """Every model answered «limit exhausted». `daily` = the per-day limit (resets at midnight
+    Pacific time), otherwise a per-minute one; `retry_after` = seconds Google asked to wait, if any."""
+
+    def __init__(self, message: str, daily: bool = False, retry_after: Optional[float] = None):
+        super().__init__(message)
+        self.daily = daily
+        self.retry_after = retry_after
+
+
+_RETRY_DELAY_RE = re.compile(r"retry(?:_delay|delay)?['\"]?\s*[:=]?\s*['\"]?(\d+(?:\.\d+)?)s", re.IGNORECASE)
+
+
+def quota_error_from(errors: list[str]) -> GeminiQuotaError:
+    """Builds the quota error from the raw 429 texts: per-day or per-minute, and Google's retry delay."""
+    joined = " ".join(errors)
+    low = joined.lower()
+    daily = "perday" in low or "per_day" in low or "per day" in low or "requestsperday" in low
+    delays = [float(m) for m in _RETRY_DELAY_RE.findall(joined)]
+    return GeminiQuotaError(GEMINI_QUOTA_MESSAGE, daily=daily, retry_after=max(delays) if delays else None)
+
+
 GEMINI_UNAVAILABLE_MESSAGE = (
     "Google Gemini зараз перевантажений і не відповідає. "
     "Транскрипцію збережено, спробуйте ще раз через кілька хвилин."
@@ -190,6 +217,192 @@ def _is_transient_error(err_str: str) -> bool:
     return any(m.lower() in low for m in _TRANSIENT_MARKERS)
 
 
+# JSON schemas for Gemini structured output: the model must return exactly this shape,
+# so a stray quote or a cut-off sentence in "reason" no longer breaks parsing.
+_CLIPS_SCHEMA: dict = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "start": {"type": "number"},
+            "end": {"type": "number"},
+            "title": {"type": "string"},
+            "category": {"type": "string", "enum": ["content", "intro", "outro", "ad"]},
+            "hook": {"type": "integer"},
+            "emotion": {"type": "integer"},
+            "standalone": {"type": "integer"},
+            "value": {"type": "integer"},
+            "reason": {"type": "string"},
+            "hook_text": {"type": "string"},
+            "caption": {"type": "string"},
+            "hashtags": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": [
+            "start", "end", "title", "category", "hook", "emotion", "standalone", "value",
+            "reason", "hook_text", "caption", "hashtags",
+        ],
+    },
+}
+
+_RERANK_SCHEMA: dict = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {"n": {"type": "integer"}, "score": {"type": "integer"}},
+        "required": ["n", "score"],
+    },
+}
+
+
+def _json_config(schema: dict, temperature: float, thinking_level: Optional[str] = None):
+    """generate_content config: JSON that follows the schema, no automatic function calling,
+    and the thinking level when one is given."""
+    from google.genai import types
+
+    extra = {}
+    if thinking_level:
+        extra["thinking_config"] = types.ThinkingConfig(thinking_level=thinking_level)
+    return types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_json_schema=schema,
+        temperature=temperature,
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        **extra,
+    )
+
+
+# ─── Request budget: free-tier limits ───────────────────────────────────────
+# Free keys allow the Lite models ~15 requests per minute and ~500 per day. One window makes at
+# most MAX_ATTEMPTS_PER_WINDOW requests per round, each model gets at most
+# gemini.max_rpm_per_model requests in any 60 s, and a model that answered «daily limit» is
+# skipped until Google resets it (midnight Pacific time), remembered across restarts.
+MAX_ATTEMPTS_PER_WINDOW = 4
+QUOTA_STATE_PATH = Path(__file__).resolve().parent / "gemini_quota_state.json"
+_quota_state_lock = threading.Lock()
+
+
+def _attempt_plan(models: list[str]) -> list[str]:
+    return [models[i % len(models)] for i in range(MAX_ATTEMPTS_PER_WINDOW)]
+
+
+def _is_daily_quota(err_str: str) -> bool:
+    low = err_str.lower()
+    return "perday" in low or "per_day" in low or "per day" in low or "requestsperday" in low
+
+
+def _exhausted_today(now: Optional[float] = None) -> set[str]:
+    """Models whose daily limit is used up and not yet reset."""
+    now = time.time() if now is None else now
+    with _quota_state_lock:
+        try:
+            data = json.loads(QUOTA_STATE_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return set()
+    if not isinstance(data, dict):
+        return set()
+    return {m for m, until in data.items() if isinstance(until, (int, float)) and until > now}
+
+
+def mark_exhausted_today(model_name: str, now: Optional[float] = None) -> None:
+    """Remembers that the model's daily limit is used up, until Google resets it."""
+    from backend.queue_runner import next_daily_reset  # late import: the queue imports this module
+
+    now = time.time() if now is None else now
+    until = next_daily_reset(now) + 5 * 60
+    with _quota_state_lock:
+        try:
+            data = json.loads(QUOTA_STATE_PATH.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError):
+            data = {}
+        data = {m: u for m, u in data.items() if isinstance(u, (int, float)) and u > now}
+        data[model_name] = until
+        try:
+            tmp = QUOTA_STATE_PATH.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            tmp.replace(QUOTA_STATE_PATH)
+        except OSError as e:
+            log.warning(f"Could not save the Gemini daily-limit note: {e}")
+    log.warning(f"{model_name}: денний ліміт безкоштовного ключа вичерпано, не чіпаємо її до оновлення ліміту")
+
+
+def available_models() -> list[str]:
+    """The candidate models in order, without those whose daily limit is used up."""
+    gone = _exhausted_today()
+    return [m for m in CANDIDATE_MODELS if m not in gone]
+
+
+class _RateLimiter:
+    """At most `limit` requests per model in any 60 s, shared by all threads."""
+
+    def __init__(self, clock=None, sleep=None):
+        self._lock = threading.Lock()
+        self._sent: dict[str, list[float]] = {}
+        self._clock = clock or time.monotonic
+        self._sleep = sleep or (lambda s: time.sleep(s))
+
+    def acquire(self, model_name: str, limit: int) -> None:
+        if limit <= 0:
+            return
+        while True:
+            with self._lock:
+                now = self._clock()
+                recent = [t for t in self._sent.get(model_name, []) if now - t < 60.0]
+                if len(recent) < limit:
+                    recent.append(now)
+                    self._sent[model_name] = recent
+                    return
+                self._sent[model_name] = recent
+                wait = 60.0 - (now - recent[0]) + 0.05
+            log.info(f"{model_name}: {limit} запитів за хвилину вже надіслано, чекаємо {wait:.0f} с")
+            self._sleep(wait)
+
+
+_rate_limiter = _RateLimiter()
+
+
+def _max_rpm() -> int:
+    try:
+        return int(app_config.gemini.max_rpm_per_model or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+# Clip selection needs little reasoning: the default thinking of the bigger models made one window
+# take 75+ s (and run into 504). gemini.thinking_level ("" = the model's default) is sent to every
+# model; a model that rejects it is remembered and asked without it from then on.
+_NO_THINKING_LEVEL: set[str] = set()
+_NO_THINKING_LOCK = threading.Lock()
+
+
+def _thinking_level_for(model_name: str) -> Optional[str]:
+    level = str(getattr(app_config.gemini, "thinking_level", "") or "").strip().upper()
+    if not level:
+        return None
+    with _NO_THINKING_LOCK:
+        return None if model_name in _NO_THINKING_LEVEL else level
+
+
+def _generate(client, model_name: str, prompt: str, schema: dict, temperature: float):
+    """generate_content with schema JSON and the configured thinking level (dropped for a model
+    that does not accept it)."""
+    level = _thinking_level_for(model_name)
+    _rate_limiter.acquire(model_name, _max_rpm())
+    try:
+        return client.models.generate_content(
+            model=model_name, contents=prompt, config=_json_config(schema, temperature, level))
+    except Exception as e:
+        low = str(e).lower()
+        if level and "thinking" in low and ("400" in low or "invalid" in low):
+            with _NO_THINKING_LOCK:
+                _NO_THINKING_LEVEL.add(model_name)
+            log.warning(f"{model_name} does not accept thinking_level={level}; asking without it")
+            return client.models.generate_content(
+                model=model_name, contents=prompt, config=_json_config(schema, temperature, None))
+        raise
+
+
 def _call_gemini_single_window(
     client,
     segments: list[dict],
@@ -199,10 +412,10 @@ def _call_gemini_single_window(
     filter_mode: str,
     detected_lang: str,
     target_len: Optional[float] = None,
+    gate: Optional["_SharedBackoff"] = None,
 ) -> list[dict]:
-    """Sends a single chunk of transcript segments to Gemini and returns parsed clips."""
-    from google.genai import types
-
+    """Sends a single chunk of transcript segments to Gemini and returns parsed clips.
+    gate: shared with the other parallel windows (a 503/429 here makes all of them hold off)."""
     transcript_lines = [f"[{s['start']}s - {s['end']}s]: {s['text']}" for s in segments]
     transcript_text = "\n".join(transcript_lines)
 
@@ -282,59 +495,164 @@ def _call_gemini_single_window(
 [{{"start": 10.0, "end": 42.5, "title": "ГОЛОВНА ПОМИЛКА", "category": "content", "hook": 8, "emotion": 6, "standalone": 9, "value": 7, "reason": "Розповідає про фатальну помилку підприємців і чим вона закінчилась.", "hook_text": "Найбільша помилка, якої припускаються майже всі...", "caption": "Головна помилка, якої припускаються майже всі! Дивіться до кінця.", "hashtags": ["#shorts", "#помилки", "#інсайти", "#тренди"]}}]
 """
     last_err = ""
-    total_passes = len(_RETRY_PASS_DELAYS) + 1
     error_kinds: list[str] = []
+    quota_errors: list[str] = []
 
-    for pass_idx in range(total_passes):
+    models = available_models()
+    if not models:
+        log.warning("Усі моделі Gemini вичерпали денний ліміт; чекаємо, поки Google його оновить")
+        raise quota_error_from(["per day limit (remembered)"])
+
+    # At most MAX_ATTEMPTS_PER_WINDOW requests: the models in turn, with a growing pause each time
+    # the list starts over (instead of 3 full passes over every model)
+    for attempt, model_name in enumerate(_attempt_plan(models)):
         if error_kinds and all(k == "bad_key" for k in error_kinds):
             break  # a wrong key will not start working after a pause
-        if pass_idx > 0:
-            delay = _RETRY_PASS_DELAYS[pass_idx - 1]
+        if attempt and attempt % len(models) == 0:
+            delay = _RETRY_PASS_DELAYS[min(attempt // len(models) - 1, len(_RETRY_PASS_DELAYS) - 1)]
             log.warning(
-                f"Жодна модель Gemini не відповіла (прохід {pass_idx}/{total_passes}). "
+                f"Жодна модель Gemini не відповіла (спроба {attempt}/{MAX_ATTEMPTS_PER_WINDOW}). "
                 f"Повтор через {delay:.0f} с..."
             )
             time.sleep(delay)
-
-        for model_name in CANDIDATE_MODELS:
-            try:
-                log.info(f"Trying Gemini model: {model_name} (pass {pass_idx + 1}/{total_passes})")
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        temperature=0.3,
-                    ),
-                )
-                raw_text = (response.text or "").strip() if response else ""
-                if not raw_text:
-                    last_err = f"{model_name}: порожня відповідь"
-                    log.warning(f"Model {model_name} returned an empty response, trying next model...")
-                    continue
-            except Exception as e:
-                last_err = f"{model_name}: {e}"
-                error_kinds.append(_gemini_error_kind(str(e)))
-                if _is_transient_error(str(e)):
-                    log.info(f"⚡ Модель {model_name} тимчасово недоступна ({e}), перемикаємось на наступну...")
-                else:
-                    log.warning(f"Model {model_name} failed: {e}, trying next model...")
+        if model_name in _exhausted_today():
+            continue  # another window found its daily limit meanwhile
+        try:
+            if gate is not None:
+                gate.wait()
+            log.info(f"Trying Gemini model: {model_name} (attempt {attempt + 1}/{MAX_ATTEMPTS_PER_WINDOW})")
+            started = time.monotonic()
+            response = _generate(client, model_name, prompt, _CLIPS_SCHEMA, temperature=0.3)
+            log.info(f"Gemini {model_name} answered in {time.monotonic() - started:.1f} s")
+            raw_text = (response.text or "").strip() if response else ""
+            if not raw_text:
+                last_err = f"{model_name}: порожня відповідь"
+                log.warning(f"Model {model_name} returned an empty response, trying next model...")
                 continue
+        except Exception as e:
+            last_err = f"{model_name}: {e}"
+            error_kinds.append(_gemini_error_kind(str(e)))
+            if error_kinds[-1] == "quota":
+                quota_errors.append(str(e))
+                if _is_daily_quota(str(e)):
+                    mark_exhausted_today(model_name)
+            if _is_transient_error(str(e)):
+                if gate is not None:
+                    gate.hit()
+                log.info(f"⚡ Модель {model_name} тимчасово недоступна ({e}), перемикаємось на наступну...")
+            else:
+                log.warning(f"Model {model_name} failed: {e}, trying next model...")
+            continue
 
-            try:
-                clips = _parse_clips_json(raw_text)
-                log.info(f"Response successfully received and parsed from {model_name}")
-                return clips
-            except Exception as e:
-                last_err = f"{model_name}: {e}"
-                log.warning(f"Помилка парсингу відповіді {model_name}: {e}. Пробуємо наступну модель...")
+        try:
+            clips = _parse_clips_json(raw_text)
+            log.info(f"Response successfully received and parsed from {model_name}")
+            return clips
+        except Exception as e:
+            last_err = f"{model_name}: {e}"
+            log.warning(f"Помилка парсингу відповіді {model_name}: {e}. Пробуємо наступну модель...")
 
-    log.error(f"Усі моделі Gemini недоступні після {total_passes} проходів. Остання помилка: {last_err}")
+    log.error(f"Усі моделі Gemini недоступні після {MAX_ATTEMPTS_PER_WINDOW} спроб. Остання помилка: {last_err}")
     if error_kinds and all(k == "bad_key" for k in error_kinds):
         raise GeminiUnavailableError(GEMINI_BAD_KEY_MESSAGE)
     if error_kinds and all(k == "quota" for k in error_kinds):
-        raise GeminiUnavailableError(GEMINI_QUOTA_MESSAGE)
+        raise quota_error_from(quota_errors)
     raise GeminiUnavailableError(GEMINI_UNAVAILABLE_MESSAGE)
+
+
+# Long videos: transcript windows go to Gemini in parallel (gemini.parallel_windows at a time).
+# A per-minute limit hit on one window pauses that window and tries it again instead of losing it.
+_RATE_RETRY_WAITS: tuple[float, ...] = (30.0, 60.0)
+_RATE_RETRY_MAX_WAIT = 90.0
+# Windows Google did not answer (overloaded) get one more round after the others, after this pause.
+_SECOND_ROUND_WAIT = 90.0
+# When one parallel window gets 503/429/504, all of them hold off this long (plus jitter).
+_GATE_PAUSE = (2.0, 4.0)
+
+GEMINI_PARTIAL_OVERLOAD_MESSAGE = (
+    "Сервери Google перевантажені: проаналізовано {done} з {total} частин відео. "
+    "Готові частини збережено, решту доробимо пізніше."
+)
+
+
+class GeminiIncompleteError(GeminiUnavailableError):
+    """Some transcript windows got no answer even after the second round.
+    done: {window key: clips} of the windows that did answer (to be kept and reused);
+    cause: the error of a missing window. daily / retry_after / overloaded drive the queue pause."""
+
+    def __init__(self, message: str, done: dict, total: int, cause: Exception):
+        super().__init__(message)
+        self.done = done
+        self.total = total
+        self.cause = cause
+        self.daily = bool(getattr(cause, "daily", False))
+        self.retry_after = getattr(cause, "retry_after", None)
+        self.overloaded = not isinstance(cause, GeminiQuotaError)
+
+
+class _SharedBackoff:
+    """A gate shared by the parallel windows of one analysis: after a 503/429/504 anywhere,
+    every window waits a little before its next request instead of hammering all models at once."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._until = 0.0
+
+    def hit(self, seconds: Optional[float] = None) -> None:
+        delay = seconds if seconds is not None else random.uniform(*_GATE_PAUSE)
+        with self._lock:
+            self._until = max(self._until, time.monotonic() + delay)
+
+    def wait(self) -> None:
+        with self._lock:
+            delay = self._until - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+
+
+def _parallel_windows() -> int:
+    try:
+        return max(1, int(app_config.gemini.parallel_windows or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _window_with_rate_retry(index: int, total: int, **kwargs) -> list[dict]:
+    """One window; on a per-minute limit waits (Google's retry delay if given) and tries again.
+    The per-day limit and other errors go up unchanged."""
+    for attempt in range(len(_RATE_RETRY_WAITS) + 1):
+        log.info(f"Analyzing transcript window {index + 1}/{total}...")
+        try:
+            return _call_gemini_single_window(**kwargs)
+        except GeminiQuotaError as e:
+            if e.daily or attempt >= len(_RATE_RETRY_WAITS):
+                raise
+            wait = min(_RATE_RETRY_MAX_WAIT, max(_RATE_RETRY_WAITS[attempt], (e.retry_after or 0) + 2))
+            log.warning(f"Window {index + 1}: Gemini per-minute limit, trying again in {wait:.0f} s")
+            time.sleep(wait)
+    raise AssertionError("unreachable")
+
+
+def window_key(segments: list[dict], count: int, min_len: int, max_len: int, filter_mode: str,
+               detected_lang: str, target_len: Optional[float]) -> str:
+    """Identifies one window's request, so a finished window can be reused after a pause or restart."""
+    sig = {
+        "n": len(segments),
+        "first": [segments[0]["start"], segments[0]["end"]] if segments else None,
+        "last": [segments[-1]["start"], segments[-1]["end"]] if segments else None,
+        "chars": sum(len(s.get("text", "")) for s in segments),
+        "count": count, "min": min_len, "max": max_len,
+        "filter": resolve_filter_mode(filter_mode), "lang": detected_lang,
+        "target": round(float(target_len), 1) if target_len else None,
+    }
+    return hashlib.sha1(json.dumps(sig, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+
+
+def _retry_later(err: Exception) -> bool:
+    """Worth a second round: Google overloaded or did not answer (not a wrong key, not a limit)."""
+    if isinstance(err, GeminiQuotaError):
+        return False
+    return str(err) != GEMINI_BAD_KEY_MESSAGE
 
 
 def analyze_and_find_clips(
@@ -346,14 +664,16 @@ def analyze_and_find_clips(
     filter_mode: str = FilterMode.VIRAL_HOOKS,
     detected_lang: str = "uk",
     target_len: Optional[float] = None,
+    done_windows: Optional[dict] = None,
 ) -> list[dict]:
     """
     High-level AI clip selector with context protection and smart chunking.
 
-    For normal-length videos, executes a single-pass Gemini call.
-    For very long transcripts (>100k chars / 2+ hours), automatically partitions
-    the transcript into chronological windows, queries Gemini for the best highlights
-    in each window, and merges the top clips.
+    The transcript goes to Gemini as one prompt, or for long videos / many clips as chronological
+    windows analysed in parallel and merged. Windows Google did not answer get a second round after
+    the others; if some are still missing, GeminiIncompleteError carries the finished ones
+    (done_windows on the next call reuses them, so only the missing windows are asked again).
+    A wrong key raises at once. Results are never partial without saying so.
     """
     if client is None:
         client = get_gemini_client()
@@ -372,59 +692,110 @@ def analyze_and_find_clips(
     num_chunks = max(chunks_by_chars, chunks_by_count)
 
     if num_chunks <= 1:
-        # Standard single-pass analysis
-        return _call_gemini_single_window(
+        windows = [segments]
+        per_window = count
+    else:
+        chunk_size = math.ceil(len(segments) / num_chunks)
+        per_window = max(1, math.ceil(count / num_chunks))
+        windows = [w for w in (segments[i * chunk_size: (i + 1) * chunk_size] for i in range(num_chunks)) if w]
+        log.info(
+            f"Partitioning analysis ({total_chars} chars across {len(segments)} segments, target {count} clips) "
+            f"into {len(windows)} chronological windows (~{per_window} clips per window)."
+        )
+
+    keys = [window_key(w, per_window, min_len, max_len, filter_mode, detected_lang, target_len) for w in windows]
+    done: dict = {k: v for k, v in (done_windows or {}).items() if k in keys}
+    if done:
+        log.info(f"Reusing {len(done)} of {len(windows)} windows analysed before; asking Gemini only for the rest")
+    workers = max(1, min(_parallel_windows(), len(windows)))
+    gate = _SharedBackoff() if workers > 1 else None
+
+    def run(i: int) -> list[dict]:
+        return _window_with_rate_retry(
+            i, len(windows),
             client=client,
-            segments=segments,
-            count=count,
+            segments=windows[i],
+            count=per_window,
             min_len=min_len,
             max_len=max_len,
             filter_mode=filter_mode,
             detected_lang=detected_lang,
             target_len=target_len,
+            gate=gate,
         )
 
-    # Partitioning into chronological windows for scale & quality
-    chunk_size = math.ceil(len(segments) / num_chunks)
-    clips_per_chunk = max(1, math.ceil(count / num_chunks))
+    pending = [i for i, k in enumerate(keys) if k not in done]
+    errors: dict[int, Exception] = {}
+    for round_no in (1, 2):
+        if not pending:
+            break
+        if round_no == 2:
+            pending = [i for i in pending if _retry_later(errors[i])]
+            if not pending:
+                break
+            if _SECOND_ROUND_WAIT > 0:
+                log.warning(
+                    f"Gemini did not answer {len(pending)} window(s); trying them again in {_SECOND_ROUND_WAIT:.0f} s"
+                )
+                time.sleep(_SECOND_ROUND_WAIT)
+        if workers > 1 and len(pending) > 1:
+            log.info(f"Analyzing {len(pending)} windows, up to {workers} at a time")
+            with ThreadPoolExecutor(max_workers=min(workers, len(pending)), thread_name_prefix="GeminiWindow") as pool:
+                futures = {i: pool.submit(run, i) for i in pending}
+            outcomes = {}
+            for i, fut in futures.items():
+                try:
+                    outcomes[i] = fut.result()
+                except Exception as e:
+                    outcomes[i] = e
+        else:
+            outcomes = {}
+            for i in pending:
+                try:
+                    outcomes[i] = run(i)
+                except Exception as e:
+                    outcomes[i] = e
+        failed = []
+        for i in pending:
+            out = outcomes[i]
+            if isinstance(out, Exception):
+                errors[i] = out
+                failed.append(i)
+                log.warning(f"Window {i + 1} analysis failed: {out}")
+            else:
+                done[keys[i]] = out
+                errors.pop(i, None)
+        pending = failed
+        if any(str(errors[i]) == GEMINI_BAD_KEY_MESSAGE for i in pending):
+            break  # a wrong key will not start working in a second round
 
-    log.info(
-        f"Partitioning analysis ({total_chars} chars across {len(segments)} segments, target {count} clips) "
-        f"into {num_chunks} chronological windows (~{clips_per_chunk} clips per window)."
-    )
+    missing = [i for i in range(len(windows)) if keys[i] not in done]
+    if missing:
+        causes = [errors.get(i) for i in missing if errors.get(i) is not None]
+        bad = next((e for e in causes if str(e) == GEMINI_BAD_KEY_MESSAGE), None)
+        if bad is not None:
+            raise bad
+        cause = next((e for e in causes if isinstance(e, GeminiQuotaError)), None) or (
+            causes[0] if causes else GeminiUnavailableError(GEMINI_UNAVAILABLE_MESSAGE))
+        n_done = len(windows) - len(missing)
+        finished = {k: v for k, v in done.items() if k in keys}
+        if isinstance(cause, GeminiQuotaError):
+            message = str(cause) if n_done == 0 else (
+                f"Проаналізовано {n_done} з {len(windows)} частин відео, решту не дав ліміт ключа. {cause}")
+        elif n_done == 0:
+            message = GEMINI_UNAVAILABLE_MESSAGE
+        else:
+            message = GEMINI_PARTIAL_OVERLOAD_MESSAGE.format(done=n_done, total=len(windows))
+        log.error(f"Gemini: {len(missing)} of {len(windows)} windows still missing ({cause})")
+        raise GeminiIncompleteError(message, finished, len(windows), cause)
 
+    if len(windows) == 1:
+        return done[keys[0]]
+
+    # Merge in window order, so the result is the same however the windows were scheduled
     all_clips: list[dict] = []
-    gemini_error: Optional[GeminiUnavailableError] = None
-    for i in range(num_chunks):
-        chunk_segs = segments[i * chunk_size: (i + 1) * chunk_size]
-        if not chunk_segs:
-            continue
-        try:
-            log.info(f"Analyzing transcript window {i + 1}/{num_chunks}...")
-            clips = _call_gemini_single_window(
-                client=client,
-                segments=chunk_segs,
-                count=clips_per_chunk,
-                min_len=min_len,
-                max_len=max_len,
-                filter_mode=filter_mode,
-                detected_lang=detected_lang,
-                target_len=target_len,
-            )
-            all_clips.extend(clips)
-        except GeminiUnavailableError as e:
-            gemini_error = e
-            log.warning(f"Window {i + 1} analysis failed: Gemini unavailable")
-        except Exception as e:
-            log.warning(f"Window {i + 1} analysis failed: {e}")
-
-    if not all_clips:
-        if gemini_error is not None:
-            raise gemini_error
-        raise RuntimeError("Не вдалося знайти жодного кліпу у вікнах аналізу довгого відео.")
-    if gemini_error is not None:
-        log.warning("Частина вікон не проаналізована через недоступність Gemini; повертаємо кліпи з успішних вікон.")
-
+    for k in keys:
+        all_clips.extend(done[k])
     # Sort candidates by score descending (if present), else chronological
     all_clips.sort(key=lambda c: (float(c.get("score", 0)), -c.get("start", 0)), reverse=True)
     selected = all_clips[:count]
@@ -450,7 +821,6 @@ def rerank_clips(
     if len(clips) < 2:
         return clips
     try:
-        from google.genai import types
         if client is None:
             client = get_gemini_client()
         filter_hint = FILTER_INSTRUCTIONS.get(resolve_filter_mode(filter_mode), "")
@@ -468,13 +838,9 @@ def rerank_clips(
             'Поверни ВИКЛЮЧНО JSON масив: [{"n": 1, "score": 87}, ...] для всіх кліпів.'
         )
         last_err = ""
-        for model_name in CANDIDATE_MODELS:
+        for model_name in available_models():
             try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2),
-                )
+                response = _generate(client, model_name, prompt, _RERANK_SCHEMA, temperature=0.2)
                 data = json.loads(_strip_fences((response.text or "").strip()))
                 if isinstance(data, dict):
                     data = next((v for v in data.values() if isinstance(v, list)), [])
@@ -491,6 +857,8 @@ def rerank_clips(
                 return out
             except Exception as e:
                 last_err = f"{model_name}: {e}"
+                if _gemini_error_kind(str(e)) == "quota" and _is_daily_quota(str(e)):
+                    mark_exhausted_today(model_name)
                 continue
         log.warning(f"Re-ranking pass skipped, keeping rubric scores ({last_err})")
     except Exception as e:

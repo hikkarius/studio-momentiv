@@ -13,7 +13,8 @@
 - `run_studio.py` — точка входу, http://127.0.0.1:8000. `repurpose_agent.py` — CLI.
 - `backend/server.py` — FastAPI, усі `/api/*` маршрути. `backend/db.py` — SQLite (WAL, параметризовані запити).
 - `backend/job_runner.py` (аналіз одного відео), `backend/queue_runner.py` (черга, по одному за раз),
-  `backend/storage.py` (місце на диску, очищення), `backend/app_update.py` (версія, кнопка «Оновити»,
+  `backend/storage.py` (місце на диску, очищення), `backend/backup.py` (щоденна копія бази в `backups/daily`,
+  «Відновити»), `backend/keep_awake.py` (ноутбук не засинає, поки працює черга), `backend/app_update.py` (версія, кнопка «Оновити»,
   перевірка ключа), `backend/support_report.py` («Зібрати звіт про проблему»).
 - `transcription.py` (Whisper + кеш `.transcript_cache/`), `ai_selector.py` (Gemini: перебір
   `gemini.candidate_models`, до 3 проходів, потім `GeminiUnavailableError`; ніколи не вигадувати кліпи),
