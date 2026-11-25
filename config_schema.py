@@ -44,6 +44,8 @@ class GeminiConfig(BaseModel):
         ],
         min_length=1,
     )
+    # asked once only when every candidate answers «overloaded» (503); another family, so a busy Lite does not stop the search
+    fallback_models: List[str] = Field(default_factory=lambda: ["gemini-3.6-flash"])
     rerank: bool = True
     parallel_windows: int = Field(default=3, ge=1, le=8)
     thinking_level: str = Field(default="minimal", pattern=r"^(|minimal|low|medium|high)$")

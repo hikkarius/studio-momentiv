@@ -349,6 +349,60 @@ def available_models() -> list[str]:
     return [m for m in CANDIDATE_MODELS if m not in gone]
 
 
+def _fallback_models() -> list[str]:
+    """Stronger models asked once when every candidate is overloaded (not those out of today's limit)."""
+    gone = _exhausted_today()
+    extra = getattr(app_config.gemini, "fallback_models", None) or []
+    return [m for m in extra if m not in gone and m not in CANDIDATE_MODELS]
+
+
+# After this many «overloaded» answers in one analysis with no answer at all, Google is down:
+# the other windows stop asking instead of burning 4 requests each (and a second round)
+OVERLOAD_TRIP = 6
+
+
+class _OverloadWatch:
+    """Shared by the windows of one analysis: counts «overloaded» answers until the first real answer."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._fails = 0
+        self._answers = 0
+        self._fallback_failed = False
+        self._fallback_busy = False
+
+    def failed(self, fallback: bool = False) -> None:
+        with self._lock:
+            self._fails += 1
+            if fallback:
+                self._fallback_failed = True
+
+    def answered(self) -> None:
+        with self._lock:
+            self._answers += 1
+
+    def tripped(self) -> bool:
+        with self._lock:
+            return self._answers == 0 and self._fails >= OVERLOAD_TRIP
+
+    def down(self) -> bool:
+        """Nothing answered at all, only «overloaded»."""
+        with self._lock:
+            return self._answers == 0 and self._fails > 0
+
+    def claim_fallback(self) -> bool:
+        """One window at a time tries the fallback model; none after it was overloaded too."""
+        with self._lock:
+            if self._fallback_failed or self._fallback_busy:
+                return False
+            self._fallback_busy = True
+            return True
+
+    def release_fallback(self) -> None:
+        with self._lock:
+            self._fallback_busy = False
+
+
 class _RateLimiter:
     """At most `limit` requests per model in any 60 s, shared by all threads."""
 
@@ -431,9 +485,11 @@ def _call_gemini_single_window(
     gate: Optional["_SharedBackoff"] = None,
     experimental: bool = False,
     max_chars: int = _MAX_TRANSCRIPT_CHARS,
+    overload: Optional["_OverloadWatch"] = None,
 ) -> list[dict]:
     """Sends a single chunk of transcript segments to Gemini and returns parsed clips.
-    gate: shared with the other parallel windows (a 503/429 here makes all of them hold off)."""
+    gate: shared with the other parallel windows (a 503/429 here makes all of them hold off).
+    overload: shared by the windows of one analysis; once Google is clearly down, stop asking."""
     transcript_lines = [f"[{s['start']}s - {s['end']}s]: {s['text']}" for s in segments]
     transcript_text = "\n".join(transcript_lines)
 
@@ -551,10 +607,29 @@ def _call_gemini_single_window(
 
     # At most MAX_ATTEMPTS_PER_WINDOW requests: the models in turn, with a growing pause each time
     # the list starts over (instead of 3 full passes over every model)
-    for attempt, model_name in enumerate(_attempt_plan(models)):
+    overload = overload or _OverloadWatch()
+    gave_up = False
+    plan = _attempt_plan(models)
+    for attempt, model_name in enumerate(plan + _fallback_models()):
         if error_kinds and all(k == "bad_key" for k in error_kinds):
             break  # a wrong key will not start working after a pause
-        if attempt and attempt % len(models) == 0:
+        fallback = attempt >= len(plan)
+        if fallback:
+            # the candidates all said «overloaded»: one try of a stronger model from another family,
+            # but only once per analysis if it is overloaded too
+            if not error_kinds or any(k != "overload" for k in error_kinds) or not overload.claim_fallback():
+                break
+            log.warning(f"Основні моделі Gemini перевантажені, пробуємо запасну {model_name}")
+        elif overload.tripped():
+            if not gave_up:
+                log.warning("Сервери Google перевантажені для всіх частин відео: не витрачаємо більше запитів")
+                gave_up = True
+            if error_kinds:
+                continue  # straight to the fallback model
+            error_kinds.append("overload")
+            last_err = "Google overloaded (other windows)"
+            continue
+        if attempt and not fallback and attempt % len(models) == 0:
             delay = _RETRY_PASS_DELAYS[min(attempt // len(models) - 1, len(_RETRY_PASS_DELAYS) - 1)]
             log.warning(
                 f"Жодна модель Gemini не відповіла (спроба {attempt}/{MAX_ATTEMPTS_PER_WINDOW}). "
@@ -564,11 +639,15 @@ def _call_gemini_single_window(
         if model_name in _exhausted_today():
             continue  # another window found its daily limit meanwhile
         try:
-            if gate is not None:
+            if gate is not None and not fallback:
                 gate.wait()
             log.info(f"Trying Gemini model: {model_name} (attempt {attempt + 1}/{MAX_ATTEMPTS_PER_WINDOW})")
             started = time.monotonic()
-            response = _generate(client, model_name, prompt, _CLIPS_SCHEMA, temperature=0.3)
+            try:
+                response = _generate(client, model_name, prompt, _CLIPS_SCHEMA, temperature=0.3)
+            finally:
+                if fallback:
+                    overload.release_fallback()
             log.info(f"Gemini {model_name} answered in {time.monotonic() - started:.1f} s")
             raw_text = (response.text or "").strip() if response else ""
             if not raw_text:
@@ -577,7 +656,12 @@ def _call_gemini_single_window(
                 continue
         except Exception as e:
             last_err = f"{model_name}: {e}"
-            error_kinds.append(_gemini_error_kind(str(e)))
+            kind = _gemini_error_kind(str(e))
+            if kind == "other" and _is_transient_error(str(e)):
+                kind = "overload"
+            error_kinds.append(kind)
+            if kind == "overload":
+                overload.failed(fallback)
             if error_kinds[-1] == "quota":
                 quota_errors.append(str(e))
                 if _is_daily_quota(str(e)):
@@ -593,12 +677,13 @@ def _call_gemini_single_window(
         try:
             clips = _parse_clips_json(raw_text)
             log.info(f"Response successfully received and parsed from {model_name}")
+            overload.answered()
             return clips
         except Exception as e:
             last_err = f"{model_name}: {e}"
             log.warning(f"Помилка парсингу відповіді {model_name}: {e}. Пробуємо наступну модель...")
 
-    log.error(f"Усі моделі Gemini недоступні після {MAX_ATTEMPTS_PER_WINDOW} спроб. Остання помилка: {last_err}")
+    log.error(f"Усі моделі Gemini недоступні. Остання помилка: {last_err}")
     if error_kinds and all(k == "bad_key" for k in error_kinds):
         raise GeminiUnavailableError(GEMINI_BAD_KEY_MESSAGE)
     if error_kinds and all(k == "quota" for k in error_kinds):
@@ -755,6 +840,7 @@ def analyze_and_find_clips(
         log.info(f"Reusing {len(done)} of {len(windows)} windows analysed before; asking Gemini only for the rest")
     workers = max(1, min(_parallel_windows(), len(windows)))
     gate = _SharedBackoff() if workers > 1 else None
+    overload = _OverloadWatch()
 
     def run(i: int) -> list[dict]:
         return _window_with_rate_retry(
@@ -768,6 +854,7 @@ def analyze_and_find_clips(
             detected_lang=detected_lang,
             target_len=target_len,
             gate=gate,
+            overload=overload,
         )
 
     pending = [i for i, k in enumerate(keys) if k not in done]
@@ -778,6 +865,9 @@ def analyze_and_find_clips(
         if round_no == 2:
             pending = [i for i in pending if _retry_later(errors[i])]
             if not pending:
+                break
+            if overload.down() and not done:
+                log.warning("Google did not answer a single window: no second round, try again later")
                 break
             if _SECOND_ROUND_WAIT > 0:
                 log.warning(
