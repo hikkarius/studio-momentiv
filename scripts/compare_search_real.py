@@ -76,6 +76,7 @@ def main() -> None:
     transcription.transcript_cache_dir = lambda: cache
 
     calls = {"n": 0}
+    models_called: dict = {}
     real_client = ai_selector.get_gemini_client
 
     def counting_client(*a, **k):
@@ -85,6 +86,8 @@ def main() -> None:
         class M:
             def generate_content(self, *aa, **kk):
                 calls["n"] += 1
+                m = kk.get("model", "?")
+                models_called[m] = models_called.get(m, 0) + 1
                 return gen(*aa, **kk)
 
         class C:
@@ -122,6 +125,7 @@ def main() -> None:
              "url": db.get_project_source_url(p["id"]), "runs": {}}
         for mode in ("classic", "experimental"):
             calls["n"] = 0
+            models_called.clear()
             t0 = time.time()
             print(f"→ {p['title']} · {mode}", flush=True)
             try:
@@ -131,11 +135,13 @@ def main() -> None:
                 err = ""
             except Exception as e:
                 clips, err = [], f"{type(e).__name__}: {e}"
-            run = {"seconds": round(time.time() - t0, 1), "gemini_calls": calls["n"], "error": err, "clips": []}
+            run = {"seconds": round(time.time() - t0, 1), "gemini_calls": calls["n"], "models_called": dict(models_called),
+                   "error": err, "clips": []}
             for c in sorted(clips, key=lambda c: -float(c.get("score", 0))):
                 text = " ".join(w["word"] for w in words if c["start"] - 0.05 <= w["start"] < c["end"])
                 run["clips"].append({"start": c["start"], "end": c["end"], "dur": round(c["end"] - c["start"], 1),
                                      "score": c.get("score"), "title": c.get("title"), "signals": c.get("signals", []),
+                                     "model": c.get("_model", ""),
                                      "first_words": " ".join(text.split()[:12]), "text": text[:600]})
             v["runs"][mode] = run
             print(f"   {len(run['clips'])} clips, {run['seconds']} s, {calls['n']} Gemini calls {err}", flush=True)
