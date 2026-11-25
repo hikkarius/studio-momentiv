@@ -503,7 +503,11 @@ def strong_plan() -> list[tuple[str, int]]:
     if choice == EXPERIMENTAL_MODEL_AUTO:
         models = list(getattr(app_config.gemini, "strong_models", None) or [])
         return [(m, 1) for m in models if m not in gone and m not in CANDIDATE_MODELS]
-    return [] if choice in gone else [(choice, 1 + len(_CHOSEN_MODEL_WAITS))]
+    # the chosen model gets a few tries, then the other strong models once each, then the fast ones
+    others = [m for m in (getattr(app_config.gemini, "strong_models", None) or [])
+              if m != choice and m not in gone and m not in CANDIDATE_MODELS]
+    first = [] if choice in gone else [(choice, 1 + len(_CHOSEN_MODEL_WAITS))]
+    return first + [(m, 1) for m in others]
 
 
 def _ask_strong(client, plan: list[tuple[str, int]], prompt: str, schema: dict, temperature: float, parse):

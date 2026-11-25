@@ -77,7 +77,7 @@ def test_plan_auto_fast_chosen_and_out_of_limit(monkeypatch, auto):
     ai_selector.mark_exhausted_today(FLASH38)
     assert strong_plan() == [(HYDROGEN, 1), (FLASH36, 1)]
     monkeypatch.setattr(app_config.gemini, "experimental_model", HYDROGEN)
-    assert strong_plan() == [(HYDROGEN, 3)]  # a chosen model gets a few tries
+    assert strong_plan() == [(HYDROGEN, 3), (FLASH36, 1)]  # a chosen model gets a few tries, then the others
     monkeypatch.setattr(app_config.gemini, "experimental_model", "fast")
     assert strong_plan() == []
 
@@ -123,9 +123,10 @@ def test_paid_only_and_daily_limit_are_remembered_and_skipped_next_time(auto):
 def test_a_chosen_model_is_retried_with_a_pause_then_the_fast_ones_answer(monkeypatch, no_sleep):
     monkeypatch.setattr(app_config.gemini, "experimental_model", HYDROGEN)
     lite = CANDIDATE_MODELS[0]
-    mc = _client({HYDROGEN: [Exception(BUSY)], lite: [_resp([_clip(10, 40)])]})
+    mc = _client({HYDROGEN: [Exception(BUSY)], FLASH38: [Exception(BUSY)], FLASH36: [Exception(BUSY)],
+                  lite: [_resp([_clip(10, 40)])]})
     clips = find_clips_experimental(client=mc, segments=_segments(22), count=10)
-    assert mc.asked[:4] == [HYDROGEN, HYDROGEN, HYDROGEN, lite]
+    assert mc.asked[:6] == [HYDROGEN, HYDROGEN, HYDROGEN, FLASH38, FLASH36, lite]
     assert no_sleep[:2] == [20.0, 40.0]
     assert clips[0]["_model"] == lite
 
