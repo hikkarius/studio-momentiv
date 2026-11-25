@@ -507,6 +507,10 @@ async function retryAnalysisForCurrentProject() {
     if (typeof Editor !== "undefined") Editor.open(project, currentClips);
     return;
   }
+  if (mode === "compare") {
+    Compare.open(project, { onClose: () => loadProjectResults(project.id) });
+    return;
+  }
   resetStudioState();
   try {
     await Queue.addProject(project.id, { search_mode: mode });
@@ -1143,14 +1147,14 @@ function searchModeLabel(mode) {
 
 /**
  * «Шукати кліпи заново»: asks which way to search. The other way is preselected, so trying it is one click.
- * Resolves to "classic" / "experimental", or null when cancelled.
+ * Resolves to "classic" / "experimental", "compare" («Порівняти наосліп»), or null when cancelled.
  */
 function askSearchAgain(project, marked) {
   return new Promise((resolve) => {
     const used = project.search_mode || "classic";
     let pick = used === "classic" ? "experimental" : "classic";
     const back = document.createElement("div");
-    back.className = "modal-backdrop ask-dialog";
+    back.className = "modal-backdrop ask-dialog ask-search-dialog";
     back.setAttribute("role", "dialog");
     back.setAttribute("aria-modal", "true");
     back.setAttribute("aria-labelledby", "askSearchTitle");
@@ -1170,6 +1174,7 @@ function askSearchAgain(project, marked) {
           <p class="ask-text">${escapeHtml(keepNote)} Транскрипція вже є, тож це швидко.</p>
         </div>
         <div class="modal-footer">
+          <button type="button" class="btn btn-secondary ask-cmp" data-a="cmp" title="Студія знайде кліпи обома способами, а ти наосліп обереш кращі. Кліпи цього відео не зміняться, поки сам не вирішиш.">⚖ Порівняти наосліп</button>
           <button type="button" class="btn btn-secondary" data-a="no">Скасувати</button>
           <button type="button" class="btn btn-primary" data-a="yes">↻ Шукати заново</button>
         </div>
@@ -1197,7 +1202,7 @@ function askSearchAgain(project, marked) {
         return;
       }
       const b = e.target.closest("button[data-a]");
-      if (b) done(b.dataset.a === "yes" ? pick : null);
+      if (b) done(b.dataset.a === "yes" ? pick : b.dataset.a === "cmp" ? "compare" : null);
       else if (e.target === back) done(null);
     });
     document.addEventListener("keydown", onKey, true);

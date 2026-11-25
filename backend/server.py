@@ -31,7 +31,7 @@ import reactions
 import streamer
 import title_ideas
 import vertical_render
-from backend import app_update, backup, db, job_runner, keep_awake, queue_runner, storage, support_report
+from backend import app_update, backup, compare, db, job_runner, keep_awake, queue_runner, storage, support_report
 from constants import resolve_filter_mode
 from state import app_state
 from transcription import load_transcript_cache
@@ -433,6 +433,7 @@ def ingest_url(url: str, progress_cb=None, space_checked: bool = False) -> tuple
             source_path=video_path,
             duration=duration,
         )
+        db.set_project_source_url(project["id"], url)  # later: YouTube «most replayed» for the experimental search
         try:  # a Twitch VOD / YouTube stream: its chat replay helps find the reactions (best effort, ≤5 min)
             n = _fetch_chat(url, str(_safe_project_output_dir(project["id"]) / "chat.json"))
             if n:
@@ -491,6 +492,60 @@ def start_analyze(project_id: str, payload: AnalyzeRequest):
         search_mode=payload.search_mode or None,
     )
     return {"job_id": job_id, "project_id": project_id, "status": "queued"}
+
+
+# ─── «Порівняти наосліп»: classic vs experimental search ───────────────────────
+
+class CompareVoteRequest(BaseModel):
+    n: int = Field(ge=0, le=100)
+    pick: str = Field(pattern=r"^(left|right|same|)$")
+
+
+class CompareApplyRequest(BaseModel):
+    mode: str = Field(pattern=r"^(classic|experimental)$")
+
+
+@app.post("/api/projects/{project_id}/compare")
+def start_compare(project_id: str):
+    """Runs both searches on the cached transcript; the video's clips stay as they are."""
+    from config_loader import app_config
+
+    _validate_project_id(project_id)
+    proj = db.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Проєкт не знайдено.")
+    compare.start(project_id, job_runner.auto_clips_count(proj.get("duration") or 0), app_config.studio.default_filter)
+    return compare.view(project_id)
+
+
+@app.get("/api/projects/{project_id}/compare")
+def get_compare(project_id: str):
+    _validate_project_id(project_id)
+    return compare.view(project_id)
+
+
+@app.post("/api/projects/{project_id}/compare/vote")
+def vote_compare(project_id: str, payload: CompareVoteRequest):
+    _validate_project_id(project_id)
+    try:
+        return compare.vote(project_id, payload.n, payload.pick)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.post("/api/projects/{project_id}/compare/apply")
+def apply_compare(project_id: str, payload: CompareApplyRequest):
+    """«Взяти кліпи переможця»: the chosen search's clips replace the unmarked ones (marked clips stay)."""
+    _validate_project_id(project_id)
+    if not db.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Проєкт не знайдено.")
+    try:
+        clips = compare.clips_of(project_id, payload.mode)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    db.save_candidate_clips(project_id, clips, keep_reviewed=True)
+    db.set_project_search_mode(project_id, payload.mode)
+    return {"status": "applied", "clips": len(clips)}
 
 
 @app.get("/api/jobs/{job_id}/stream")

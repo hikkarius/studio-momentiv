@@ -6,7 +6,10 @@ such moments get a short mark, the AI still chooses the clips (and never invents
   loudness_peaks(source)  — ffmpeg loudness per second → moments much louder than the minute around them;
   fetch_chat(url, dest)   — best effort: the chat replay of a Twitch VOD / YouTube stream (yt-dlp) → message times;
   chat_spikes(times)      — 10-second windows with many more messages than usual;
-  mark_segments(...)      — copies of the transcript segments with «[реакція: ...]» marks for the prompt.
+  fetch_heatmap(url)      — best effort: YouTube «Найчастіше переглядають» (yt-dlp `heatmap`) → [(start, end, value)];
+  replayed_parts(heat)    — the few most re-watched parts of the video;
+  mark_segments(...)      — copies of the transcript segments with «[реакція: ...]» marks for the prompt;
+  clip_signals(...)       — which of these hints fall inside a finished clip (the tags on its card).
 """
 from __future__ import annotations
 
@@ -75,6 +78,73 @@ def loudness_peaks(source: str) -> List[Tuple[float, float]]:
     except Exception as e:  # a hint only: never stop the analysis
         log.warning(f"Loudness hints skipped: {e}")
         return []
+
+
+# ─── YouTube «Найчастіше переглядають» ─────────────────────────────────────────
+
+REPLAY_TOP = 6          # how many re-watched parts go to the AI
+REPLAY_MIN = 0.45       # the part must be at least this re-watched (YouTube scales the curve to 0…1)
+
+
+def fetch_heatmap(url: str, timeout: int = 120) -> List[Tuple[float, float, float]]:
+    """Best effort: the «most replayed» curve of a YouTube video. Empty for other sites, new or small videos."""
+    host = (re.sub(r"^https?://", "", url).split("/")[0]).lower()
+    if not any(h in host for h in ("youtube.com", "youtu.be")):
+        return []
+    cmd = [sys.executable, "-m", "yt_dlp", "--skip-download", "--no-playlist", "-j", "--", url]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                              env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
+        line = next((ln for ln in reversed((proc.stdout or "").splitlines()) if ln.startswith("{")), "")
+        return heatmap_from_info(json.loads(line) if line else {})
+    except Exception as e:
+        log.warning(f"YouTube heatmap skipped: {e}")
+        return []
+
+
+def heatmap_from_info(info: Dict[str, Any]) -> List[Tuple[float, float, float]]:
+    """Pure: yt-dlp info dict → [(start, end, value)]."""
+    out = []
+    for h in info.get("heatmap") or []:
+        try:
+            out.append((float(h["start_time"]), float(h["end_time"]), float(h["value"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def replayed_parts(heat: Sequence[Tuple[float, float, float]], top: int = REPLAY_TOP,
+                   min_value: float = REPLAY_MIN) -> List[Tuple[float, float, float]]:
+    """
+    Pure. Neighbouring re-watched buckets merge into parts → the `top` strongest [(start, end, peak)].
+    The first 3 % of the video is skipped: everyone watches the start, so it is always «re-watched».
+    """
+    if not heat:
+        return []
+    total = max(e for _, e, _ in heat)
+    parts: List[List[float]] = []
+    for s, e, v in sorted(heat):
+        if v < min_value or s < total * 0.03:
+            continue
+        if parts and s - parts[-1][1] <= 1.0:
+            parts[-1][1] = e
+            parts[-1][2] = max(parts[-1][2], v)
+        else:
+            parts.append([s, e, v])
+    parts.sort(key=lambda p: -p[2])
+    return sorted((round(a, 1), round(b, 1), round(v, 2)) for a, b, v in parts[:top])
+
+
+def load_heatmap(path: str) -> List[Tuple[float, float, float]]:
+    try:
+        return [tuple(x) for x in json.loads(Path(path).read_text(encoding="utf-8"))]
+    except Exception:
+        return []
+
+
+def save_heatmap(path: str, heat: Sequence[Tuple[float, float, float]]) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps([list(h) for h in heat]), encoding="utf-8")
 
 
 # ─── Chat ─────────────────────────────────────────────────────────────────────
@@ -175,7 +245,8 @@ def load_chat(path: str) -> List[float]:
 # ─── Marks for the prompt ─────────────────────────────────────────────────────
 
 def mark_segments(segments: Sequence[Dict[str, Any]], loud: Iterable[Tuple[float, float]] = (),
-                  chat: Iterable[Tuple[float, int]] = ()) -> Tuple[List[Dict[str, Any]], int]:
+                  chat: Iterable[Tuple[float, int]] = (),
+                  replayed: Iterable[Tuple[float, float, float]] = ()) -> Tuple[List[Dict[str, Any]], int]:
     """Copies of the segments; the one at each reaction gets «[реакція: ...]» before its text. Returns (segments, marks)."""
     segs = [dict(s) for s in segments]
     if not segs:
@@ -199,6 +270,30 @@ def mark_segments(segments: Sequence[Dict[str, Any]], loud: Iterable[Tuple[float
         i = at(t + CHAT_WIN / 2)
         if i >= 0:
             notes.setdefault(i, []).append(f"чат вибухнув ({c} повідомлень за {int(CHAT_WIN)} с)")
+    for a, b, v in replayed:
+        i = at(a + 0.5)  # the line that is spoken when the part begins
+        if i >= 0:
+            notes.setdefault(i, []).append(
+                f"глядачі YouTube найчастіше переглядали {_mmss(a)}–{_mmss(b)} (сила {v:.0%})")
     for i, ns in notes.items():
         segs[i]["text"] = f"{MARK} {'; '.join(dict.fromkeys(ns))}] {segs[i].get('text', '')}"
     return segs, len(notes)
+
+
+def _mmss(t: float) -> str:
+    t = int(max(0, t))
+    return f"{t // 60}:{t % 60:02d}"
+
+
+def clip_signals(start: float, end: float, loud: Iterable[Tuple[float, float]] = (),
+                 chat: Iterable[Tuple[float, int]] = (),
+                 replayed: Iterable[Tuple[float, float, float]] = ()) -> List[str]:
+    """Pure. Which hints fall inside the clip: 'replayed' (YouTube), 'loud' (laughter, applause, shouts), 'chat'."""
+    out = []
+    if any(min(end, b) - max(start, a) >= min(5.0, (b - a) / 2) for a, b, _ in replayed):
+        out.append("replayed")
+    if any(start <= t <= end for t, _ in loud):
+        out.append("loud")
+    if any(start - CHAT_WIN <= t <= end for t, _ in chat):
+        out.append("chat")
+    return out

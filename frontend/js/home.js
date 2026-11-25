@@ -159,6 +159,7 @@ const Home = (() => {
     if (p.clips_count) {
       const mode = await askSearchAgain(p, p.reviewed_count || 0);
       if (!mode) return;
+      if (mode === "compare") { Compare.open(p, { onClose: () => load() }); return; }
       try { await Queue.addProject(p.id, { search_mode: mode }); } catch (err) { showToast(err.message, "error"); }
       return;
     }

@@ -171,6 +171,12 @@ def init_db():
         if "search_mode" not in project_columns:
             # how the current clips were found: classic / experimental ('' = before the switch existed)
             conn.execute("ALTER TABLE projects ADD COLUMN search_mode TEXT NOT NULL DEFAULT '';")
+        if "source_url" not in project_columns:
+            # the link the video was downloaded from ('' = a file from the computer)
+            conn.execute("ALTER TABLE projects ADD COLUMN source_url TEXT NOT NULL DEFAULT '';")
+        if "signals" not in columns:
+            # JSON: why the audience liked the clip, ["replayed" (YouTube), "loud" (laughter, applause), "chat"]
+            conn.execute("ALTER TABLE candidate_clips ADD COLUMN signals TEXT NOT NULL DEFAULT '[]';")
 
 
 def new_shelf_size(duration_sec: float) -> int:
@@ -260,6 +266,24 @@ def update_project_status(project_id: str, status: str):
         )
 
 
+def set_project_source_url(project_id: str, url: str) -> None:
+    with get_db() as conn:
+        conn.execute("UPDATE projects SET source_url = ? WHERE id = ?", (url or "", project_id))
+
+
+def get_project_source_url(project_id: str) -> str:
+    """The video's link: saved on the project, or (videos added before that) the queue item that downloaded it."""
+    with get_db() as conn:
+        row = conn.execute("SELECT source_url FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if row and row["source_url"]:
+            return row["source_url"]
+        row = conn.execute(
+            "SELECT source_url FROM queue_items WHERE project_id = ? AND source_url != '' ORDER BY created_at DESC LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        return row["source_url"] if row else ""
+
+
 def set_project_search_mode(project_id: str, mode: str) -> None:
     with get_db() as conn:
         conn.execute("UPDATE projects SET search_mode = ? WHERE id = ?", (mode or "", project_id))
@@ -308,12 +332,14 @@ def save_candidate_clips(project_id: str, clips: List[Dict[str, Any]], keep_revi
             caption = str(c.get("caption") or "")
             tags = c.get("hashtags")
             tags_json = json.dumps(tags if isinstance(tags, list) else ["#shorts", "#відео"])
+            sig = c.get("signals")
+            sig_json = json.dumps([str(x) for x in sig] if isinstance(sig, list) else [])
 
             conn.execute(
                 "INSERT INTO candidate_clips (id, project_id, clip_index, start_sec, end_sec, duration, "
-                "virality_score, title, hook_text, reason, caption, hashtags, is_selected) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
-                (clip_id, project_id, idx, start, end, dur, score, title, hook, reason, caption, tags_json),
+                "virality_score, title, hook_text, reason, caption, hashtags, signals, is_selected) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+                (clip_id, project_id, idx, start, end, dur, score, title, hook, reason, caption, tags_json, sig_json),
             )
         _mark_reserve(conn, project_id, only_new=keep_reviewed)
 
@@ -340,6 +366,11 @@ def _clip_row(row: Any) -> Dict[str, Any]:
         d["title_variants"] = tv if isinstance(tv, list) else []
     except Exception:
         d["title_variants"] = []
+    try:
+        sig = json.loads(d.get("signals") or "[]")
+        d["signals"] = sig if isinstance(sig, list) else []
+    except Exception:
+        d["signals"] = []
     return d
 
 

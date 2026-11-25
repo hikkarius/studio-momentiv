@@ -55,6 +55,12 @@ const Editor = (() => {
   const byScore = () => [...st.clips.keys()].sort((a, b) => scoreOf(st.clips[b]) - scoreOf(st.clips[a]) || st.clips[a].num - st.clips[b].num);
   const byTime = () => [...st.clips.keys()].sort((a, b) => st.clips[a].num - st.clips[b].num);
   const ordered = () => (st.sort === "time" ? byTime() : byScore());
+  // Why the audience liked a clip (hints the AI got; set by the experimental search and for streams)
+  const SIGNALS = {
+    replayed: ["📈 найчастіше переглядали", "Глядачі YouTube переглядали це місце найчастіше"],
+    loud: ["😂 реакція залу", "Тут різко голосніше: сміх, оплески або крик"],
+    chat: ["💬 чат вибухнув", "Під час стріму тут різко побільшало повідомлень у чаті"],
+  };
   /** Clip statuses, like a todo list. '' = Нове, keep = В роботі, done = Виконано, drop = Не беру. */
   const STATUS = { "": "Нове", keep: "В роботі", done: "Виконано", drop: "Не беру" };
   const SHELVES = ["new", "keep", "done", "drop", "reserve"];
@@ -193,7 +199,9 @@ const Editor = (() => {
       b.querySelector(".ed-sdot").dataset.s = c.review_status || "";
       b.querySelector(".ed-sbtn-l").textContent = STATUS[c.review_status || ""];
     });
-    $("edWhy").innerHTML = c.reason ? `<b>Чому:</b> ${esc(c.reason)}` : "";
+    const sig = (c.signals || []).filter((k) => SIGNALS[k])
+      .map((k) => `<span class="ed-sig" title="${esc(SIGNALS[k][1])}">${esc(SIGNALS[k][0])}</span>`).join("");
+    $("edWhy").innerHTML = (sig ? `<span class="ed-sigs">${sig}</span>` : "") + (c.reason ? `<b>Чому:</b> ${esc(c.reason)}` : "");
     $("edStartTc").textContent = fmt(c.start_sec);
     $("edEndTc").textContent = fmt(c.end_sec);
     renderPauses();
