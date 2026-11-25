@@ -34,6 +34,12 @@ const Editor = (() => {
     return Number.isFinite(s) && s > c.start_sec + 1 && s < c.end_sec - 1 ? s : (c.start_sec + c.end_sec) / 2;
   };
   const STORY_PART_MIN = 15;
+  const overlapSec = (a, b) => Math.max(0, Math.min(a.end_sec, b.end_sec) - Math.max(a.start_sec, b.start_sec));
+  /** A short clip counts as «inside» a long story when at least half of it plays there. */
+  const isInside = (c, s) => !isStory(c) && isStory(s) && c.review_status !== "drop" && s.review_status !== "drop" && overlapSec(c, s) >= len(c) / 2;
+  const storyOf = (c) => (c && !isStory(c) ? st.clips.find((s) => isInside(c, s)) || null : null);
+  const insideOf = (s) => (isStory(s) ? st.clips.filter((c) => isInside(c, s)) : []);
+  const clipLink = (c) => `<button type="button" class="ed-golink" data-go="${st.clips.indexOf(c)}">№${c.num} «${esc(c.title)}»</button>`;
 
   function toast(msg, err = false) {
     const t = $("edToast");
@@ -108,7 +114,8 @@ const Editor = (() => {
       li.innerHTML = `<div class="ed-th"><img src="/api/projects/${pid()}/clips/${c.clip_index}/thumbnail?s=${Math.round(c.start_sec * 10)}" alt="" draggable="false" loading="lazy" onerror="this.remove()">
           <span class="ed-num">№${c.num}</span><span class="ed-dur">${durLabel(len(c))}</span>${TIER[c.tier] || ""}${r === "keep" ? '<span class="ed-ok" title="В роботі">✓</span>' : ""}</div>
         <div class="ed-rb"><div class="ed-rt">${esc(c.title)}</div>
-        <div class="ed-rm"><span>${isStory(c) ? `<span class="ed-story-chip" title="Довга історія">📖 ${inParts(c) ? "×2" : "ціла"}</span>` : fmtS(c.start_sec)}${r === "drop" ? " · не беру" : ""}</span><span class="s" title="Місце серед кліпів цього відео (ШІ дав ${esc(c.virality_score)})">★ ${esc(scoreOf(c))}</span></div></div>`;
+        <div class="ed-rm"><span>${isStory(c) ? `<span class="ed-story-chip" title="Довга історія">📖 ${inParts(c) ? "×2" : "ціла"}</span>`
+          : storyOf(c) ? `<span class="ed-in-chip" title="Цей момент є в довгій історії №${storyOf(c).num}">📖 є в №${storyOf(c).num}</span>` : fmtS(c.start_sec)}${r === "drop" ? " · не беру" : ""}</span><span class="s" title="Місце серед кліпів цього відео (ШІ дав ${esc(c.virality_score)})">★ ${esc(scoreOf(c))}</span></div></div>`;
       // step 2 with nothing in work: a clip opens on step 1, where it can be taken «В роботі»
       const pick = () => { if (vxEmpty()) setMode("table"); select(i); };
       li.addEventListener("click", pick);
@@ -225,13 +232,21 @@ const Editor = (() => {
 
   /** «📖 Довга історія»: the «Ціла | 2 частини» switch above the video. */
   function renderStory(c) {
+    const host = storyOf(c);
+    $("edInStory").hidden = !host;
+    $("edInStory").innerHTML = host
+      ? `📖 Цей момент є в довгій історії ${clipLink(host)}. Можна взяти обидва: короткий для охоплення, історію для перегляду до кінця.` : "";
     $("edStory").hidden = !isStory(c);
     if (!isStory(c)) return;
     const cut = splitOf(c);
     $("edStoryWhole").textContent = `${fmtS(len(c))} одним кліпом`;
     $("edStoryParts").textContent = `${fmtS(cut - c.start_sec)} + ${fmtS(c.end_sec - cut)}`;
     $("edStoryView").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === (inParts(c) ? "parts" : "whole"))));
-    $("edStoryNote").textContent = inParts(c) ? "Тягни ✂ на доріжці, щоб змінити місце розрізу" : "Shorts і TikTok беруть до 3 хв";
+    const inner = insideOf(c);
+    const innerTxt = !inner.length ? ""
+      : (inner.length === 1 ? `Всередині короткий кліп ${clipLink(inner[0])}` : `Всередині короткі кліпи ${inner.map(clipLink).join(", ")}`) + " · позначено на доріжці";
+    $("edStoryNote").innerHTML = inParts(c) ? "Тягни ✂ на доріжці, щоб змінити місце розрізу" + (innerTxt ? `. ${innerTxt}` : "")
+      : innerTxt || "Shorts і TikTok беруть до 3 хв";
   }
 
   async function setStory(fields, c = clip()) {
@@ -432,6 +447,12 @@ const Editor = (() => {
       h += `<div class="partlab" style="left:${(p(Math.max(lo, c.start_sec)) + p(cut)) / 2}%">Частина 1 · ${fmtS(cut - c.start_sec)}</div>`;
       h += `<div class="partlab" style="left:${(p(cut) + p(Math.min(hi, c.end_sec))) / 2}%">Частина 2 · ${fmtS(c.end_sec - cut)}</div>`;
     }
+    insideOf(c).forEach((x) => { // a short clip that already covers part of this story
+      const a = Math.max(lo, x.start_sec), b = Math.min(hi, x.end_sec);
+      if (b <= a) return;
+      h += `<div class="inband" style="left:${p(a)}%;width:${p(b) - p(a)}%" title="Короткий кліп №${x.num} «${esc(x.title)}»"></div>`
+        + `<div class="inbandl" style="left:${p(a)}%">№${x.num}</div>`;
+    });
     h += `<div class="zph" id="edZph"></div>`;
     hidePhraseCard(true);
     T.innerHTML = h;
@@ -1569,6 +1590,10 @@ const Editor = (() => {
       toast("Готуємо відео…");
       download(`/api/projects/${pid()}/clips/${clip().clip_index}/download?part=${b.dataset.part}`);
     });
+    ["edInStory", "edStoryNote"].forEach((id) => $(id).addEventListener("click", (e) => { // «№2 «…»»: open that clip
+      const b = e.target.closest("[data-go]");
+      if (b) select(Number(b.dataset.go));
+    }));
     $("edStoryView").addEventListener("click", (e) => {
       const b = e.target.closest("button[data-v]");
       if (b && clip() && clip().story_view !== b.dataset.v) setStory({ story_view: b.dataset.v });

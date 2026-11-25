@@ -74,3 +74,29 @@ def test_part_label_on_the_phone_and_home_option(page, studio, story_project):
     page.select_option("#heroStories", "off")
     assert "історії" not in page.locator("#heroHint").inner_text()
     assert page.errors == []
+
+
+def test_short_clip_inside_a_story_is_marked_both_ways(page, studio, story_project):
+    clips = [
+        {"start": 5.0, "end": 22.0, "score": 80, "title": "Короткий момент", "reason": "Хук."},
+        {"start": 40.0, "end": 60.0, "score": 85, "title": "Митник відкрив валізу", "reason": "Хук."},
+        {"start": 20.0, "end": 110.0, "score": 95, "title": "Історія з митницею", "reason": "Ціла історія.",
+         "kind": "story", "split": 65.0},
+    ]
+    db.save_candidate_clips(PROJECT_ID, clips)
+    open_editor(page, studio)
+    num = page.locator("#edList .ed-row", has_text="Історія з митницею").locator(".ed-num").inner_text()
+    inner = page.locator("#edList .ed-row", has_text="Митник відкрив валізу")
+    assert f"📖 є в {num}" in inner.inner_text()
+    assert "📖 є в" not in page.locator("#edList .ed-row", has_text="Короткий момент").inner_text()  # only 2 s overlap
+
+    inner.click()
+    page.locator("#edInStory").wait_for(state="visible")
+    assert "Історія з митницею" in page.locator("#edInStory").inner_text()
+
+    page.click("#edInStory [data-go]")  # the link opens the story
+    page.locator("#edStory").wait_for(state="visible")
+    assert page.locator("#edInStory").is_hidden()
+    assert "Всередині короткий кліп" in page.locator("#edStoryNote").inner_text()
+    assert page.locator("#edTrack .inband").count() == 1
+    assert page.errors == []
