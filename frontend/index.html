@@ -458,6 +458,18 @@
                 <input type="checkbox" class="set-switch" data-key="gemini.rerank" role="switch"></label>
             </div>
           </div>
+          <div class="set-grp">
+            <h4>Модель ШІ для 🧪 експериментального пошуку</h4>
+            <div class="set-cards" data-key="gemini.experimental_model" id="setExpModel" role="group" aria-label="Модель ШІ для експериментального пошуку"></div>
+            <div class="set-box">
+              <div class="set-line">
+                <div class="set-l"><b>Що зараз доступно твоєму ключу</b><small id="setModelsNote">Ще не перевіряли. Перевірка надсилає один маленький запит кожній моделі.</small></div>
+                <button type="button" class="btn btn-secondary" id="setModelsCheck" onclick="Settings.checkModels()">Перевірити зараз</button>
+              </div>
+              <ul class="set-models" id="setModelsList" aria-live="polite" hidden></ul>
+            </div>
+            <small class="set-note">📼 Класичний пошук робить багато запитів, тому завжди бере швидкі моделі. Сильні моделі мають малий денний ліміт, а експериментальному вистачає 1–2 запитів на відео.</small>
+          </div>
         </div>
 
         <div class="settings-body" data-panel="disk" data-title="Місце на диску" hidden>

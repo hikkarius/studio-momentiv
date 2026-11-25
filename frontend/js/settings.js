@@ -36,7 +36,7 @@ const Settings = (() => {
     });
     if (sheet().hidden) return;
     if (name === "disk") loadDisk();
-    if (name === "ai") { showHardware(); if (keyState === "unknown" && view && view.gemini_key.set) checkSavedKey(); }
+    if (name === "ai") { showHardware(); loadModels(); if (keyState === "unknown" && view && view.gemini_key.set) checkSavedKey(); }
     if (name === "about") showAbout();
     if (name === "safe") loadBackups();
   }
@@ -141,7 +141,8 @@ const Settings = (() => {
     b.dataset.v = String(v);
     b.dataset.extra = "1";
     if (group.classList.contains("set-cards")) {
-      const label = (view.choices.whisper_model.find((c) => c.value === v) || {}).label || String(v);
+      const list = group.id === "setExpModel" ? view.choices.experimental_model : view.choices.whisper_model;
+      const label = (list.find((c) => c.value === v) || {}).label || String(v);
       b.innerHTML = `<b>${escapeHtml(label)}</b><small>Вибрано вручну</small>`;
     } else {
       b.textContent = group.dataset.key === "clips.max_overlap_sec" ? `${v} с` : String(v);
@@ -151,6 +152,7 @@ const Settings = (() => {
 
   function fill() {
     options($("setLang"), view.choices.language);
+    renderModelCards();
     sheet().querySelectorAll("[data-key]").forEach((el) => {
       const v = get(el.dataset.key);
       if (el.classList.contains("set-seg") || el.classList.contains("set-cards")) {
@@ -180,6 +182,72 @@ const Settings = (() => {
       ? `При кожному запуску студії: сміття і файли кліпів, старші за ${days} днів`
       : "Вимкнено. Можна прибирати вручну кнопками вище.";
     renderKey();
+  }
+
+  // ── «Модель ШІ для 🧪 експериментального пошуку» ─────────────────────────────
+
+  function renderModelCards() {
+    const box = $("setExpModel");
+    const list = view.choices.experimental_model || [];
+    const sig = list.map((c) => c.value).join("|");
+    if (box.dataset.sig === sig) return;
+    box.dataset.sig = sig;
+    box.innerHTML = list.map((c) => `<button type="button" data-v="${escapeHtml(c.value)}">` +
+      (c.tag ? `<span class="set-tag">${escapeHtml(c.tag)}</span>` : "") +
+      `<b>${escapeHtml(c.label)}</b><small>${escapeHtml(c.hint)}</small></button>`).join("");
+  }
+
+  const MODEL_ICON = { ok: "✓", busy: "⏳", limit: "⏳", minute: "⏳", paid: "🔒", missing: "✕", bad_key: "!", offline: "!", error: "!" };
+  const MODEL_ROLE = { strong: "сильна", fast: "швидка", fallback: "запасна" };
+
+  function renderModels(check) {
+    const list = $("setModelsList");
+    if (!check || !check.models || !check.models.length) { list.hidden = true; return; }
+    const at = new Date(check.checked_at * 1000);
+    const today = at.toDateString() === new Date().toDateString();
+    const t = at.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
+    $("setModelsNote").textContent = `Перевірено ${today ? "сьогодні" : at.toLocaleDateString("uk-UA", { day: "numeric", month: "long" })} о ${t}. ` +
+      "Стан змінюється протягом дня: «перевантажена» часто минає за годину.";
+    list.innerHTML = check.models.map((m) => {
+      const cls = m.status === "ok" ? "ok" : ["busy", "limit", "minute"].includes(m.status) ? m.status
+        : ["bad_key", "offline", "error"].includes(m.status) ? "bad" : "";
+      const secs = m.status === "ok" && m.seconds != null ? ` · відповідь ${String(m.seconds).replace(".", ",")} с` : "";
+      return `<li class="${cls}"><i aria-hidden="true">${MODEL_ICON[m.status] || "?"}</i><b>${escapeHtml(m.name)}</b>` +
+        `<span class="role">${escapeHtml(MODEL_ROLE[m.role] || "")}</span><span>${escapeHtml(m.text + secs)}</span></li>`;
+    }).join("");
+    list.hidden = false;
+  }
+
+  let modelsLoaded = false;
+  async function loadModels() {
+    if (modelsLoaded) return;
+    try {
+      const res = await fetch("/api/gemini/models");
+      if (!res.ok) return;
+      modelsLoaded = true;
+      renderModels((await res.json()).check);
+    } catch (err) {
+      console.warn("models", err);
+    }
+  }
+
+  async function checkModels() {
+    const btn = $("setModelsCheck");
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = "Перевіряю…";
+    $("setModelsNote").textContent = "Питаю кожну модель. Сильні моделі думають довше, це може тривати до хвилини.";
+    try {
+      const res = await fetch("/api/gemini/models/check", { method: "POST" });
+      if (!res.ok) { showToast(await errorText(res), "error"); $("setModelsNote").textContent = "Не вдалося перевірити."; return; }
+      modelsLoaded = true;
+      renderModels((await res.json()).check);
+    } catch (err) {
+      showToast("Не вдалося зв'язатися зі студією", "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
   }
 
   function options(sel, list) {
@@ -637,5 +705,5 @@ const Settings = (() => {
 
   document.addEventListener("DOMContentLoaded", init);
 
-  return { open, close, setTab, backupNow, saveKey, checkSavedKey, showKeyInput, update, resetAll, cleanJunk, cleanClips, openRemoveDialog, closeRemoveDialog, confirmRemove, fmtBytes, reload: load };
+  return { open, close, setTab, checkModels, backupNow, saveKey, checkSavedKey, showKeyInput, update, resetAll, cleanJunk, cleanClips, openRemoveDialog, closeRemoveDialog, confirmRemove, fmtBytes, reload: load };
 })();

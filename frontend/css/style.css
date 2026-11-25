@@ -1196,3 +1196,4 @@ body:not(.home-empty) .home-how { display: none !important; }
 
 /* Phone: the link field keeps its placeholder on one line */
 @media (max-width: 640px) { .hero-input { font-size: var(--fs-md); } }
+.vc-model { white-space: nowrap; }

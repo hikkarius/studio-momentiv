@@ -27,7 +27,7 @@ from core import (
 )
 from ai_selector import (
     SEARCH_EXPERIMENTAL, EXPERIMENTAL_MAX_CLIPS, GeminiIncompleteError, GeminiQuotaError,
-    find_clips_experimental, rerank_clips, resolve_search_mode,
+    find_clips_experimental, rerank_clips, resolve_search_mode, strong_plan,
 )
 from clip_refiner import refine_clips
 from languages import language_label
@@ -219,7 +219,9 @@ def find_clips_for(
         ai_segments = _mark_hints(project_id, segments, hints)
 
     progress(0.60, (
-        "ШІ читає все відео й шукає найсильніші моменти (експериментальний пошук)..." if experimental
+        ("ШІ читає все відео й шукає найсильніші моменти. Сильна модель думає довше, до кількох хвилин..."
+         if strong_plan() else "ШІ читає все відео й шукає найсильніші моменти (експериментальний пошук)...")
+        if experimental
         else "ШІ-пошук вірусних моментів (Google Gemini)..."
     ))
 
@@ -262,6 +264,7 @@ def find_clips_for(
             raise
         clear_done_windows(project_id)
 
+    ai_model = _main_model(raw_candidates)
     progress(0.85, "Підганяємо межі кліпів під речення...")
     for c in raw_candidates:  # the reaction marks are for the AI only
         for k in ("hook_text", "title", "reason"):
@@ -288,10 +291,22 @@ def find_clips_for(
 
     if app_config.gemini.rerank and len(valid_clips) > 1:
         progress(0.92, "Другий прохід: порівнюємо кліпи між собою...")
-        valid_clips = rerank_clips(valid_clips, filter_mode=canonical_filter, detected_lang=detected_lang)
+        valid_clips = rerank_clips(valid_clips, filter_mode=canonical_filter, detected_lang=detected_lang,
+                                   strong_model=ai_model if experimental else None)
     if hints:
         valid_clips = _apply_signals(valid_clips, hints, boost=experimental)
-    return valid_clips
+    # which Gemini model chose the clips (shown on the video card); clip_ai_model() reads it back
+    return [{**c, "_model": ai_model} for c in valid_clips] if ai_model else valid_clips
+
+
+def _main_model(clips: List[Dict[str, Any]]) -> str:
+    """The model that answered for most of the clips ('' when unknown, e.g. windows saved earlier)."""
+    names = [c.get("_model") for c in clips if isinstance(c.get("_model"), str) and c.get("_model")]
+    return max(set(names), key=names.count) if names else ""
+
+
+def clip_ai_model(clips: List[Dict[str, Any]]) -> str:
+    return _main_model(clips)
 
 
 def _run_analyze_worker_locked(
@@ -382,6 +397,7 @@ def _run_analyze_worker_locked(
         # 4. Save to DB
         db.save_candidate_clips(project_id, valid_clips, keep_reviewed=True)
         db.set_project_search_mode(project_id, mode)
+        db.set_project_ai_model(project_id, clip_ai_model(valid_clips))
         db.update_project_status(project_id, "ready")
 
         broadcast_update(job_id, {

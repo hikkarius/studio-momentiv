@@ -1909,7 +1909,7 @@ SEARCH_CHOICES = [
 _EDITABLE_SETTINGS = {
     "whisper": {"model", "language"},
     "clips": {"default_min_len", "default_max_len", "max_overlap_sec"},
-    "gemini": {"rerank"},
+    "gemini": {"rerank", "experimental_model"},
     "studio": {"default_clips", "default_filter", "default_search", "cleanup_days", "daily_backup", "keep_awake",
                "wait_for_limit"},
 }
@@ -1923,8 +1923,26 @@ def _settings_view() -> Dict[str, Any]:
     return {
         "values": {sec: {k: cfg[sec][k] for k in keys} for sec, keys in _EDITABLE_SETTINGS.items()},
         "gemini_key": {"set": bool(key), "hint": ("…" + key[-4:]) if len(key) >= 8 else ""},
-        "choices": {"whisper_model": WHISPER_MODEL_CHOICES, "language": LANGUAGE_CHOICES, "filter": FILTER_CHOICES, "search": SEARCH_CHOICES},
+        "choices": {"whisper_model": WHISPER_MODEL_CHOICES, "language": LANGUAGE_CHOICES, "filter": FILTER_CHOICES,
+                    "search": SEARCH_CHOICES, "experimental_model": _experimental_model_choices()},
     }
+
+
+def _experimental_model_choices() -> List[Dict[str, str]]:
+    """«Модель ШІ для 🧪 експериментального пошуку»: auto, the strongest free model by name, fast."""
+    from backend.gemini_models import pretty_name
+    from config_loader import app_config
+
+    strong = list(app_config.gemini.strong_models or [])
+    chain = ", далі ".join(pretty_name(m) for m in strong[:3]) or "найсильнішу безкоштовну модель"
+    out = [{"value": "auto", "label": "Авто: найсильніша вільна", "tag": "Рекомендовано",
+            "hint": f"Пробує {chain}. Якщо всі зайняті, бере швидку."}]
+    if strong:
+        out.append({"value": strong[0], "label": pretty_name(strong[0]),
+                    "hint": "Найрозумніша з безкоштовних. Якщо перевантажена, студія чекає до хвилини, потім бере швидку."})
+    out.append({"value": "fast", "label": "Швидка",
+                "hint": "Як у класичному: відповідь за секунди, найбільший денний ліміт."})
+    return out
 
 
 @app.get("/api/settings")
@@ -1954,6 +1972,9 @@ def update_settings(payload: Dict[str, Any]):
     if "studio" in patch and "default_search" in patch["studio"]:
         if patch["studio"]["default_search"] not in {c["value"] for c in SEARCH_CHOICES}:
             raise HTTPException(status_code=400, detail="Невідомий спосіб пошуку.")
+    if "gemini" in patch and "experimental_model" in patch["gemini"]:
+        if patch["gemini"]["experimental_model"] not in {c["value"] for c in _experimental_model_choices()}:
+            raise HTTPException(status_code=400, detail="Невідома модель ШІ.")
     if "whisper" in patch and "language" in patch["whisper"]:
         if not is_supported(str(patch["whisper"]["language"])):
             raise HTTPException(status_code=400, detail="Невідома мова відео.")
@@ -1978,6 +1999,25 @@ def update_settings(payload: Dict[str, Any]):
 class _KeyCheck(BaseModel):
     key: str
     save: bool = True
+
+
+@app.get("/api/gemini/models")
+def gemini_models_last():
+    """The last «Перевірити зараз» result (null before the first check)."""
+    from backend.gemini_models import last_check
+
+    return {"check": last_check()}
+
+
+@app.post("/api/gemini/models/check")
+def gemini_models_check():
+    """One tiny request to each model the studio may use: which ones this key can use right now."""
+    from backend.gemini_models import check_models
+    from config_loader import ensure_gemini_api_key
+
+    if not (ensure_gemini_api_key() or "").strip():
+        raise HTTPException(status_code=400, detail="Спершу додай ключ Gemini.")
+    return {"check": check_models()}
 
 
 @app.post("/api/settings/check-saved-key")

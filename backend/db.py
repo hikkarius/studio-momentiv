@@ -171,6 +171,9 @@ def init_db():
         if "search_mode" not in project_columns:
             # how the current clips were found: classic / experimental ('' = before the switch existed)
             conn.execute("ALTER TABLE projects ADD COLUMN search_mode TEXT NOT NULL DEFAULT '';")
+        if "ai_model" not in project_columns:
+            # the Gemini model that chose the current clips ('' = unknown, before this was saved)
+            conn.execute("ALTER TABLE projects ADD COLUMN ai_model TEXT NOT NULL DEFAULT '';")
         if "source_url" not in project_columns:
             # the link the video was downloaded from ('' = a file from the computer)
             conn.execute("ALTER TABLE projects ADD COLUMN source_url TEXT NOT NULL DEFAULT '';")
@@ -287,6 +290,11 @@ def get_project_source_url(project_id: str) -> str:
 def set_project_search_mode(project_id: str, mode: str) -> None:
     with get_db() as conn:
         conn.execute("UPDATE projects SET search_mode = ? WHERE id = ?", (mode or "", project_id))
+
+
+def set_project_ai_model(project_id: str, model: str) -> None:
+    with get_db() as conn:
+        conn.execute("UPDATE projects SET ai_model = ? WHERE id = ?", (model or "", project_id))
 
 
 def save_candidate_clips(project_id: str, clips: List[Dict[str, Any]], keep_reviewed: bool = False):

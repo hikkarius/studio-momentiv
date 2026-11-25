@@ -33,7 +33,26 @@ const Home = (() => {
     done: ["✓ Розібрано", "done"],
   };
 
+  /** gemini-4-hydrogen → Gemini 4 Hydrogen (same as backend/gemini_models.pretty_name). */
+  function modelName(m) {
+    const r = /^gemini-([0-9.]+)-(.+)$/.exec(m || "");
+    if (!r) return m || "";
+    const rest = r[2].replace("flash-lite", "Flash-Lite").split("-").join(" ")
+      .split(" ").map((w) => (w[0] === w[0].toUpperCase() ? w : w[0].toUpperCase() + w.slice(1))).join(" ");
+    return `Gemini ${r[1]} ${rest}`;
+  }
+
+  /** «🧪 Gemini 4 Hydrogen»: which model chose the clips of an experimental search. */
+  function modelOf(p) {
+    if (p.search_mode !== "experimental" || !p.ai_model) return "";
+    return ` · <span class="vc-model" title="Ця модель ШІ обрала кліпи">🧪 ${escapeHtml(modelName(p.ai_model))}</span>`;
+  }
+
   function metaOf(p, st) {
+    return metaBase(p, st) + (st === "busy" || st === "failed" || st === "empty" ? "" : modelOf(p));
+  }
+
+  function metaBase(p, st) {
     const total = p.clips_count || 0;
     const reviewed = p.reviewed_count || 0;
     const kept = p.kept_count || 0;
