@@ -41,7 +41,7 @@ RENDER_VERSION = 5  # bump to invalidate every cached vertical file after a rend
 # One render at a time: the GPU encoder and the face detector share the laptop.
 RENDER_LOCK = threading.Lock()
 
-FRAME_MODES = ("auto", "track", "blur", "split", "center")
+FRAME_MODES = ("auto", "track", "blur", "split", "center", "stream")  # stream: webcam + game (streamer.py)
 
 
 # ─── 1. Caption styles ────────────────────────────────────────────────────────
@@ -484,16 +484,17 @@ def build_ass(
 @dataclass
 class Layout:
     """How to turn the 16:9 frame into 9:16. Coordinates are fractions of the source frame."""
-    kind: str                                   # track | split | blur | center
+    kind: str                                   # track | split | blur | center | stream
     keyframes: List[Tuple[float, float]] = field(default_factory=list)  # (t, crop centre x) for track/center
     split: List[Tuple[float, float, float]] = field(default_factory=list)  # [(cx, cy, h)] top, bottom for split
     faces_found: float = 0.0                    # share of samples with a face
     note: str = ""
+    stream: Dict[str, Any] = field(default_factory=dict)  # streamer.plan() for kind=stream
 
     def to_dict(self) -> Dict[str, Any]:
         return {"kind": self.kind, "keyframes": [[round(t, 2), round(x, 4)] for t, x in self.keyframes],
                 "split": [[round(a, 4), round(b, 4), round(c, 4)] for a, b, c in self.split],
-                "faces_found": round(self.faces_found, 2), "note": self.note}
+                "faces_found": round(self.faces_found, 2), "note": self.note, "stream": self.stream}
 
 def probe_size(path: str) -> Tuple[int, int]:
     out = subprocess.run(
@@ -777,7 +778,10 @@ def _x_expr(keys: Sequence[Tuple[float, float]], src_w: int, crop_px: int) -> st
 def video_filter(layout: Layout, src_w: int, src_h: int, ass_name: Optional[str], fonts_rel: str) -> str:
     """filter_complex string producing [v] (1080×1920, 30 fps, optional burned subtitles)."""
     even = lambda v: max(2, int(v) // 2 * 2)
-    if layout.kind == "blur":
+    if layout.kind == "stream":
+        import streamer
+        chain = streamer.video_filter(layout.stream, src_w, src_h, OUT_FPS)
+    elif layout.kind == "blur":
         chain = (
             f"[0:v]split=2[bga][fga];"
             f"[bga]scale={OUT_W}:{OUT_H}:force_original_aspect_ratio=increase,crop={OUT_W}:{OUT_H},boxblur=25:2,eq=brightness=-0.08[bg];"
@@ -885,7 +889,8 @@ def render_vertical(
 DEFAULT_OPTS: Dict[str, Any] = {"style": DEFAULT_STYLE, "frame": "auto", "pos": None, "hook": False, "edits": {},
                                 "size": 1.0, "color": None, "text": None,
                                 "hook_text": None, "hook_style": "white", "hook_size": 1.0, "hook_full": False,
-                                "round": False, "stroke": None, "hook_round": False, "hook_stroke": None, "hook_pos": None}
+                                "round": False, "stroke": None, "hook_round": False, "hook_stroke": None, "hook_pos": None,
+                                "stream_look": None}
 # Colour presets offered in the editor (RGB hex). None = the style's own colour.
 ACCENT_COLORS = ("FFE14D", "7CFF4F", "FF4D4D", "4DC3FF", "FF5EC4", "E6C068", "FF9F1C")
 TEXT_COLORS = ("FFFFFF", "FFE14D", "FFF8EC")
@@ -907,6 +912,9 @@ def normalize_opts(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     except (TypeError, ValueError):
         o["pos"] = None
     o["hook"] = bool(raw.get("hook", False))
+    if isinstance(raw.get("stream_look"), dict):  # «Стрім»: this clip's own look instead of the video's
+        import streamer
+        o["stream_look"] = streamer.clean_look(raw["stream_look"])
 
     def num(key: str, lo: float, hi: float) -> float:
         try:

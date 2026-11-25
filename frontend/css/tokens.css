@@ -19,6 +19,8 @@
   --warn: #fbbf24; --warn-rgb: 251 191 36;
   --info: #5b8def; --info-rgb: 59 130 246; --info-soft: #18233a; --info-text: #9cc4f0;
   /* clip statuses: Нове / В роботі / Виконано / Не беру / Запас */
+  /* streamer mode: the webcam frame */
+  --cam: #a77bff; --cam-ink: #120826;
   --st-new: #34312c; --st-keep: var(--accent); --st-done: var(--info); --st-drop: var(--danger); --st-reserve: var(--faint);
   /* fixed colours: on top of video and pictures */
   --white: #fff; --black: #000; --scrim-rgb: 0 0 0;
@@ -45,7 +47,7 @@
     --danger: #c2334a; --danger-rgb: 194 51 74; --danger-soft: #f8dde2; --danger-text: #b3261e;
     --ok-solid: #1b7f4b; --danger-solid: #c2334a; --info-solid: #2f6fd6;
     --info: #2f6fd6; --info-soft: #dce7fb; --info-text: #1d4ed8;
-    --st-new: #b5bcc2;
+    --st-new: #b5bcc2; --cam: #6d3fd6; --cam-ink: #ffffff;
     --shadow: 0 1px 2px rgba(17, 21, 24, .06), 0 4px 14px rgba(17, 21, 24, .05); --pop-shadow: 0 8px 24px rgba(17, 21, 24, .18);
     color-scheme: light;
   }
@@ -61,7 +63,7 @@
   --danger: #c2334a; --danger-rgb: 194 51 74; --danger-soft: #f8dde2; --danger-text: #b3261e;
   --ok-solid: #1b7f4b; --danger-solid: #c2334a; --info-solid: #2f6fd6;
   --info: #2f6fd6; --info-soft: #dce7fb; --info-text: #1d4ed8;
-  --st-new: #b5bcc2;
+  --st-new: #b5bcc2; --cam: #6d3fd6; --cam-ink: #ffffff;
   --shadow: 0 1px 2px rgba(17, 21, 24, .06), 0 4px 14px rgba(17, 21, 24, .05); --pop-shadow: 0 8px 24px rgba(17, 21, 24, .18);
   color-scheme: light;
 }

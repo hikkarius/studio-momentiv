@@ -63,6 +63,7 @@ def isolate_test_database(tmp_path, monkeypatch):
 
     monkeypatch.setattr(transcription, "transcript_cache_dir", _test_cache_dir)
     monkeypatch.setattr(storage, "_RENDER_TMP", isolated_root / "render_tmp")
+    monkeypatch.setattr(server, "_fetch_chat", lambda url, dest: 0)  # never download a real chat replay
     # Never ask a real site for the video size from tests (no network); tests that need a size patch it
     monkeypatch.setattr(server, "probe_download_size", lambda url, **kw: None)
     # Nor download a link's audio track (the queue then falls back to the video-only path)

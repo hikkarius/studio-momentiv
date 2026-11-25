@@ -216,6 +216,13 @@ def _run_analyze_worker_locked(
         if not segments:
             raise RuntimeError("У відео не виявлено мовлення або транскрипція порожня.")
 
+        # A stream recording (webcam found or a chat replay saved): reactions become hints for the AI
+        ai_segments = segments
+        broadcast_update(job_id, {"status": "running", "progress": 0.57, "message": "Перевіряю, чи це запис стріму..."})
+        if _find_webcam_once(project_id, video_path) or os.path.exists(_chat_path(project_id)):
+            broadcast_update(job_id, {"status": "running", "progress": 0.58, "message": "Стрім: шукаю реакції (крик, сміх, чат)..."})
+            ai_segments = _reaction_segments(project_id, video_path, segments)
+
         broadcast_update(job_id, {"status": "running", "progress": 0.60, "message": "ШІ-пошук вірусних моментів (Google Gemini)..."})
 
         # Gemini Virality Selection (raises GeminiUnavailableError with a user-facing message)
@@ -229,7 +236,7 @@ def _run_analyze_worker_locked(
         try:
             raw_candidates = analyze_and_find_clips(
                 client=None,
-                segments=segments,
+                segments=ai_segments,
                 count=request_count,
                 min_len=min_len,
                 max_len=max_len,
@@ -245,6 +252,10 @@ def _run_analyze_worker_locked(
         clear_done_windows(project_id)
 
         broadcast_update(job_id, {"status": "running", "progress": 0.85, "message": "Підганяємо межі кліпів під речення..."})
+        for c in raw_candidates:  # the reaction marks are for the AI only
+            for k in ("hook_text", "title", "reason"):
+                if isinstance(c.get(k), str) and "[реакція:" in c[k]:
+                    c[k] = re.sub(r"\[реакція:[^\]]*\]\s*", "", c[k]).strip()
         # Loose sanity check only: the refiner below snaps short clips out to full sentences
         rough = validate_clips(raw_candidates, proj["duration"], min_len=8, max_len=max_len + 30, tolerance=0)
         valid_clips = refine_clips(
@@ -330,6 +341,46 @@ def _run_analyze_worker_locked(
             err_text += " Натисни «Знайти моменти» ще раз через кілька хвилин: доробимо лише те, чого бракує."
         db.update_project_status(project_id, "failed")
         broadcast_update(job_id, {"status": "failed", "progress": 1.0, "error": err_text, "message": f"Помилка: {err_text}"})
+
+
+def _chat_path(project_id: str) -> str:
+    return os.path.join(OUTPUT_DIR, project_id, "chat.json")
+
+
+def _reaction_segments(project_id: str, source_path: str, segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Transcript copies with «[реакція: ...]» at loud moments and chat spikes (hints for Gemini only)."""
+    try:
+        import reactions
+        loud = reactions.loudness_peaks(source_path)
+        chat = reactions.chat_spikes(reactions.load_chat(_chat_path(project_id)))
+        marked, n = reactions.mark_segments(segments, loud, chat)
+        log.info(f"Reaction hints for {project_id}: {len(loud)} loud, {len(chat)} chat spikes → {n} marked lines")
+        return marked
+    except Exception as e:
+        log.warning(f"Reaction hints skipped for {project_id}: {e}")
+        return segments
+
+
+def _find_webcam_once(project_id: str, source_path: str) -> bool:
+    """Before the AI: is this a stream recording with a webcam? (~5-15 s, once per video; True if a webcam.)
+    Step 2 then switches such videos to «Стрім: вебка + гра» by itself. Never fails the job."""
+    try:
+        path = os.path.join(OUTPUT_DIR, project_id, "stream.json")
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                return bool(json.load(f).get("cam"))
+        if not source_path or not os.path.exists(source_path):
+            return False
+        import streamer
+        found = streamer.detect_webcam(source_path)
+        info = {"cam": found["cam"], "face": found["face"], "w": found["w"], "h": found["h"], "note": found["note"],
+                "auto": True, "look": streamer.clean_look(None), "use": bool(found["cam"])}  # a webcam: «Стрім» on by itself
+        streamer.save_info(path, info)
+        log.info(f"Webcam search for {project_id}: {'found ' + str(found['cam']) if found['cam'] else 'none'}")
+        return bool(found["cam"])
+    except Exception as e:  # OpenCV missing, odd video, ...: step 2 can still search on demand
+        log.warning(f"Webcam search before analysis failed for {project_id}: {e}")
+        return False
 
 
 def enqueue_analyze_job(

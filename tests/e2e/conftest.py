@@ -91,6 +91,10 @@ def studio(tmp_path_factory):
     server.load_transcript_cache = lambda p, **kw: ([], words, "uk")
     subtitles_generator.load_transcript_cache = lambda p, **kw: ([], words, "uk")
     db.init_db()
+    # The test video is no stream: skip the real webcam search the editor starts in the background
+    import streamer
+    saved["detect"] = streamer.detect_webcam
+    streamer.detect_webcam = lambda source, **k: {"cam": None, "face": None, "w": 320, "h": 180, "note": "Вебку не знайдено."}
     # A key is "saved", so the first-run «встав ключ Gemini» screen stays closed in these tests
     saved["key"] = os.environ.get("GEMINI_API_KEY")
     os.environ["GEMINI_API_KEY"] = "e2e-fake-key-" + "x" * 30
@@ -118,6 +122,7 @@ def studio(tmp_path_factory):
     else:
         os.environ["GEMINI_API_KEY"] = saved["key"]
     subtitles_generator.load_transcript_cache = saved["sltc"]
+    streamer.detect_webcam = saved["detect"]
 
 
 @pytest.fixture

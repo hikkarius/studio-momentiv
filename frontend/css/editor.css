@@ -621,3 +621,97 @@
 @media (prefers-reduced-motion: reduce) { #vxHookOn, #vxHookOn::after { transition: none; } }
 #edVx input[type="range"] { min-height: 28px; }
 .theme-menu-btn { min-width: 32px; min-height: 32px; }
+
+/* ── «Стрім: вебка + гра» ── */
+.vx-opts svg .cm { fill: var(--cam); }
+.vx-stream { display: flex; flex-direction: column; gap: 12px; padding: 14px; border-radius: var(--r-lg); border: 1px solid var(--ed-line2); background: var(--ed-panel2); }
+.vx-stream[hidden] { display: none; }
+.vx-camst { margin: 0; font-size: var(--fs-md); line-height: 1.4; color: var(--ed-muted); }
+.vx-camst b { color: var(--ok); }
+.vx-camst b.no { color: var(--warn); }
+.vx-cambtns { display: flex; flex-wrap: wrap; gap: 6px; }
+.vx-cambtns .ed-btn { background: var(--ed-panel); }
+.vx-lay { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.vx-lay button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 9px 4px; border-radius: var(--r-md); border: 1.5px solid var(--ed-line2);
+  background: var(--ed-panel); color: var(--ed-muted); font-size: var(--fs-sm); font-weight: 600; line-height: 1.2; text-align: center; cursor: pointer; }
+.vx-lay button:hover { border-color: var(--ed-muted); }
+.vx-lay button[aria-pressed="true"] { border-color: var(--ed-accent); box-shadow: 0 0 0 1px var(--ed-accent); color: var(--ed-fg); }
+.vx-lay .m { position: relative; display: flex; flex-direction: column; width: 30px; height: 54px; border-radius: 5px; overflow: hidden; border: 1.5px solid currentColor; }
+.vx-lay .m s { display: block; text-decoration: none; }
+.vx-lay .m .c { background: var(--cam); opacity: .75; }
+.vx-lay .m .g { background: var(--ed-accent); opacity: .55; }
+.vx-lay .m .b { background: var(--ed-line); }
+.vx-lay .m .pip { position: absolute; left: 3px; top: 4px; width: 15px; height: 10px; border-radius: 2px; opacity: 1; outline: 1px solid var(--white); }
+.vx-view { flex: none; }
+.vx-view[hidden] { display: none; }
+.vx-fed { position: relative; width: min(100cqw, 100cqh * 16 / 9); aspect-ratio: 16 / 9; border-radius: var(--r-md); overflow: hidden; background: var(--ed-screen); touch-action: none; user-select: none; }
+.vx-fed[hidden] { display: none; }
+.vx-fed canvas { width: 100%; height: 100%; display: block; }
+.vx-camb, .vx-gameb { position: absolute; box-sizing: border-box; }
+.vx-camb { border: 3px solid var(--cam); box-shadow: 0 0 0 1px rgb(var(--scrim-rgb) / .5); cursor: move; z-index: 2; }
+.vx-camb[hidden], .vx-gameb[hidden] { display: none; }
+.vx-gameb { border: 3px dashed var(--ed-accent); background: rgb(var(--accent-rgb) / .06); cursor: ew-resize; z-index: 1; }
+.vx-camb span, .vx-gameb span { position: absolute; left: -3px; top: -27px; padding: 3px 9px; border-radius: 6px 6px 6px 0; font-size: var(--fs-xs); font-weight: 800; letter-spacing: .04em; white-space: nowrap; }
+.vx-camb span { background: var(--cam); color: var(--cam-ink); }
+.vx-gameb span { top: 8px; left: 8px; border-radius: 6px; background: var(--ed-accent); color: var(--ed-accent-ink); }
+.vx-camb i { position: absolute; width: 16px; height: 16px; border-radius: 4px; background: var(--white); border: 2px solid var(--black); }
+.vx-camb i[data-h="nw"] { left: -10px; top: -10px; cursor: nwse-resize; }
+.vx-camb i[data-h="ne"] { right: -10px; top: -10px; cursor: nesw-resize; }
+.vx-camb i[data-h="sw"] { left: -10px; bottom: -10px; cursor: nesw-resize; }
+.vx-camb i[data-h="se"] { right: -10px; bottom: -10px; cursor: nwse-resize; }
+.vx-camb.low span { top: auto; bottom: -27px; border-radius: 0 6px 6px 6px; }
+/* «Стрім»: size, zoom and styling of the webcam and the game */
+.vx-look { display: flex; flex-direction: column; gap: 10px; }
+.vx-look[hidden], .vx-look .vx-row[hidden], .vx-look label[hidden], .vx-look .vx-range[hidden] { display: none; }
+.vx-look input[type="text"] { font: inherit; font-size: var(--fs-md); color: var(--ed-fg); background: var(--ed-panel); border: 1px solid var(--ed-line); border-radius: var(--r-md); padding: 8px 11px; width: 100%; box-sizing: border-box; }
+.vx-corner button { min-width: 44px; font-size: var(--fs-lg); }
+.vx-hint { margin: 0; font-size: var(--fs-sm); line-height: 1.4; color: var(--ed-muted); }
+.vx-lookfoot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid var(--ed-line2); }
+.vx-lookfoot .ed-btn { background: var(--ed-panel); }
+/* «Стрім»: the selection box on the phone (click the webcam or the game) */
+.vx-sel { position: absolute; z-index: 6; border: 2px solid var(--cam); box-shadow: 0 0 0 1px rgb(var(--scrim-rgb) / .6); pointer-events: none; }
+.vx-sel.game { border-color: var(--ed-accent); }
+.vx-sel[hidden] { display: none; }
+.vx-sel i { position: absolute; width: 14px; height: 14px; border-radius: 3px; background: var(--white); border: 2px solid var(--black); }
+/* where each handle sits is set from vertical.js: at the phone's edge they move in, past its rounded corners */
+.vx-selchip { position: absolute; left: 50%; top: 6px; transform: translateX(-50%); display: flex; align-items: center; gap: 7px; white-space: nowrap;
+  padding: 3px 4px 3px 10px; border-radius: var(--r-pill); background: rgb(var(--scrim-rgb) / .82); color: var(--white); font-size: var(--fs-xs); pointer-events: auto; }
+.vx-selchip b { color: var(--accent-text); }
+.vx-selchip button { border: 0; border-radius: var(--r-pill); background: rgb(255 255 255 / .16); color: var(--white); width: 24px; height: 24px; cursor: pointer; font-size: var(--fs-md); }
+.vx-sel.low .vx-selchip { top: auto; bottom: 6px; }
+.vx-sel.attop:not(.low) .vx-selchip { top: 30px; }
+/* nick styles (tiles show what the render draws) */
+.vx-nicks { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+.vx-nicks button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0; border: 0; background: none; cursor: pointer;
+  color: var(--ed-muted); font-size: var(--fs-sm); }
+.vx-nicks button b { font-weight: 600; }
+.vx-nicks button[aria-pressed="true"] { color: var(--ed-fg); }
+.vx-nicks button[aria-pressed="true"] b { font-weight: 800; }
+/* the preview stays dark in both themes, like the subtitle style tiles: the nick sits on a video */
+.vx-nkp { width: 100%; height: 52px; display: flex; align-items: center; justify-content: center; border-radius: var(--r-md);
+  background: linear-gradient(160deg, #3d2b41, #1d1a22); border: 1.5px solid var(--ed-line2); line-height: 1.2; }
+.vx-nicks button:hover .vx-nkp { border-color: var(--ed-muted); }
+.vx-nicks button[aria-pressed="true"] .vx-nkp { border-color: var(--ed-accent); box-shadow: 0 0 0 2px var(--ed-accent); }
+.nk-twitch { background: #9146ff; color: #fff; font: 900 15px "VX Rubik Black", sans-serif; padding: 3px 9px; border-radius: 6px; }
+.nk-neon { color: #fff; font: 900 14px "VX Unbounded", sans-serif; text-shadow: 0 0 4px #00e5ff, 0 0 9px #00e5ff; }
+.nk-pill { background: #fff; color: #111; font: 900 14px "VX Montserrat", sans-serif; padding: 3px 11px; border-radius: 99px; box-shadow: 0 2px 0 #000; }
+.nk-bold { color: #ffd400; font: italic 900 18px "VX Rubik Black", sans-serif; -webkit-text-stroke: 1.5px #000; text-shadow: 2px 2px 0 #000; }
+.nk-tape { background: #ffd400; color: #111; font: 600 16px "VX Oswald", sans-serif; padding: 0 9px; transform: rotate(-4deg); box-shadow: 3px 3px 0 #111; }
+/* «Схоже, це запис стріму» */
+.vx-modal { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: rgb(var(--scrim-rgb) / .6); padding: 16px; }
+.vx-modal[hidden] { display: none; }
+.vx-modal-box { width: min(540px, 100%); background: var(--ed-panel); color: var(--ed-fg); border: 1px solid var(--ed-line); border-radius: var(--r-lg); padding: 22px; box-shadow: 0 20px 60px rgb(var(--scrim-rgb) / .6); }
+.vx-modal-box h3 { margin: 0 0 8px; font-size: var(--fs-xl); }
+.vx-sm-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; font-size: var(--fs-md); }
+.vx-sm-steps li::before { content: "✓"; color: var(--ok); font-weight: 900; margin-right: 8px; }
+.vx-sm-steps li.wait::before { content: "⋯"; color: var(--ed-accent); }
+.vx-sm-bar { height: 8px; border-radius: var(--r-pill); background: var(--ed-panel2); overflow: hidden; margin: 12px 0 4px; }
+.vx-sm-bar[hidden] { display: none; }
+.vx-sm-bar i { display: block; height: 100%; width: 0; background: var(--ed-accent-grad); transition: width .9s linear; }
+.vx-sm-thumb { position: relative; margin: 14px 0 4px; border-radius: var(--r-md); overflow: hidden; }
+.vx-sm-thumb[hidden] { display: none; }
+.vx-sm-thumb canvas { display: block; width: 100%; height: auto; background: var(--black); }
+.vx-sm-box { position: absolute; border: 3px solid var(--cam); }
+.vx-sm-box span { position: absolute; left: -3px; top: -22px; background: var(--cam); color: var(--cam-ink); font-size: var(--fs-xs); font-weight: 800; padding: 2px 8px; border-radius: 5px 5px 5px 0; }
+.vx-sm-btns { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.vx-sm-btns [hidden] { display: none; }
