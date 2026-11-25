@@ -814,3 +814,7 @@
 .vx-tm-row.on { border-color: var(--ed-accent); background: var(--ed-accent-soft); }
 .vx-tm-row > span { flex: 1; }
 @media (max-width: 760px) { .vx-tm-steps, .vx-tm-grid { grid-template-columns: 1fr; } }
+.vx-tplbar .vx-ltpl > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.vx-tplbar .vx-tplrow { flex-wrap: nowrap; }
+.vx-tplbar .vx-tplrow .ed-btn { flex: none; padding-left: 10px; padding-right: 10px; }
+.vx-tplbar .vx-ltpl select { min-width: 96px; }

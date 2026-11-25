@@ -1455,7 +1455,7 @@ const Vertical = (() => {
   function renderTemplates() {
     if (!st.opts) return;
     const cur = tplMatch(st.opts);
-    $("vxTpl").innerHTML = tplOptions(cur, st.templates.length ? "свій вигляд" : "ще немає");
+    $("vxTpl").innerHTML = tplOptions(cur, "Шаблон: немає");
     $("vxTplDel").hidden = !cur;
     const keepSel = $("vxLTpl").value;
     $("vxLTpl").innerHTML = tplOptions(keepSel || (st.templates[0] || {}).name, st.templates.length ? "" : "— ще немає шаблонів —");
