@@ -10,19 +10,6 @@ class FilterMode(StrEnum):
     STORYTELLING = "Емоційні / Історії (Storytelling)"
 
 
-class VideoLanguage(StrEnum):
-    UKRAINIAN = "🇺🇦 Українська (uk)"
-    AUTO = "🌐 Автовизначення"
-    ENGLISH = "🇬🇧 English (en)"
-
-
-LANGUAGE_CODE_MAP: dict[str, str] = {
-    VideoLanguage.UKRAINIAN: "uk",
-    VideoLanguage.AUTO: "auto",
-    VideoLanguage.ENGLISH: "en",
-}
-LANGUAGE_CHOICES: list[str] = [lang.value for lang in VideoLanguage]
-
 FILTER_INSTRUCTIONS: dict[str, str] = {
     FilterMode.VIRAL_HOOKS: (
         "Шукай найбільш вірусні, гострі моменти з потужним хуком у перші 3-5 секунд: "
@@ -39,10 +26,6 @@ FILTER_INSTRUCTIONS: dict[str, str] = {
 }
 
 FILTER_MODES: list[str] = [m.value for m in FilterMode]
-
-MIN_CLIP_DURATION: int = 15
-MAX_CLIP_DURATION: int = 90
-
 
 def resolve_filter_mode(val: str | None) -> FilterMode:
     """Resolves CLI/UI alias or raw string to a canonical FilterMode."""

@@ -60,22 +60,6 @@ body {
   letter-spacing: -0.02em;
 }
 
-.badge-pro {
-  font-size: var(--fs-xs);
-  background: var(--accent-orange);
-  color: var(--accent-ink);
-  padding: 2px 7px;
-  border-radius: var(--r-sm);
-  font-weight: 900;
-  margin-left: 6px;
-  vertical-align: middle;
-}
-
-.brand-subtitle {
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-}
-
 /* ── Container ────────────────────────────────────────────────────────────── */
 .studio-container {
   max-width: 1440px;
@@ -149,51 +133,7 @@ body {
   color: var(--text-main);
 }
 
-.tab-content {
-  display: none;
-}
-
-.tab-content.active {
-  display: block;
-}
-
-/* ── Dropzone ─────────────────────────────────────────────────────────────── */
-.dropzone {
-  border: 2px dashed rgb(var(--tint) / 0.15);
-  border-radius: var(--r-md);
-  padding: 36px 20px;
-  text-align: center;
-  cursor: pointer;
-  background: rgb(var(--tint) / 0.015);
-  transition: all 0.2s;
-}
-
-.dropzone:hover {
-  border-color: var(--accent-orange);
-  background: rgb(var(--accent-rgb) / 0.03);
-}
-
-.upload-icon {
-  font-size: var(--fs-3xl);
-  display: block;
-  margin-bottom: 12px;
-}
-
-.upload-title {
-  font-size: var(--fs-md);
-  font-weight: 600;
-  margin-bottom: 6px;
-}
-
-.upload-hint {
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-}
-
-.url-input-group {
-  display: flex;
-  gap: 12px;
-}
+/* ── Inputs ───────────────────────────────────────────────────────────────── */
 
 .input-text {
   flex: 1;
@@ -691,74 +631,7 @@ body {
   flex-shrink: 0;
 }
 
-/* ── History Card & Sessions Drawer ────────────────────────────────────────── */
-.history-card {
-  margin-bottom: 24px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--r-md);
-  overflow: hidden;
-}
-
-.history-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 20px;
-  cursor: pointer;
-  user-select: none;
-  background: rgb(var(--tint) / 0.02);
-  transition: background 0.2s ease;
-}
-
-.history-header:hover {
-  background: rgb(var(--tint) / 0.04);
-}
-
-.history-title-wrap {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.history-icon {
-  font-size: var(--fs-xl);
-}
-
-.history-title-wrap h2 {
-  font-size: var(--fs-lg);
-  font-weight: 700;
-  color: var(--text-main);
-  margin: 0;
-}
-
-.history-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.history-hint {
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-}
-
-.history-toggle-arrow {
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-  transition: transform 0.2s ease;
-}
-
-.history-content {
-  padding: 12px 20px 20px 20px;
-  border-top: 1px solid var(--border-color);
-}
-
-.history-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 12px;
-}
+/* ── Video cards ──────────────────────────────────────────────────────────── */
 
 .history-item {
   background: var(--bg-card-alt);
@@ -845,77 +718,7 @@ body {
   text-overflow: ellipsis;
 }
 
-.history-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-  margin-top: 3px;
-}
-
-.history-clips-badge {
-  background: rgb(var(--accent-rgb) / 0.15);
-  color: var(--orange-text);
-  padding: 1px 6px;
-  border-radius: var(--r-sm);
-  font-weight: 600;
-}
-
-.history-clips-badge.empty {
-  background: rgb(var(--tint) / 0.06);
-  color: var(--text-muted);
-}
-
-.history-status-tag {
-  font-size: var(--fs-xs);
-  padding: 1px 5px;
-  border-radius: 3px;
-  text-transform: uppercase;
-  font-weight: 700;
-}
-
-.history-status-tag.ready {
-  background: rgb(var(--ok-rgb) / 0.15);
-  color: var(--accent-emerald);
-}
-
-.history-status-tag.uploaded {
-  background: rgb(var(--info-rgb) / 0.15);
-  color: var(--accent-blue);
-}
-
-.history-status-tag.analyzing {
-  background: rgb(var(--warn-rgb) / 0.15);
-  color: var(--accent-amber);
-}
-
-.history-item-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.btn-history-delete {
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: var(--r-sm);
-  font-size: var(--fs-sm);
-  line-height: 1;
-  transition: all 0.2s ease;
-}
-
-.btn-history-delete:hover {
-  background: rgb(var(--danger-rgb) / 0.2);
-  color: var(--danger);
-  border-color: rgb(var(--danger-rgb) / 0.4);
-}
-
-/* ── Action Grid & Dual Engine Selector ────────────────────────────────────── */
+/* ── Action grid ──────────────────────────────────────────────────────────── */
 .action-controls-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -929,119 +732,6 @@ body {
   }
 }
 
-.engine-selector {
-  width: 100%;
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.engine-label {
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--text-main);
-}
-
-.engine-options {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-}
-
-@media (max-width: 768px) {
-  .engine-options {
-    grid-template-columns: 1fr;
-  }
-}
-
-.engine-option {
-  cursor: pointer;
-  display: block;
-}
-
-.engine-option input[type="radio"] {
-  display: none;
-}
-
-.engine-card {
-  background: var(--bg-card-alt);
-  border: 1px solid var(--border-color);
-  border-radius: var(--r-sm);
-  padding: 14px;
-  transition: all 0.2s ease;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-}
-
-.engine-card:hover {
-  border-color: rgb(var(--accent-rgb) / 0.4);
-  background: rgb(var(--tint) / 0.03);
-}
-
-.engine-option.active .engine-card {
-  border-color: var(--accent-orange);
-  background: rgb(var(--accent-rgb) / 0.06);
-  box-shadow: 0 0 16px rgb(var(--accent-rgb) / 0.15);
-}
-
-.engine-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.engine-badge {
-  font-size: var(--fs-xs);
-  font-weight: 800;
-  padding: 2px 7px;
-  border-radius: var(--r-sm);
-  letter-spacing: 0.04em;
-}
-
-.engine-badge.fast {
-  background: rgb(var(--accent-rgb) / 0.2);
-  color: var(--orange-text);
-  border: 1px solid rgb(var(--accent-rgb) / 0.4);
-}
-
-.engine-badge.local {
-  background: rgb(var(--ok-rgb) / 0.2);
-  color: var(--accent-emerald);
-  border: 1px solid rgb(var(--ok-rgb) / 0.4);
-}
-
-.engine-dot {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 2px solid var(--border-color);
-  background: transparent;
-  transition: all 0.2s ease;
-}
-
-.engine-option.active .engine-dot {
-  border-color: var(--accent-orange);
-  background: var(--accent-orange);
-  box-shadow: 0 0 8px var(--accent-orange);
-}
-
-.engine-title {
-  font-size: var(--fs-md);
-  font-weight: 700;
-  color: var(--text-main);
-  margin-bottom: 4px;
-}
-
-.engine-desc {
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-  line-height: 1.4;
-}
-
 .btn-start-analyze {
   width: 100%;
   padding: 14px;
@@ -1050,7 +740,7 @@ body {
 }
 
 /* Headings: the condensed display face of the theme */
-.brand-title, .history-title-wrap h2, .card-header h2 { font-family: var(--head-font); font-weight: 400; letter-spacing: .01em; }
+.brand-title, .card-header h2 { font-family: var(--head-font); font-weight: 400; letter-spacing: .01em; }
 
 /* ── Toast ────────────────────────────────────────────────────────────────── */
 .toast {
@@ -1363,7 +1053,6 @@ body {
 .videos-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .videos-head h2 { font-family: var(--head-font); font-weight: 400; font-size: var(--fs-md); letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .videos-head h2 span { font-family: "JetBrains Mono", monospace; font-size: var(--fs-sm); }
-.videos-hint { color: var(--text-muted); font-size: var(--fs-sm); }
 .videos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
 .video-card { position: relative; display: block; padding: 0; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--r-md); overflow: hidden; transition: border-color .15s, transform .15s; }
 .video-card:hover { border-color: var(--accent-orange); transform: translateY(-2px); }

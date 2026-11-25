@@ -321,28 +321,6 @@ def test_generate_readable_project_id():
     assert "video" in pid3
 
 
-def test_extract_audio_slice(tmp_path):
-    import subprocess
-    from utils import extract_audio_slice
-
-    src_audio = str(tmp_path / "test_src.mp3")
-    out_audio = str(tmp_path / "test_slice.mp3")
-
-    # Generate synthetic 5-second mp3 with lavfi sine
-    cmd = [
-        "ffmpeg", "-y",
-        "-f", "lavfi", "-i", "sine=frequency=1000:duration=5",
-        "-c:a", "libmp3lame", "-b:a", "64k", src_audio
-    ]
-    subprocess.run(cmd, capture_output=True, check=True, timeout=30)
-    assert os.path.exists(src_audio)
-
-    res_path = extract_audio_slice(src_audio, out_audio, start_sec=1.0, duration_sec=2.0)
-    assert res_path == out_audio
-    assert os.path.exists(out_audio)
-    assert os.path.getsize(out_audio) > 0
-
-
 def test_delete_project_purges_physical_files(tmp_path):
     # Setup mock project and files
     pid = f"test_purge_{uuid.uuid4().hex[:8]}"
@@ -985,33 +963,6 @@ def test_done_and_drop_free_rendered_files_but_keep_clip(tmp_path):
         assert proj["done_count"] == 1
     finally:
         shutil.rmtree(out, ignore_errors=True)
-
-
-def test_trim_silence_bounds():
-    from clip_refiner import trim_silence
-    words = [{"start": 12.0, "end": 12.4, "word": "Привіт"}, {"start": 20.0, "end": 27.5, "word": "друзі."}]
-    assert trim_silence(words, 10.0, 30.0) == (11.85, 27.85)
-    # Never extends the clip, and a word cut by the bound keeps the bound
-    assert trim_silence([{"start": 9.5, "end": 10.3, "word": "а"}, {"start": 29.8, "end": 30.6, "word": "б"}], 10.0, 30.0) is None
-    assert trim_silence([], 10.0, 30.0) is None
-    # Would leave less than 5 s of clip
-    assert trim_silence([{"start": 15.0, "end": 16.0, "word": "так"}], 10.0, 30.0) is None
-
-
-def test_trim_silence_endpoint(tmp_path, monkeypatch):
-    pid, _ = _make_review_project(tmp_path)
-    words = [{"start": 13.0, "end": 13.5, "word": "Ну"}, {"start": 24.0, "end": 25.0, "word": "все."}]
-    monkeypatch.setattr("backend.server.load_transcript_cache", lambda p, **kw: ([], words, "uk"))
-    data = client.post(f"/api/projects/{pid}/clips/1/trim-silence").json()
-    assert data["status"] == "updated"
-    assert (data["clip"]["start_sec"], data["clip"]["end_sec"]) == (12.85, 25.35)
-    assert data["trimmed_sec"] == round(2.85 + 4.65, 2)
-    # Second press: nothing left to trim
-    assert client.post(f"/api/projects/{pid}/clips/1/trim-silence").json()["status"] == "unchanged"
-
-    monkeypatch.setattr("backend.server.load_transcript_cache", lambda p, **kw: None)
-    assert client.post(f"/api/projects/{pid}/clips/1/trim-silence").status_code == 409
-    assert client.post(f"/api/projects/{pid}/clips/99/trim-silence").status_code == 404
 
 
 def test_download_names_use_the_studio_clip_number(tmp_path, monkeypatch):

@@ -537,9 +537,6 @@ def delete_project(project_id: str) -> bool:
 # ─── Processing queue ────────────────────────────────────────────────────────
 
 QUEUE_ACTIVE = ("downloading", "analyzing")
-QUEUE_FINISHED = ("done", "failed")
-
-
 def add_queue_item(
     item_id: str,
     source_url: str = "",

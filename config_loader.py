@@ -123,7 +123,6 @@ def _load_app_config() -> AppConfig:
     return base
 
 
-load_config = _load_app_config
 app_config: AppConfig = _load_app_config()
 CONFIG: dict = app_config.model_dump()
 CLIP_INTERVAL_SEC: int = app_config.clips.interval_sec

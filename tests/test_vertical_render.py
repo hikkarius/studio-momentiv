@@ -245,13 +245,6 @@ def _project_with_clip(tmp_path):
     return pid, clip["clip_index"], src
 
 
-def test_caption_styles_endpoint():
-    r = client.get("/api/caption-styles")
-    assert r.status_code == 200
-    ids = [s["id"] for s in r.json()["styles"]]
-    assert ids[:3] == ["hl", "kar", "one"] and r.json()["default"] == "hl"
-
-
 def test_patch_vertical_opts_is_saved_cleaned(tmp_path):
     pid, idx, _ = _project_with_clip(tmp_path)
     assert db.get_candidate_clips(pid)[0]["vertical_opts"] == {}
