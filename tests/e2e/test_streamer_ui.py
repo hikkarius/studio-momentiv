@@ -190,7 +190,8 @@ def test_stream_sizes_zoom_phone_drag_and_styling(page, studio, project, monkeyp
                {"layout": "pip", "pip_w": 1.0, "pip_x": 1, "pip_y": 0.4, "round": True, "frame": "none"},
                {"layout": "pip", "pip_w": 0.6, "pip_x": 1, "pip_y": 1, "nick": "lebiga", "nick_style": "neon"},
                {"layout": "pip", "game_w": 0.8, "game_cx": 0.3, "game_cy": 0.7, "game_zoom": 1.4, "game_x": 0.7},
-               {"layout": "pip", "game_w": 1.7, "game_cx": 1.6, "game_cy": -0.2}):
+               {"layout": "pip", "game_w": 1.7, "game_cx": 1.6, "game_cy": -0.2},
+               {"layout": "full", "divider": True, "nick": "lebiga", "full_win": {"cam_w": 0.55, "cam_x": 1, "cam_y": 0.7, "game_w": 1.4, "game_cy": 0.3}}):
         full = {**streamer.LOOK_DEFAULT, **lk}
         js = page.evaluate("(lk) => Vertical.twin(lk)", full)
         _same_plan(js, streamer.plan(CAM, [0.17, 0.78], 320, 180, full))
@@ -274,3 +275,95 @@ def test_stream_sizes_zoom_phone_drag_and_styling(page, studio, project, monkeyp
     page.wait_for_function("Vertical.state().look.game_zoom === 1 && Vertical.state().look.pip_w === 0.48")
     assert look()["nick"] == "lebiga" and look()["layout"] == "pip"
     assert page.errors == []
+
+
+def test_webcam_and_whole_game_are_windows(page, studio, project, monkeypatch):
+    """«Вебка + вся гра»: webcam full width on top, the game under it; both move and resize like in «Гра на весь екран»."""
+    monkeypatch.setattr(streamer, "detect_webcam",
+                        lambda source, **k: {"cam": CAM, "face": [0.17, 0.78], "w": 320, "h": 180, "note": ""})
+    keep_first_clip()
+    open_editor(page, studio)
+    page.click("#edMode button[data-m='vx']")
+    page.wait_for_function("document.getElementById('vxSmTitle').textContent.includes('Схоже')", timeout=20000)
+    page.click("#vxSmOk")
+    vx_tab(page, "frame")
+    page.wait_for_function("Vertical.state().layout === 'stream' && !!Vertical.state().cam", timeout=20000)
+    page.click("#vxLay button[data-v='full']")
+    page.wait_for_function("Vertical.state().stream.layout === 'full'")
+    page.evaluate("document.getElementById('edVideo').pause()")
+    box = page.locator("#vxCanvas").bounding_box()
+    k = box["height"] / 1920
+    at = lambda x, y: (box["x"] + x * k, box["y"] + y * k)  # noqa: E731
+    g, c = page.evaluate("Vertical.state().stream.parts.map(p => p.dst)")
+    assert c[:3] == [0, 0, 1080] and abs(g[1] - c[3]) <= 1
+
+    # the game: select, drag it down; the webcam stays
+    mid = (540, g[1] + g[3] / 2)
+    page.mouse.click(*at(*mid))
+    page.wait_for_function("document.getElementById('vxSelName').textContent === 'Гра'")
+    assert "ширини" in page.locator("#vxSelPct").inner_text()
+    page.mouse.move(*at(*mid))
+    page.mouse.down()
+    page.mouse.move(*at(mid[0], mid[1] + 250), steps=5)
+    page.mouse.up()
+    page.wait_for_function(f"Vertical.state().stream.parts[0].dst[1] > {g[1] + 200}")
+    assert page.evaluate("Vertical.state().stream.parts[1].dst") == c
+    page.wait_for_timeout(300)
+    fw = json.loads(server._stream_path(PROJECT_ID).read_text(encoding="utf-8"))["look"]["full_win"]
+    assert fw["game_cy"] > 0.5 and fw["cam_w"] == 1.0
+
+    # the webcam: select, pull its bottom-right corner in → a smaller window
+    page.mouse.click(*at(540, c[3] / 2))
+    page.wait_for_function("document.getElementById('vxSelName').textContent.startsWith('Вебка')")
+    hb = page.locator("#vxSel i[data-h='se']").bounding_box()
+    page.mouse.move(hb["x"] + 7, hb["y"] + 7)
+    page.mouse.down()
+    page.mouse.move(*at(600, c[3] / 2), steps=6)
+    page.mouse.up()
+    page.wait_for_function("Vertical.state().stream.parts[1].dst[2] < 700")
+    # «↺» puts the webcam back; the game keeps its place
+    gy = page.evaluate("Vertical.state().stream.parts[0].dst[1]")
+    page.click("#vxSelReset")
+    page.wait_for_function("Vertical.state().stream.parts[1].dst[2] === 1080")
+    assert page.evaluate("Vertical.state().stream.parts[0].dst[1]") == gy
+
+
+def test_snapping_and_undo(page, studio, project, monkeypatch):
+    """Moving a window snaps it to the middle (a guide line shows); Ctrl+Z / Ctrl+Shift+Z undo and redo."""
+    monkeypatch.setattr(streamer, "detect_webcam",
+                        lambda source, **k: {"cam": CAM, "face": [0.17, 0.78], "w": 320, "h": 180, "note": ""})
+    keep_first_clip()
+    open_editor(page, studio)
+    page.click("#edMode button[data-m='vx']")
+    page.wait_for_function("document.getElementById('vxSmTitle').textContent.includes('Схоже')", timeout=20000)
+    page.click("#vxSmOk")
+    vx_tab(page, "frame")
+    page.wait_for_function("Vertical.state().layout === 'stream' && !!Vertical.state().cam", timeout=20000)
+    page.click("#vxLay button[data-v='pip']")
+    page.wait_for_function("Vertical.state().stream.layout === 'pip'")
+    assert page.locator("#vxUndo").is_disabled() is False  # switching the layout is one step back already
+    page.evaluate("document.getElementById('edVideo').pause()")
+    box = page.locator("#vxCanvas").bounding_box()
+    k = box["height"] / 1920
+    at = lambda x, y: (box["x"] + x * k, box["y"] + y * k)  # noqa: E731
+    c = page.evaluate("Vertical.state().stream.parts[1].dst")
+    before = page.evaluate("Vertical.state().look.pip_x")
+    mid = (c[0] + c[2] / 2, c[1] + c[3] / 2)
+    page.mouse.click(*at(*mid))
+    page.mouse.move(*at(*mid))
+    page.mouse.down()
+    # near the middle of the phone (a few px off): it snaps exactly onto it, with a vertical guide line
+    page.mouse.move(*at(540 + 10, mid[1] + 300), steps=8)
+    assert page.locator("#vxGuides i.v").count() >= 1
+    page.mouse.up()
+    assert page.locator("#vxGuides i").count() == 0
+    page.wait_for_function("(() => { const d = Vertical.state().stream.parts[1].dst; return Math.abs(d[0] + d[2] / 2 - 540) <= 1; })()")
+
+    page.locator("#vxCanvas").focus()
+    page.keyboard.press("Control+z")
+    page.wait_for_function(f"Math.abs(Vertical.state().look.pip_x - {before}) < 0.001")
+    page.keyboard.press("Control+Shift+z")
+    page.wait_for_function(f"Math.abs(Vertical.state().look.pip_x - {before}) > 0.05")
+    assert page.locator("#vxRedo").is_disabled()
+    page.click("#vxUndo")
+    page.wait_for_function(f"Math.abs(Vertical.state().look.pip_x - {before}) < 0.001")

@@ -42,6 +42,8 @@ LOOK_DEFAULT: Dict[str, Any] = {
     "pip_x": 0.04, "pip_y": 0.035, "pip_w": 0.48,             # «Гра на весь екран»: the window, fractions of the phone
     "game_w": None, "game_cx": 0.5, "game_cy": 0.5,           # «Гра на весь екран»: the game as a window too (None = whole
                                                               # phone); its width and centre in phone widths/heights
+    "full_win": None,  # «Вебка + вся гра»: both pictures are windows; None = webcam full width on top, the game under it.
+                       # Moved: {"cam_w", "cam_x", "cam_y", "game_w", "game_cx", "game_cy"} (same units as above)
     "round": False, "frame": "white", "divider": False,
     "nick": "", "nick_style": "twitch", "nick_x": None, "nick_y": None,  # nick_x/y: top-left on the phone (None = auto)
 }
@@ -241,6 +243,24 @@ def clean_cam(cam: Any) -> Optional[List[float]]:
 
 # ─── 2. Layout plan ───────────────────────────────────────────────────────────
 
+FULL_WIN_RANGES = {"cam_w": (0.25, 1.0), "cam_x": (0.0, 1.0), "cam_y": (0.0, 1.0),
+                   "game_w": (0.2, 4.0), "game_cx": (-1.0, 2.0), "game_cy": (-1.0, 2.0)}
+
+
+def _clean_full_win(v: Any) -> Optional[Dict[str, float]]:
+    """«Вебка + вся гра» windows the user moved: only known keys, in range; nothing left → None (the preset)."""
+    if not isinstance(v, dict):
+        return None
+    out: Dict[str, float] = {}
+    for k, (lo, hi) in FULL_WIN_RANGES.items():
+        try:
+            if v.get(k) is not None:
+                out[k] = round(_clamp(float(v[k]), lo, hi), 4)
+        except (TypeError, ValueError):
+            pass
+    return out or None
+
+
 def clean_look(raw: Any, base: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """User-sent look (may be partial) over `base` (default LOOK_DEFAULT) → every key, in range."""
     o = dict(LOOK_DEFAULT)
@@ -275,6 +295,8 @@ def clean_look(raw: Any, base: Optional[Dict[str, Any]] = None) -> Dict[str, Any
     num("game_cy", -1.0, 2.0)
     num("nick_x", 0.0, 1.0, True)
     num("nick_y", 0.0, 1.0, True)
+    if "full_win" in raw:
+        o["full_win"] = _clean_full_win(raw["full_win"])
     if raw.get("nick_style") in NICK_STYLES:
         o["nick_style"] = raw["nick_style"]
     num("pip_x", 0.0, 1.0)
@@ -346,30 +368,41 @@ def plan(cam: Optional[Sequence[float]], face: Optional[Sequence[float]], src_w:
     if layout == "game":
         parts.append(part("game", _fit(OUT_W / OUT_H, frame, game_focus, lk["game_zoom"], 0.5), (0, 0, OUT_W, OUT_H)))
         nick_at = NICK_TOP
-    elif layout in ("top", "full"):
+    elif layout == "top":
         ch = _even(OUT_H * share)
         parts.append(part("cam", _fit(OUT_W / ch, cb, f, lk["cam_zoom"]), (0, 0, OUT_W, ch)))
-        if layout == "top":
-            gh = OUT_H - ch
-            parts.append(part("game", _fit(OUT_W / gh, frame, game_focus, lk["game_zoom"], 0.5), (0, ch, OUT_W, gh)))
-            pos = round(100 * ch / OUT_H, 1)
-            if lk["divider"]:
-                divider = [0, ch - 3, OUT_W, 6]
-        else:
-            # the whole game, but without the strip where the webcam sits (no blurred streamer in the game)
-            gbox = frame
-            cam_l, cam_r = cam[0], cam[0] + cam[2]
-            if cam_r <= 0.4:
-                gbox = (cam_r * W + 2, 0.0, W - cam_r * W - 2, H)
-            elif cam_l >= 0.6:
-                gbox = (0.0, 0.0, cam_l * W - 2, H)
-            gh = min(_even(OUT_W * gbox[3] / gbox[2]), _even(OUT_H - ch - 260))
-            bg = True
-            parts.append(part("game", _fit(OUT_W / gh, gbox, game_focus, lk["game_zoom"], 0.5), (0, ch, OUT_W, gh)))
-            pos = round(min(85.0, 100 * (ch + gh + 150) / OUT_H), 1)
-            if lk["divider"]:
-                divider = [0, ch - 3, OUT_W, 6]
+        gh = OUT_H - ch
+        parts.append(part("game", _fit(OUT_W / gh, frame, game_focus, lk["game_zoom"], 0.5), (0, ch, OUT_W, gh)))
+        pos = round(100 * ch / OUT_H, 1)
+        if lk["divider"]:
+            divider = [0, ch - 3, OUT_W, 6]
         nick_at = NICK_TOP  # top-left of the webcam: the subtitles sit on the seam
+    elif layout == "full":
+        # two windows: the webcam (full width on top at first) and the whole game under it, without the strip
+        # where the webcam sits (no blurred streamer in the game); both can be resized and moved like in «pip»
+        fw = lk["full_win"] or {}
+        pw = _even(OUT_W * fw.get("cam_w", 1.0))
+        ph = _even(pw * cb[3] / cb[2])
+        px = int(_clamp(fw.get("cam_x", 0.0) * OUT_W, 0, OUT_W - pw))
+        py = int(_clamp(fw.get("cam_y", 0.0) * OUT_H, 0, OUT_H - ph))
+        gbox = frame
+        cam_l, cam_r = cam[0], cam[0] + cam[2]
+        if cam_r <= 0.4:
+            gbox = (cam_r * W + 2, 0.0, W - cam_r * W - 2, H)
+        elif cam_l >= 0.6:
+            gbox = (0.0, 0.0, cam_l * W - 2, H)
+        gw = fw.get("game_w", 1.0)
+        gh0 = OUT_W * gw * gbox[3] / gbox[2]
+        gl = {**lk, "game_w": gw, "game_cx": fw.get("game_cx", 0.5),
+              "game_cy": fw.get("game_cy", (py + ph + gh0 / 2) / OUT_H)}  # right under the webcam
+        game, bg = _game_window(gl, gbox, game_focus)
+        parts.append({**part("game", game["src"], game["dst"]), "win": game["win"]})
+        parts.append(part("cam", _fit(cb[2] / cb[3], cb, f, lk["cam_zoom"]), (px, py, pw, ph)))
+        gd = game["dst"]
+        pos = round(min(85.0, 100 * (max(py + ph, gd[1] + gd[3]) + 150) / OUT_H), 1)  # under both
+        if lk["divider"]:
+            divider = [px, py + ph - 3, pw, 6]
+        nick_at = (px + NICK_TOP[0], py + NICK_TOP[1])
     else:  # pip
         b = PIP_BORDER if color else 0
         pw = min(_even(OUT_W * lk["pip_w"]), OUT_W - 2 * b)
