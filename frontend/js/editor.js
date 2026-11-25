@@ -1183,6 +1183,13 @@ const Editor = (() => {
   }
 
   function postText() { return `${$("edTitle").value}\n\n${$("edCaption").value}\n\n${$("edTags").value}`; }
+  /** Shorts shows only the title (up to 100 characters): the 9:16 hook title, else the clip title, plus #shorts when it fits. */
+  function shortsTitle() {
+    const c = clip();
+    const hook = ((c && c.vertical_opts && c.vertical_opts.hook_text) || $("edTitle").value || "").replace(/\s+/g, " ").trim();
+    const base = hook.length > 100 ? `${hook.slice(0, 99).trimEnd()}…` : hook;
+    return base.length + 8 <= 100 ? `${base} #shorts` : base;
+  }
 
   function copy(text) {
     const done = () => toast("Скопійовано");
@@ -1284,7 +1291,9 @@ const Editor = (() => {
   function init() {
     if (typeof Vertical !== "undefined") {
       const keptCount = () => st.clips.filter((c) => c.review_status === "keep").length;
-      Vertical.attach({ clip, pid, api, patch, toast, download, video, seek, togglePlay, postText, copy, keptCount });
+      const clips = () => st.clips;
+      const openClip = (clipIndex) => { const i = st.clips.findIndex((c) => c.clip_index === clipIndex); if (i >= 0) select(i); };
+      Vertical.attach({ clip, pid, api, patch, toast, download, video, seek, togglePlay, postText, copy, keptCount, clips, openClip });
     }
     document.addEventListener("keydown", onKey);
     document.addEventListener("pointerdown", (e) => { if (st.pop && !e.target.closest(".ed-pop")) closePop(); });
@@ -1431,6 +1440,7 @@ const Editor = (() => {
     $("edCopyCaption").addEventListener("click", () => copy($("edCaption").value));
     $("edCopyTags").addEventListener("click", () => copy($("edTags").value));
     $("edCopyPost").addEventListener("click", () => copy(postText()));
+    $("edCopyShorts").addEventListener("click", () => copy(shortsTitle()));
     $("edMp4").addEventListener("click", () => { toast("Готуємо відео…"); download(`/api/projects/${pid()}/clips/${clip().clip_index}/download`); });
     $("edSrt").addEventListener("click", () => download(`/api/projects/${pid()}/clips/${clip().clip_index}/export-srt`));
     document.querySelectorAll("#edMode button").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.m)));
@@ -1439,10 +1449,12 @@ const Editor = (() => {
     $("vxMp4").addEventListener("click", () => $("edMp4").click());
     $("vxSrt").addEventListener("click", () => $("edSrt").click());
     $("vxCopyPost").addEventListener("click", () => copy(postText()));
+    $("vxCopyShorts").addEventListener("click", () => copy(shortsTitle()));
     // «Вертикальні кліпи»: one settings tab at a time (remembered), «Ще ▾» downloads, previous / next kept clip
     const vxTab = (t) => {
       document.querySelectorAll("#vxTabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.t === t)));
       document.querySelectorAll("#edVx .vx-pane").forEach((p) => { p.hidden = p.dataset.t !== t; });
+      if (t === "hook" && typeof Vertical !== "undefined") Vertical.onHookPane();
       try { localStorage.setItem("studio-vx-tab", t); } catch (_) {}
     };
     let savedTab = "style";

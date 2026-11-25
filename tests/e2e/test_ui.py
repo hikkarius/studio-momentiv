@@ -535,6 +535,62 @@ def test_vertical_title_size_colour_and_scrub(page, studio, project):
     assert not page.errors
 
 
+def test_vertical_title_ideas_pick_and_shorts(page, studio, project):
+    keep_first_clip()
+    open_editor(page, studio)
+    page.click("#edMode button[data-m='vx']")
+    page.wait_for_function("Vertical.state().layout", timeout=20000)
+    idx = page.evaluate("Editor.state().clipIndex")
+    vx_tab(page, "hook")
+    ideas = page.locator("#vxIdeaList .vx-idea")
+    ideas.first.wait_for(timeout=6000)
+    assert ideas.count() == 3
+    assert "питання" in ideas.nth(1).inner_text()
+    ideas.nth(1).click()
+    assert wait_for(page, lambda: (lambda o: o.get("hook") is True and o.get("hook_text") == "Чи можна стати мільйонером чесно?")(clip(idx).get("vertical_opts", {})))
+    assert ideas.nth(1).get_attribute("aria-checked") == "true"
+    assert "мільйонером" in page.locator("#vxHook").inner_text().lower()
+    assert wait_for(page, lambda: db.title_choices()["recent"][:1] == [{"kind": "питання", "text": "Чи можна стати мільйонером чесно?"}])
+    assert clip(idx)["title_variants"][0]["kind"] == "шок"
+    assert not page.errors
+
+
+def test_vertical_list_templates_and_make_all(page, studio, project):
+    for c in sorted(db.get_candidate_clips(PROJECT_ID), key=lambda c: c["start_sec"])[:2]:
+        db.update_clip_fields(PROJECT_ID, c["clip_index"], review_status="keep")
+    for t in db.list_vertical_templates():
+        db.delete_vertical_template(t["name"])
+    open_editor(page, studio)
+    page.click("#edMode button[data-m='vx']")
+    page.wait_for_function("Vertical.state().layout", timeout=20000)
+    # Save the current look as «Подкаст» from the «Стиль» tab
+    vx_tab(page, "style")
+    page.click("#vxStyle button[data-v='one']")
+    page.click("#vxTplSave")
+    page.fill("#vxTplName", "Подкаст")
+    page.click("#vxTplOk")
+    assert wait_for(page, lambda: [t["name"] for t in db.list_vertical_templates()] == ["Подкаст"])
+    assert page.locator("#vxTpl").input_value() == "Подкаст"
+    # «Усі разом»: one row per clip «В роботі»
+    page.click("#vxToList")
+    rows = page.locator("#vxLRows .vx-lrow")
+    rows.first.wait_for()
+    assert rows.count() == 2
+    assert "Не зроблено" in rows.nth(0).inner_text()
+    page.wait_for_function("[...document.querySelectorAll('#vxLRows img')].every((i) => i.complete && i.naturalWidth > 0)", timeout=20000)
+    page.click("#vxLApply")
+    assert wait_for(page, lambda: all(c["vertical_opts"].get("style") == "one" for c in db.get_candidate_clips(PROJECT_ID) if c["review_status"] == "keep"))
+    page.wait_for_function("[...document.querySelectorAll('#vxLRows select')].every((s) => s.value === 'Подкаст')")
+    assert page.locator("#vxLMake").inner_text() == "Зробити 2 незроблені"
+    page.click("#vxLMake")
+    page.wait_for_function("document.querySelectorAll('#vxLRows .vx-lok').length === 2", timeout=180000)
+    assert page.locator("#vxLMake").inner_text() == "Усі зроблені"
+    # The list is remembered; «По одному» goes back to the phone
+    page.click("#vxToOne")
+    assert page.locator("#vxList").is_hidden() and page.locator("#vxPhone").is_visible()
+    assert not page.errors
+
+
 def test_vertical_zip_of_kept_clips(page, studio, project):
     open_editor(page, studio)
     page.keyboard.press("y")

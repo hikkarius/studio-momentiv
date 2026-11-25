@@ -891,6 +891,30 @@ DEFAULT_OPTS: Dict[str, Any] = {"style": DEFAULT_STYLE, "frame": "auto", "pos": 
                                 "hook_text": None, "hook_style": "white", "hook_size": 1.0, "hook_full": False,
                                 "round": False, "stroke": None, "hook_round": False, "hook_stroke": None, "hook_pos": None,
                                 "stream_look": None}
+# The look a named template carries («Подкаст», «Стрім»). Per-clip things (word edits, the title text) stay with the clip.
+TEMPLATE_FIELDS = ("style", "frame", "pos", "hook", "size", "color", "text", "hook_style", "hook_size", "hook_full",
+                   "round", "stroke", "hook_round", "hook_stroke", "hook_pos")
+
+
+def template_of(opts: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Only the template part of clip options, cleaned."""
+    clean = normalize_opts(opts)
+    tpl = {k: clean[k] for k in TEMPLATE_FIELDS}
+    if tpl["frame"] == "stream":
+        del tpl["frame"]  # «Стрім» belongs to the video (its webcam frame), not to a look shared with podcasts
+    return tpl
+
+
+def apply_template(opts: Optional[Dict[str, Any]], template: Dict[str, Any]) -> Dict[str, Any]:
+    """Clip options with the template's look put over them (word edits and the title text kept)."""
+    merged = dict(normalize_opts(opts))
+    look = template_of(template)
+    if (template or {}).get("frame") in (None, "stream"):
+        look.pop("frame", None)  # a template without a frame keeps the clip's own
+    merged.update(look)
+    return normalize_opts(merged)
+
+
 # Colour presets offered in the editor (RGB hex). None = the style's own colour.
 ACCENT_COLORS = ("FFE14D", "7CFF4F", "FF4D4D", "4DC3FF", "FF5EC4", "E6C068", "FF9F1C")
 TEXT_COLORS = ("FFFFFF", "FFE14D", "FFF8EC")

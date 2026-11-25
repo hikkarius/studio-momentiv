@@ -29,6 +29,7 @@ import pauses
 import subtitles_generator
 import reactions
 import streamer
+import title_ideas
 import vertical_render
 from backend import app_update, backup, db, job_runner, keep_awake, queue_runner, storage, support_report
 from constants import resolve_filter_mode
@@ -940,6 +941,36 @@ def preview_clip_pauses(project_id: str, clip_index: int):
     return {"tempos": out}
 
 
+@app.post("/api/projects/{project_id}/clips/{clip_index}/title-ideas")
+def make_title_ideas(project_id: str, clip_index: int):
+    """Three hook titles (шок / питання / інтрига) for the 9:16 title plate, from Gemini; stored on the clip."""
+    proj, clip = _get_project_and_clip(project_id, clip_index)
+    cached = load_transcript_cache(proj["source_path"], any_model=True)
+    words = cached[1] if cached else []
+    lang = (cached[2] if cached else "") or "uk"
+    text = title_ideas.clip_text_from_words(words, float(clip["start_sec"]), float(clip["end_sec"]))
+    try:
+        variants = title_ideas.suggest_titles(text, str(clip.get("title") or ""), lang, taste=db.title_choices(),
+                                              why=str(clip.get("reason") or "")[:300])
+    except title_ideas.TitleIdeasError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    updated = db.update_clip_fields(project_id, clip_index, title_variants=variants)
+    return {"variants": variants, "clip": updated, "taste": db.title_choices()["total"]}
+
+
+class TitleChoiceRequest(BaseModel):
+    kind: str = Field(max_length=20)
+    text: str = Field(min_length=1, max_length=200)
+
+
+@app.post("/api/projects/{project_id}/clips/{clip_index}/title-choice")
+def save_title_choice(project_id: str, clip_index: int, payload: TitleChoiceRequest):
+    """Remembers which title the author put on the clip, so later suggestions follow their taste."""
+    _get_project_and_clip(project_id, clip_index)
+    db.add_title_choice(project_id, clip_index, payload.kind, payload.text)
+    return {"ok": True, "taste": db.title_choices()["total"]}
+
+
 @app.get("/api/projects/{project_id}/clips/{clip_index}/words")
 def get_clip_words(project_id: str, clip_index: int, pad: float = 6.0):
     """Word-level transcript around a clip (clip ± pad seconds) for click-to-trim in the editor."""
@@ -1152,20 +1183,31 @@ def _clip_vertical_opts(project_id: str, clip: Dict[str, Any]) -> Dict[str, Any]
     return opts
 
 
+def _vertical_target(project_id: str, clip: Dict[str, Any], subs: bool,
+                     proj: Optional[Dict[str, Any]] = None) -> tuple[Path, str]:
+    """Where the 9:16 file for the clip's current settings lives (it may not be rendered yet), and its download name."""
+    opts = _clip_vertical_opts(project_id, clip)
+    subs = subs and opts["style"] != "none"
+    cuts = _clip_cuts(clip)
+    key = vertical_render.cache_key(clip["start_sec"], clip["end_sec"], opts, subs, clip.get("title", "")) + pauses.cuts_key(cuts)
+    if opts["frame"] == "stream":
+        proj = proj or db.get_project(project_id)
+        if proj:
+            key += _stream_key(_stream_info(project_id, proj))
+    filename = _download_name(project_id, clip, "9x16" if subs else "9x16 без субтитрів")
+    return _vertical_dir(project_id) / f"clip_{clip['clip_index']}_{key}_{'s' if subs else 'n'}.mp4", filename
+
+
 def _ensure_vertical(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any], subs: bool) -> tuple[str, str]:
     """Renders (once, cached by settings) the vertical MP4 of a clip. Returns (path, filename)."""
     opts = _clip_vertical_opts(project_id, clip)
     subs = subs and opts["style"] != "none"
     cuts = _clip_cuts(clip)
     cuts_rel = pauses.relative(cuts, float(clip["start_sec"]))
-    key = vertical_render.cache_key(clip["start_sec"], clip["end_sec"], opts, subs, clip.get("title", "")) + pauses.cuts_key(cuts)
     stream_info = _stream_info(project_id, proj) if opts["frame"] == "stream" else None
-    if stream_info:
-        key += _stream_key(stream_info)
     idx = clip["clip_index"]
     vdir = _vertical_dir(project_id)
-    filename = _download_name(project_id, clip, "9x16" if subs else "9x16 без субтитрів")
-    path = vdir / f"clip_{idx}_{key}_{'s' if subs else 'n'}.mp4"
+    path, filename = _vertical_target(project_id, clip, subs, proj)
     if path.exists():
         return str(path), filename
     duration = clip["end_sec"] - clip["start_sec"]
@@ -1432,6 +1474,28 @@ _vjobs: Dict[str, Dict[str, Any]] = {}
 _vjobs_lock = threading.Lock()
 
 
+def _run_vertical_batch(job_id: str, project_id: str, proj: Dict[str, Any], chosen: List[Dict[str, Any]], subs: bool) -> None:
+    """«Зробити всі»: renders the clips one by one (no archive); the list view polls which are ready."""
+    job = _vjobs[job_id]
+    try:
+        for rank, c in enumerate(chosen, 1):
+            job["current"] = c.get("title", "")
+            job["current_index"] = c["clip_index"]
+            fresh = next((x for x in db.get_candidate_clips(project_id) if x["clip_index"] == c["clip_index"]), None)
+            if fresh is not None:  # the author may change a clip while the others render
+                _ensure_vertical(project_id, proj, fresh, subs)
+            job["done"] = rank
+            job["ready"].append(c["clip_index"])
+        job["status"] = "completed"
+    except Exception as e:
+        detail = e.detail if isinstance(e, HTTPException) else str(e)
+        log.error(f"Vertical batch failed: {detail}")
+        job["status"] = "failed"
+        job["error"] = str(detail)
+    finally:
+        job["current_index"] = None
+
+
 def _run_vertical_zip(job_id: str, project_id: str, proj: Dict[str, Any], chosen: List[Dict[str, Any]], subs: bool) -> None:
     import zipfile
     job = _vjobs[job_id]
@@ -1485,6 +1549,110 @@ def start_vertical_zip(project_id: str, payload: VerticalZipRequest):
                           "filename": f"{(safe[:40].replace(' ', '_') or 'video')}_{len(chosen)}_vertical.zip"}
     threading.Thread(target=_run_vertical_zip, args=(job_id, project_id, proj, chosen, payload.subs), daemon=True).start()
     return {k: v for k, v in _vjobs[job_id].items() if k != "file"}
+
+
+def _kept_clips(project_id: str, wanted: Optional[List[int]] = None) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    _validate_project_id(project_id)
+    proj = db.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Проєкт не знайдено.")
+    clips = [c for c in db.get_candidate_clips(project_id) if c.get("review_status") == "keep"]
+    if wanted:
+        clips = [c for c in clips if c["clip_index"] in set(wanted)]
+    return proj, clips
+
+
+@app.get("/api/projects/{project_id}/vertical-status")
+def vertical_status(project_id: str):
+    """For the «Усі разом» list: each clip «В роботі», is its 9:16 (with subtitles) ready, which template it matches."""
+    _, clips = _kept_clips(project_id)
+    templates = db.list_vertical_templates()
+    shapes = [(t["name"], vertical_render.template_of(t["opts"])) for t in templates]
+    out = []
+    for c in clips:
+        path, _ = _vertical_target(project_id, c, True)
+        look = vertical_render.template_of(c.get("vertical_opts"))
+        out.append({"clip_index": c["clip_index"], "ready": path.exists(),
+                    "template": next((n for n, shape in shapes if shape == {k: look[k] for k in shape}), None)})
+    job = next((j for j in _vjobs.values() if j.get("project_id") == project_id and j.get("kind") == "batch"
+                and j["status"] == "running"), None)
+    return {"clips": out, "job": {k: v for k, v in job.items() if k != "file"} if job else None}
+
+
+class VerticalBatchRequest(BaseModel):
+    clips: List[int] = Field(default_factory=list, max_length=200)  # empty = every clip «В роботі» not yet made
+
+
+@app.post("/api/projects/{project_id}/render-vertical")
+def start_vertical_batch(project_id: str, payload: VerticalBatchRequest):
+    """«Зробити незроблені»: renders 9:16 with subtitles in the background, one clip at a time."""
+    proj, clips = _kept_clips(project_id, payload.clips)
+    todo = [c for c in clips if not _vertical_target(project_id, c, True)[0].exists()]
+    running = next((j for j in _vjobs.values() if j.get("project_id") == project_id and j.get("kind") == "batch"
+                    and j["status"] == "running"), None)
+    if running:
+        return {k: v for k, v in running.items() if k != "file"}
+    if not todo:
+        raise HTTPException(status_code=400, detail="Усі кліпи «В роботі» вже зроблені.")
+    todo.sort(key=lambda c: c.get("virality_score", 0), reverse=True)
+    job_id = uuid.uuid4().hex[:12]
+    with _vjobs_lock:
+        _vjobs[job_id] = {"id": job_id, "kind": "batch", "project_id": project_id, "status": "running", "done": 0,
+                          "total": len(todo), "current": "", "current_index": None, "ready": [], "error": "", "file": ""}
+    threading.Thread(target=_run_vertical_batch, args=(job_id, project_id, proj, todo, True), daemon=True).start()
+    return {k: v for k, v in _vjobs[job_id].items() if k != "file"}
+
+
+class TemplateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    opts: Dict[str, Any]
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, v: str) -> str:
+        v = " ".join(v.split())
+        if not v or any(ch in v for ch in '/\\?#%'):
+            raise ValueError("Назва шаблону порожня або має символи / \\ ? # %.")
+        return v
+
+
+@app.get("/api/vertical-templates")
+def get_vertical_templates():
+    return {"templates": db.list_vertical_templates()}
+
+
+@app.put("/api/vertical-templates")
+def put_vertical_template(payload: TemplateRequest):
+    """Saves the look (style, colours, title plate…) under a name; the same name overwrites."""
+    db.save_vertical_template(payload.name, vertical_render.template_of(payload.opts))
+    return {"templates": db.list_vertical_templates()}
+
+
+@app.delete("/api/vertical-templates/{name}")
+def remove_vertical_template(name: str):
+    if not db.delete_vertical_template(name):
+        raise HTTPException(status_code=404, detail="Шаблон не знайдено.")
+    return {"templates": db.list_vertical_templates()}
+
+
+class ApplyTemplateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    clips: List[int] = Field(default_factory=list, max_length=200)  # empty = every clip «В роботі»
+
+
+@app.post("/api/projects/{project_id}/apply-template")
+def apply_vertical_template(project_id: str, payload: ApplyTemplateRequest):
+    """Puts a template's look on clips; each clip keeps its own word edits and title text."""
+    tpl = next((t for t in db.list_vertical_templates() if t["name"] == payload.name), None)
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Шаблон не знайдено.")
+    _, clips = _kept_clips(project_id, payload.clips)
+    if not clips:
+        raise HTTPException(status_code=400, detail="Жодного кліпу «В роботі». Познач їх на кроці 1.")
+    updated = [db.update_clip_fields(project_id, c["clip_index"],
+                                     vertical_opts=vertical_render.apply_template(c.get("vertical_opts"), tpl["opts"]))
+               for c in clips]
+    return {"clips": updated}
 
 
 @app.get("/api/vertical-jobs/{job_id}")

@@ -693,7 +693,11 @@
               <label for="edTags">Хештеги <button type="button" id="edCopyTags">Копіювати</button></label>
               <input id="edTags" type="text">
             </div>
-            <button class="ed-btn" id="edCopyPost" type="button">⧉ Копіювати весь допис</button>
+            <div class="ed-copyrow">
+              <button class="ed-btn" id="edCopyPost" type="button">⧉ Для TikTok і Reels</button>
+              <button class="ed-btn" id="edCopyShorts" type="button">⧉ Назва для Shorts</button>
+            </div>
+            <div class="ed-small">TikTok і Reels: увесь допис. Shorts показує лише назву до 100 знаків, тому туди йде заголовок-гачок.</div>
           </div>
         </section>
         <section class="ed-panel ed-vx" id="edVx" aria-label="Вертикальний кліп" hidden>
@@ -702,6 +706,29 @@
             <h2>Поки жодного кліпу «В роботі»</h2>
             <p>На кроці 1 натисни <b>«В роботі»</b> (або клавішу <kbd>Y</kbd>) на кліпах, які хочеш змонтувати. Тут будуть лише вони, готові до 9:16.</p>
             <button type="button" class="vx-big vx-empty-go" id="vxEmptyBack">← До монтажного столу</button>
+          </div>
+          <div class="vx-list" id="vxList" hidden>
+            <div class="vx-lhead">
+              <div class="vx-seg vx-lview" role="group" aria-label="Як показувати кліпи">
+                <button type="button" id="vxToOne" aria-pressed="false">По одному</button>
+                <button type="button" aria-pressed="true">Усі разом</button>
+              </div>
+              <span class="vx-lsum" id="vxLSum"></span>
+              <span class="vx-lsp"></span>
+              <label class="vx-ltpl"><span>Шаблон для всіх</span><select id="vxLTpl"></select></label>
+              <button type="button" class="ed-btn" id="vxLApply">Застосувати</button>
+              <button type="button" class="vx-big vx-lmake" id="vxLMake">Зробити незроблені</button>
+              <button type="button" class="ed-btn" id="vxLZip">⬇ Скачати готові · ZIP</button>
+            </div>
+            <div class="vx-lprog" id="vxLProg" hidden><i id="vxLProgBar"></i></div>
+            <div class="vx-ltable" role="table" aria-label="Кліпи «В роботі»">
+              <div class="vx-lrow vx-lth" role="row">
+                <span role="columnheader">Кадр</span><span role="columnheader">Кліп</span><span role="columnheader">Довжина</span>
+                <span role="columnheader">Заголовок на відео</span><span role="columnheader">Шаблон</span><span role="columnheader">Стан</span>
+              </div>
+              <div id="vxLRows" role="rowgroup"></div>
+            </div>
+            <p class="ed-small">Клік по назві відкриває кліп для тонких правок. Студія робить кліпи по одному у фоні, можна займатися іншим.</p>
           </div>
           <div class="vx-studio">
             <div class="vx-stage">
@@ -715,6 +742,7 @@
                   <button type="button" class="ed-btn sm" id="vxPrev" title="Попередній кліп (↑)" aria-label="Попередній кліп">↑</button>
                   <button type="button" class="ed-btn sm" id="vxNext" title="Наступний кліп (↓)" aria-label="Наступний кліп">↓</button>
                 </div>
+                <button type="button" class="ed-btn sm" id="vxToList" title="Усі кліпи «В роботі» одним списком">☰ Усі разом</button>
               </div>
               <div class="vx-view vx-seg" id="vxView" role="group" aria-label="Що показати" hidden>
                 <button type="button" data-v="frame" aria-pressed="false">Рамки на кадрі</button>
@@ -752,6 +780,7 @@
                   <div class="vx-more-pop" id="vxMorePop" role="menu" hidden>
                     <button class="vx-mi" id="vxDlClean" type="button" role="menuitem"><b>9:16 без субтитрів</b><small>свої титри в CapCut</small></button>
                     <button class="vx-mi" id="vxCopyPost" type="button" role="menuitem"><b>Копіювати текст допису</b><small>заголовок, опис, хештеги</small></button>
+                    <button class="vx-mi" id="vxCopyShorts" type="button" role="menuitem"><b>Копіювати назву для Shorts</b><small>заголовок-гачок, до 100 знаків</small></button>
                     <button class="vx-mi" id="vxZip" type="button" role="menuitem"><b>ZIP усіх «В роботі» · 9:16</b><small id="vxZipInfo">із субтитрами, видно прогрес</small></button>
                     <button class="vx-mi" id="vxZipClean" type="button" role="menuitem"><b>ZIP усіх «В роботі» · чисті 16:9</b><small>для монтажу</small></button>
                   </div>
@@ -832,6 +861,15 @@
               <section class="vx-pane" data-t="style">
                 <h3>Стиль субтитрів</h3>
                 <p class="vx-lead">Клік по плитці, і телефон одразу покаже результат.</p>
+                <div class="vx-tplrow">
+                  <label class="vx-ltpl"><span>Шаблон</span><select id="vxTpl"></select></label>
+                  <button type="button" class="ed-btn sm" id="vxTplSave">Зберегти як…</button>
+                  <button type="button" class="ed-btn sm" id="vxTplDel" hidden>Видалити шаблон</button>
+                </div>
+                <div class="vx-tplnew" id="vxTplNew" hidden>
+                  <input type="text" id="vxTplName" maxlength="40" placeholder="Назва, напр. Подкаст" aria-label="Назва шаблону">
+                  <button type="button" class="ed-btn sm primary" id="vxTplOk">Зберегти</button>
+                </div>
                 <div class="vx-tiles" id="vxStyle"></div>
                 <div class="vx-row">
                   <label class="vx-lbl" for="vxPos">Висота субтитрів</label>
@@ -841,6 +879,14 @@
               <section class="vx-pane" data-t="hook" hidden>
                 <h3>Заголовок на відео</h3>
                 <p class="vx-lead">Плашка, яка утримує глядача перші секунди.</p>
+                <div class="vx-ideas" id="vxIdeas">
+                  <div class="vx-lbl">ШІ пропонує</div>
+                  <div class="vx-idea-list" id="vxIdeaList" role="radiogroup" aria-label="Заголовки від ШІ"></div>
+                  <div class="vx-idea-row">
+                    <button type="button" class="ed-btn sm" id="vxIdeaMore">↻ Ще 3 варіанти</button>
+                    <span class="vx-idea-note" id="vxIdeaNote" aria-live="polite"></span>
+                  </div>
+                </div>
                 <label class="vx-check vx-switch"><input type="checkbox" id="vxHookOn"> Показувати заголовок</label>
                 <div class="vx-hookset" id="vxHookSet">
                   <input type="text" id="vxHookText" maxlength="120" aria-label="Текст заголовка" placeholder="Текст заголовка">

@@ -90,6 +90,19 @@ def studio(tmp_path_factory):
     words = _words()
     server.load_transcript_cache = lambda p, **kw: ([], words, "uk")
     subtitles_generator.load_transcript_cache = lambda p, **kw: ([], words, "uk")
+    # No real Gemini: the «Заголовок» tab gets three fixed hook titles
+    # (only the client is replaced, so the unit tests of title_ideas, which bring their own client, are unaffected)
+    import json as _json
+    from types import SimpleNamespace
+    import title_ideas
+    ideas = _json.dumps([
+        {"kind": "шок", "text": "90% людей не знають цього"},
+        {"kind": "питання", "text": "Чи можна стати мільйонером чесно?"},
+        {"kind": "інтрига", "text": "Він сказав те, що всі приховують"},
+    ], ensure_ascii=False)
+    fake_models = SimpleNamespace(generate_content=lambda **kw: SimpleNamespace(text=ideas))
+    saved["ideas"] = title_ideas.get_gemini_client
+    title_ideas.get_gemini_client = lambda: SimpleNamespace(models=fake_models)
     db.init_db()
     # The test video is no stream: skip the real webcam search the editor starts in the background
     import streamer
@@ -117,6 +130,7 @@ def studio(tmp_path_factory):
     server.UPLOADS_DIR, server.OUTPUT_DIR = saved["up"], saved["out"]
     job_runner.UPLOADS_DIR, job_runner.OUTPUT_DIR = saved["jup"], saved["jout"]
     server.load_transcript_cache = saved["ltc"]
+    title_ideas.get_gemini_client = saved["ideas"]
     if saved["key"] is None:
         os.environ.pop("GEMINI_API_KEY", None)
     else:
