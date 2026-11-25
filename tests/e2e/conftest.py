@@ -96,7 +96,7 @@ def studio(tmp_path_factory):
     from types import SimpleNamespace
     import title_ideas
     ideas = _json.dumps([
-        {"kind": "цифра", "text": "90% людей не знають цього"},
+        {"kind": "шок", "text": "90% людей не знають цього"},
         {"kind": "питання", "text": "Чи можна стати мільйонером чесно?"},
         {"kind": "інтрига", "text": "Він сказав те, що всі приховують"},
     ], ensure_ascii=False)

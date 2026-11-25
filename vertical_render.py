@@ -899,13 +899,19 @@ TEMPLATE_FIELDS = ("style", "frame", "pos", "hook", "size", "color", "text", "ho
 def template_of(opts: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Only the template part of clip options, cleaned."""
     clean = normalize_opts(opts)
-    return {k: clean[k] for k in TEMPLATE_FIELDS}
+    tpl = {k: clean[k] for k in TEMPLATE_FIELDS}
+    if tpl["frame"] == "stream":
+        del tpl["frame"]  # «Стрім» belongs to the video (its webcam frame), not to a look shared with podcasts
+    return tpl
 
 
 def apply_template(opts: Optional[Dict[str, Any]], template: Dict[str, Any]) -> Dict[str, Any]:
     """Clip options with the template's look put over them (word edits and the title text kept)."""
     merged = dict(normalize_opts(opts))
-    merged.update(template_of(template))
+    look = template_of(template)
+    if (template or {}).get("frame") in (None, "stream"):
+        look.pop("frame", None)  # a template without a frame keeps the clip's own
+    merged.update(look)
     return normalize_opts(merged)
 
 

@@ -13,7 +13,7 @@ from backend.server import app
 client = TestClient(app)
 
 GOOD = json.dumps([
-    {"kind": "цифра", "text": "90% людей не знають цього про гроші"},
+    {"kind": "шок", "text": "90% людей не знають цього про гроші"},
     {"kind": "питання", "text": "Чи можна стати мільйонером чесно?"},
     {"kind": "інтрига", "text": "«Він сказав те, що всі бояться визнати»"},
 ], ensure_ascii=False)
@@ -46,18 +46,18 @@ def _project():
 def test_parse_variants_cleans_and_orders():
     raw = json.dumps({"titles": [
         {"kind": "інтрига", "text": "  Він   сказав  "},
-        {"kind": "Цифра", "text": "90% людей"},
-        {"kind": "цифра", "text": "дубль іншого виду"},
+        {"kind": "Шок", "text": "90% людей"},
+        {"kind": "шок", "text": "дубль іншого виду"},
         {"kind": "мем", "text": "невідомий вид"},
     ]}, ensure_ascii=False)
     assert title_ideas.parse_variants(raw) == [
-        {"kind": "цифра", "text": "90% людей"},
+        {"kind": "шок", "text": "90% людей"},
         {"kind": "інтрига", "text": "Він сказав"},
     ]
 
 
 def test_prompt_shows_the_authors_picks():
-    taste = {"recent": [{"kind": "питання", "text": "А ти б зміг?"}], "counts": {"питання": 5, "цифра": 1}, "total": 6}
+    taste = {"recent": [{"kind": "питання", "text": "А ти б зміг?"}], "counts": {"питання": 5, "шок": 1}, "total": 6}
     p = title_ideas.build_prompt("текст кліпу", "НАЗВА", "uk", taste)
     assert "А ти б зміг?" in p and "«питання»" in p
     assert "раніше обрав" not in title_ideas.build_prompt("текст", "НАЗВА", "uk", None)
@@ -67,7 +67,7 @@ def test_suggest_titles_tries_next_model(monkeypatch):
     monkeypatch.setattr(title_ideas, "CANDIDATE_MODELS", ["m1", "m2"])
     fc = fake_client(RuntimeError("503 UNAVAILABLE"), GOOD)
     out = title_ideas.suggest_titles("слова кліпу", "НАЗВА", client=fc)
-    assert [v["kind"] for v in out] == ["цифра", "питання", "інтрига"]
+    assert [v["kind"] for v in out] == ["шок", "питання", "інтрига"]
     assert out[2]["text"] == "Він сказав те, що всі бояться визнати"
 
 
@@ -94,14 +94,14 @@ def test_title_ideas_endpoint_stores_variants(monkeypatch):
     monkeypatch.setattr(server, "load_transcript_cache", lambda *a, **k: (
         [], [{"start": 5.0, "end": 5.5, "word": "до"}, {"start": 12.0, "end": 12.4, "word": "Чесно"}, {"start": 13.0, "end": 13.3, "word": "кажучи"}], "uk"))
 
-    def fake_suggest(text, title, lang, taste=None, client=None):
+    def fake_suggest(text, title, lang, taste=None, client=None, why=""):
         seen.update(text=text, title=title, lang=lang)
-        return [{"kind": "цифра", "text": "90% людей"}]
+        return [{"kind": "шок", "text": "90% людей"}]
     monkeypatch.setattr(server.title_ideas, "suggest_titles", fake_suggest)
     r = client.post(f"/api/projects/{pid}/clips/1/title-ideas")
     assert r.status_code == 200
     assert seen == {"text": "Чесно кажучи", "title": "ЧЕСНИЙ БІЗНЕС", "lang": "uk"}
-    assert db.get_candidate_clips(pid)[0]["title_variants"] == [{"kind": "цифра", "text": "90% людей"}]
+    assert db.get_candidate_clips(pid)[0]["title_variants"] == [{"kind": "шок", "text": "90% людей"}]
 
 
 def test_title_ideas_endpoint_error_is_plain_text(monkeypatch):
@@ -117,11 +117,17 @@ def test_title_ideas_endpoint_error_is_plain_text(monkeypatch):
 
 def test_title_choice_one_per_clip_and_counts():
     pid = _project()
-    assert client.post(f"/api/projects/{pid}/clips/1/title-choice", json={"kind": "цифра", "text": "90% людей"}).json()["taste"] == 1
+    assert client.post(f"/api/projects/{pid}/clips/1/title-choice", json={"kind": "шок", "text": "90% людей"}).json()["taste"] == 1
     r = client.post(f"/api/projects/{pid}/clips/1/title-choice", json={"kind": "питання", "text": "А ти?"})
     assert r.json()["taste"] == 1  # a new pick for the same clip replaces the old one
     t = db.title_choices()
     assert t["recent"] == [{"kind": "питання", "text": "А ти?"}] and t["counts"] == {"питання": 1}
     db.add_title_choice(pid, 1, "щось дивне", "Свій текст")
     assert db.title_choices()["recent"][0]["kind"] == "свій"
-    assert client.post(f"/api/projects/{pid}/clips/9/title-choice", json={"kind": "цифра", "text": "x"}).status_code == 404
+    assert client.post(f"/api/projects/{pid}/clips/9/title-choice", json={"kind": "шок", "text": "x"}).status_code == 404
+
+
+def test_prompt_asks_for_bait_not_topics():
+    p = title_ideas.build_prompt("він сказав що", "ЄВРЕЇ ТА КЕРІВНИЦТВО", "uk", why="Гостра тема")
+    assert "Відкрита петля" in p and "Заборонено" in p and "Чому цей момент обрали: Гостра тема" in p
+    assert "\"шок\": смілива" in p

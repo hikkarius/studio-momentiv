@@ -391,7 +391,7 @@ def update_clip_fields(project_id: str, clip_index: int, **fields: Any) -> Optio
     return clip
 
 
-TITLE_KINDS = ("цифра", "питання", "інтрига", "свій")
+TITLE_KINDS = ("шок", "питання", "інтрига", "свій", "цифра")  # «цифра»: picks made before 2026-11-25
 
 
 def add_title_choice(project_id: str, clip_index: int, kind: str, text: str) -> None:

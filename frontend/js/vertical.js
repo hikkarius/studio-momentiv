@@ -1346,9 +1346,10 @@ const Vertical = (() => {
   const hookPaneOpen = () => { const p = document.querySelector('#edVx .vx-pane[data-t="hook"]'); return p && !p.hidden; };
 
   // ─── Named templates («Подкаст», «Стрім») ───────────────────────────────────
-  const tplLook = (o) => JSON.stringify(TEMPLATE_FIELDS.map((k) => (o && o[k] !== undefined ? o[k] : null)));
+  // a template without «frame» (saved on a stream) matches whatever frame the clip has
+  const tplLook = (o, t) => JSON.stringify(TEMPLATE_FIELDS.filter((k) => !t || k !== "frame" || "frame" in t).map((k) => (o && o[k] !== undefined ? o[k] : null)));
   const NORM = (o) => ({ pos: null, color: null, text: null, stroke: null, hook_stroke: null, hook_pos: null, ...o });
-  const tplMatch = (o) => (st.templates.find((t) => tplLook(NORM(t.opts)) === tplLook(NORM(o))) || {}).name || "";
+  const tplMatch = (o) => (st.templates.find((t) => tplLook(NORM(t.opts), t.opts) === tplLook(NORM(o), t.opts)) || {}).name || "";
   const tplOptions = (sel, empty) => (empty ? `<option value="">${empty}</option>` : "") +
     st.templates.map((t) => `<option value="${escapeText(t.name)}"${t.name === sel ? " selected" : ""}>${escapeText(t.name)}</option>`).join("");
 

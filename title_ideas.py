@@ -18,7 +18,7 @@ from languages import language_name
 
 log = logging.getLogger("shorts_core")
 
-KINDS = ("цифра", "питання", "інтрига")
+KINDS = ("шок", "питання", "інтрига")
 MAX_LEN = 80  # characters: the plate holds two short lines at most
 MAX_CLIP_TEXT = 3000
 
@@ -34,19 +34,39 @@ class TitleIdeasError(RuntimeError):
     """No titles: the message is shown to the user as is."""
 
 
-def build_prompt(clip_text: str, current_title: str, lang_code: str, taste: Optional[Dict[str, Any]] = None) -> str:
+def build_prompt(clip_text: str, current_title: str, lang_code: str, taste: Optional[Dict[str, Any]] = None,
+                 why: str = "") -> str:
     lang = language_name(lang_code)
     lines = [
-        "Ти — продюсер Shorts/Reels/TikTok. Ось що говорять у кліпі:",
+        "Ти — автор вірусних Shorts/Reels/TikTok з мільйонними переглядами. Твоє завдання: заголовок-плашка,",
+        "який за 1 секунду зупиняє палець, що гортає стрічку. Ось що говорять у кліпі:",
         f"«{clip_text[:MAX_CLIP_TEXT]}»",
         f"Робоча назва кліпу: {current_title}",
+    ]
+    if why:
+        lines.append(f"Чому цей момент обрали: {why}")
+    lines += [
         "",
-        "Придумай 3 різні заголовки-гачки, які стоятимуть плашкою на відео в перші секунди, щоб людина не гортала далі.",
-        "Рівно по одному кожного виду:",
-        "- \"цифра\": з конкретним числом або фактом із кліпу;",
-        "- \"питання\": питання, на яке хочеться почути відповідь;",
-        "- \"інтрига\": недомовленість, що змушує дивитися до кінця.",
-        f"До 8 слів і до {MAX_LEN} знаків кожен. Без лапок, без емодзі, без хештегів. Не вигадуй фактів, яких немає в кліпі.",
+        "Як пишуть сильні гачки:",
+        "- Відкрита петля: натякни на найсоковитіше в кліпі, але НЕ розкривай відповідь. Глядач має дивитися, щоб дізнатися.",
+        "- Емоція: шок, обурення, сміх, заздрість, страх пропустити. Нейтральний опис теми — провал.",
+        "- Конкретика з кліпу: гучне слово, ім'я, цифра, дивна деталь або коротка цитата найгострішої фрази.",
+        "- Конфлікт чи протиставлення: «усі думають так, а він…», «сказав це прямо зі сцени».",
+        "- Жива розмовна мова, теперішній час, можна звертатися на «ти». 3–8 слів.",
+        "- Сміливо й гостро, на межі, але без брехні: кожне твердження має спиратися на сказане в кліпі.",
+        "Заборонено: заголовок-тема («Євреї та керівництво України», «Часник і глисти»), канцелярит,",
+        "слова «цікаво», «розповідає», «історія про», «про те, як», переказ назви кліпу іншими словами.",
+        "",
+        "Приклади (на чужих темах), слабкий → сильний:",
+        "- «Як заощаджувати гроші» → «Я щомісяця викидав 3000 і не помічав»",
+        "- «Комік про свою маму» → «Мама досі не знає, що я це сказав»",
+        "- «Лікар про сон» → «Ти спиш правильно? Майже ніхто ні»",
+        "",
+        "Спершу подумки напиши 10 варіантів, потім обери 3 найсильніші, рівно по одному кожного виду:",
+        "- \"шок\": смілива заява, провокація або найгостріша цитата з кліпу;",
+        "- \"питання\": питання, яке чіпляє особисто глядача і на яке хочеться почути відповідь;",
+        "- \"інтрига\": недомовленість, через яку неможливо не додивитися до кінця.",
+        f"До {MAX_LEN} знаків кожен. Без лапок, без емодзі, без хештегів.",
         f"Мова заголовків — мова кліпу ({lang}).",
     ]
     taste = taste or {}
@@ -55,13 +75,13 @@ def build_prompt(clip_text: str, current_title: str, lang_code: str, taste: Opti
         lines.append("")
         lines.append("Заголовки, які автор раніше обрав для своїх кліпів (орієнтуйся на їхній стиль і довжину):")
         lines += [f"- [{r.get('kind', 'свій')}] {r['text']}" for r in recent[:8]]
-        counts = {k: v for k, v in (taste.get("counts") or {}).items() if v}
+        counts = {k: v for k, v in (taste.get("counts") or {}).items() if v and k in KINDS}
         if counts:
             fav = max(counts, key=counts.get)
             lines.append(f"Найчастіше автор обирає вид «{fav}»: зроби цей варіант особливо сильним.")
     lines += [
         "",
-        'Поверни ВИКЛЮЧНО JSON масив: [{"kind": "цифра", "text": "..."}, {"kind": "питання", "text": "..."}, {"kind": "інтрига", "text": "..."}]',
+        'Поверни ВИКЛЮЧНО JSON масив: [{"kind": "шок", "text": "..."}, {"kind": "питання", "text": "..."}, {"kind": "інтрига", "text": "..."}]',
     ]
     return "\n".join(lines)
 
@@ -90,7 +110,7 @@ def clip_text_from_words(words: Sequence[Dict[str, Any]], start: float, end: flo
 
 
 def suggest_titles(clip_text: str, current_title: str, lang_code: str = "uk",
-                   taste: Optional[Dict[str, Any]] = None, client=None) -> List[Dict[str, str]]:
+                   taste: Optional[Dict[str, Any]] = None, client=None, why: str = "") -> List[Dict[str, str]]:
     """Asks the candidate models in turn (one pass, no long waits: the user is looking at the screen)."""
     if not clip_text.strip():
         raise TitleIdeasError("У кліпі немає тексту, тому ШІ нема з чого робити заголовок. Напиши свій.")
@@ -101,14 +121,14 @@ def suggest_titles(clip_text: str, current_title: str, lang_code: str = "uk",
         except Exception as e:  # no key yet
             log.warning(f"Title ideas: no Gemini client ({e})")
             raise TitleIdeasError(BAD_KEY_MESSAGE) from e
-    prompt = build_prompt(clip_text, current_title, lang_code, taste)
+    prompt = build_prompt(clip_text, current_title, lang_code, taste, why)
     kinds: List[str] = []
     for model_name in CANDIDATE_MODELS:
         try:
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt,
-                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.8,
+                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=1.0,
                                                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)),
             )
             variants = parse_variants(response.text or "")

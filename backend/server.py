@@ -943,14 +943,15 @@ def preview_clip_pauses(project_id: str, clip_index: int):
 
 @app.post("/api/projects/{project_id}/clips/{clip_index}/title-ideas")
 def make_title_ideas(project_id: str, clip_index: int):
-    """Three hook titles (цифра / питання / інтрига) for the 9:16 title plate, from Gemini; stored on the clip."""
+    """Three hook titles (шок / питання / інтрига) for the 9:16 title plate, from Gemini; stored on the clip."""
     proj, clip = _get_project_and_clip(project_id, clip_index)
     cached = load_transcript_cache(proj["source_path"], any_model=True)
     words = cached[1] if cached else []
     lang = (cached[2] if cached else "") or "uk"
     text = title_ideas.clip_text_from_words(words, float(clip["start_sec"]), float(clip["end_sec"]))
     try:
-        variants = title_ideas.suggest_titles(text, str(clip.get("title") or ""), lang, taste=db.title_choices())
+        variants = title_ideas.suggest_titles(text, str(clip.get("title") or ""), lang, taste=db.title_choices(),
+                                              why=str(clip.get("reason") or "")[:300])
     except title_ideas.TitleIdeasError as e:
         raise HTTPException(status_code=503, detail=str(e))
     updated = db.update_clip_fields(project_id, clip_index, title_variants=variants)
@@ -1572,7 +1573,7 @@ def vertical_status(project_id: str):
         path, _ = _vertical_target(project_id, c, True)
         look = vertical_render.template_of(c.get("vertical_opts"))
         out.append({"clip_index": c["clip_index"], "ready": path.exists(),
-                    "template": next((n for n, shape in shapes if shape == look), None)})
+                    "template": next((n for n, shape in shapes if shape == {k: look[k] for k in shape}), None)})
     job = next((j for j in _vjobs.values() if j.get("project_id") == project_id and j.get("kind") == "batch"
                 and j["status"] == "running"), None)
     return {"clips": out, "job": {k: v for k, v in job.items() if k != "file"} if job else None}

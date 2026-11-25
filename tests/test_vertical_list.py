@@ -87,3 +87,9 @@ def test_batch_renders_only_missing_and_status_turns_ready(monkeypatch):
     db.update_clip_fields(pid, 2, vertical_opts=vertical_render.normalize_opts({"style": "min"}))
     st = {c["clip_index"]: c["ready"] for c in client.get(f"/api/projects/{pid}/vertical-status").json()["clips"]}
     assert st == {1: True, 2: False, 3: True}
+
+
+def test_template_never_turns_stream_mode_on_other_videos():
+    tpl = vertical_render.template_of({"frame": "stream", "style": "one"})
+    assert "frame" not in tpl and tpl["style"] == "one"
+    assert vertical_render.apply_template({"frame": "blur"}, tpl)["frame"] == "blur"

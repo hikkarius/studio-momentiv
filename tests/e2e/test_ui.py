@@ -551,7 +551,7 @@ def test_vertical_title_ideas_pick_and_shorts(page, studio, project):
     assert ideas.nth(1).get_attribute("aria-checked") == "true"
     assert "мільйонером" in page.locator("#vxHook").inner_text().lower()
     assert wait_for(page, lambda: db.title_choices()["recent"][:1] == [{"kind": "питання", "text": "Чи можна стати мільйонером чесно?"}])
-    assert clip(idx)["title_variants"][0]["kind"] == "цифра"
+    assert clip(idx)["title_variants"][0]["kind"] == "шок"
     assert not page.errors
 
 
