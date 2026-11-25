@@ -35,6 +35,7 @@ const Compare = (() => {
   }
 
   function build() {
+    document.querySelectorAll(".ask-search-dialog, .cmp-dialog").forEach((d) => d.remove()); // never two windows
     const back = document.createElement("div");
     back.className = "modal-backdrop cmp-dialog";
     back.setAttribute("role", "dialog");

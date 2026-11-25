@@ -352,3 +352,25 @@ def test_compare_failure_is_shown_honestly(monkeypatch):
     compare.run("p_cf", 10, "Viral Hooks")
     v = client.get("/api/projects/p_cf/compare").json()
     assert v["status"] == "failed" and "Ліміт" in v["error"]
+
+
+def test_compare_left_running_without_a_thread_is_shown_as_interrupted():
+    compare._save("p_orphan", {"status": "running", "progress": 0.3, "message": "Пошук 1 з 2"})
+    compare._threads.pop("p_orphan", None)
+    v = compare.view("p_orphan")
+    assert v["status"] == "failed" and "перервалося" in v["error"]
+
+
+def test_compare_save_retries_while_windows_holds_the_file(monkeypatch):
+    real = compare.os.replace
+    fails = {"n": 3}
+
+    def busy(a, b):
+        if fails["n"]:
+            fails["n"] -= 1
+            raise PermissionError("[WinError 5] Access is denied")
+        return real(a, b)
+    monkeypatch.setattr(compare.os, "replace", busy)
+    monkeypatch.setattr(compare.time, "sleep", lambda s: None)
+    compare._save("p_busy", {"status": "ready", "pairs": []})
+    assert fails["n"] == 0 and compare.load("p_busy")["status"] == "ready"

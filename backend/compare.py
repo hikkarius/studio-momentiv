@@ -36,19 +36,36 @@ def _path(project_id: str) -> Path:
     return Path(job_runner.OUTPUT_DIR) / project_id / "compare.json"
 
 
+_threads: Dict[str, threading.Thread] = {}
+
+
 def load(project_id: str) -> Optional[Dict[str, Any]]:
-    try:
-        return json.loads(_path(project_id).read_text(encoding="utf-8"))
-    except Exception:
-        return None
+    for _ in range(20):
+        try:
+            return json.loads(_path(project_id).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (PermissionError, json.JSONDecodeError):  # Windows: being replaced right now
+            time.sleep(0.05)
+        except Exception:
+            return None
+    return None
 
 
 def _save(project_id: str, state: Dict[str, Any]) -> None:
+    """Atomic write. On Windows the target cannot be replaced while a reader holds it open: retry for ~3 s."""
     p = _path(project_id)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
+    tmp = p.with_name(f"compare.{threading.get_ident()}.tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, p)
+    for i in range(60):
+        try:
+            os.replace(tmp, p)
+            return
+        except PermissionError:
+            if i == 59:
+                raise
+            time.sleep(0.05)
 
 
 def make_pairs(sets: Dict[str, List[Dict[str, Any]]], rng: Optional[random.Random] = None) -> List[Dict[str, Any]]:
@@ -85,6 +102,10 @@ def view(project_id: str) -> Dict[str, Any]:
     st = load(project_id)
     if not st:
         return {"status": "none"}
+    if st.get("status") == "running" and not (_threads.get(project_id) and _threads[project_id].is_alive()):
+        # the studio was restarted mid-way, or the search thread died: say so instead of «Починаємо…» forever
+        return {"status": "failed", "progress": 1.0, "message": "Помилка",
+                "error": "Порівняння перервалося (студію перезапустили або сталася помилка). Запусти його ще раз."}
     out = {k: st.get(k) for k in ("status", "message", "progress", "error")}
     if st.get("status") != "ready":
         return out
@@ -134,7 +155,10 @@ def run(project_id: str, clips_count: int, filter_mode: str, language: Optional[
     from core import transcribe_video
 
     def progress(frac: float, msg: str) -> None:
-        _save(project_id, {"status": "running", "progress": round(frac, 2), "message": msg, "started": started})
+        try:
+            _save(project_id, {"status": "running", "progress": round(frac, 2), "message": msg, "started": started})
+        except OSError as e:  # the progress line is cosmetic: never stop the comparison for it
+            log.warning(f"Compare progress not saved: {e}")
 
     started = time.time()
     progress(0.02, "Чекаю своєї черги...")
@@ -165,8 +189,10 @@ def run(project_id: str, clips_count: int, filter_mode: str, language: Optional[
 
 
 def start(project_id: str, clips_count: int, filter_mode: str, language: Optional[str] = None) -> None:
-    st = load(project_id)
-    if st and st.get("status") == "running" and time.time() - float(st.get("started") or 0) < 3600:
-        return  # already running
+    t = _threads.get(project_id)
+    if t is not None and t.is_alive():
+        return  # already running (a «running» file left by a crash or a restart does not block a new start)
     _save(project_id, {"status": "running", "progress": 0.0, "message": "Починаємо...", "started": time.time()})
-    threading.Thread(target=run, args=(project_id, clips_count, filter_mode, language), daemon=True).start()
+    t = threading.Thread(target=run, args=(project_id, clips_count, filter_mode, language), daemon=True)
+    _threads[project_id] = t
+    t.start()

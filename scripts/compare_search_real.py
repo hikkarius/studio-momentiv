@@ -94,6 +94,9 @@ def main() -> None:
 
     with db.get_db() as conn:
         projects = [dict(r) for r in conn.execute("SELECT * FROM projects ORDER BY duration")]
+    for p in projects:  # the studio stores paths relative to its own folder
+        if not Path(p["source_path"]).is_absolute():
+            p["source_path"] = str(studio / p["source_path"])
     chosen = []
     for p in projects:
         if not Path(p["source_path"]).exists() or transcription.load_transcript_cache(p["source_path"], any_model=True) is None:
