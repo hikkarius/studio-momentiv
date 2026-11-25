@@ -84,6 +84,8 @@
   --ed-fg: var(--fg); --ed-muted: var(--muted); --ed-faint: var(--faint);
   --ed-accent: var(--accent); --ed-accent-ink: var(--accent-fg); --ed-accent-soft: var(--accent-soft); --ed-accent-text: var(--accent-text);
   --ed-accent-grad: var(--accent-grad);
+  /* keyboard focus: one ring for the whole studio (style.css :focus-visible) */
+  --focus-color: var(--accent); --focus-offset: 2px;
   --ed-keep: var(--ok); --ed-keep-soft: var(--ok-soft); --ed-drop: var(--danger); --ed-drop-soft: var(--danger-soft);
   --ed-cand: var(--st-new); --ed-screen: var(--screen); --ed-done: var(--info); --ed-done-soft: var(--info-soft);
   --ed-shadow: var(--shadow); --ed-pop-shadow: var(--pop-shadow);

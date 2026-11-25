@@ -78,6 +78,7 @@ const Editor = (() => {
 
   function renderList() {
     const L = $("edList");
+    const hadFocus = L.contains(document.activeElement); // the rebuild must not drop the keyboard to <body>
     L.innerHTML = "";
     const vis = stripClips();
     vis.forEach((i) => {
@@ -96,7 +97,7 @@ const Editor = (() => {
       // step 2 with nothing in work: a clip opens on step 1, where it can be taken «В роботі»
       const pick = () => { if (vxEmpty()) setMode("table"); select(i); };
       li.addEventListener("click", pick);
-      li.addEventListener("keydown", (e) => { if (e.key === "Enter") pick(); });
+      li.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); pick(); } });
       L.appendChild(li);
     });
     if (!vis.length) {
@@ -118,6 +119,7 @@ const Editor = (() => {
     });
     const cur = clip();
     $("edShelfNote").textContent = cur && !matches(cur) && st.mode !== "vx" ? `№${cur.num} тепер на полиці «${shelfName(shelfOf(cur))}»` : "";
+    if (hadFocus) (L.querySelector('[aria-current="true"]') || L.querySelector(".ed-row") || $("edShelves").querySelector('[aria-pressed="true"]'))?.focus({ preventScroll: true });
     renderProgress();
     updateScroll();
   }
@@ -1019,8 +1021,10 @@ const Editor = (() => {
   function closeStatusMenu() {
     const m = $("edStatusMenu");
     if (!m || m.hidden) return;
+    const back = m.contains(document.activeElement) ? st.menuBtn : null; // Esc or a pick: the keyboard returns to «Статус ▾»
     m.hidden = true;
     if (st.menuBtn) { st.menuBtn.setAttribute("aria-expanded", "false"); st.menuBtn = null; }
+    if (back && back.isConnected) back.focus({ preventScroll: true });
   }
 
   // ─── «Прибрати паузи» (jump cut) ───────────────────────────────────────────
@@ -1222,12 +1226,23 @@ const Editor = (() => {
   }
 
   // ─── Keyboard ──────────────────────────────────────────────────────────────
+  const CONTROL = 'button, a[href], summary, [role="button"], [role="tab"], [role="menuitem"], [role="menuitemradio"], .ed-row';
+  function ownsKey(t, k) {
+    if (!t || !t.closest || !(k === " " || k === "Enter" || k.startsWith("Arrow"))) return false;
+    const c = t.closest(CONTROL);
+    if (!c || !keyboardFocus(c)) return false;
+    if (k === " " || k === "Enter") return true;
+    return !!c.closest('[role="tablist"], [role="menu"], [role="radiogroup"]');
+  }
   function onKey(e) {
     if ($("editor").hidden) return;
     if (e.key === "Escape") { closePop(); closeStatusMenu(); return; }
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.target.closest && e.target.closest(".theme-menu")) return; // the theme drop-down handles its own keys
     const k = e.key;
+    // A control reached with the keyboard keeps its own keys: Space presses it, arrows move inside a group.
+    // After a mouse click the same keys still drive the player (keyboardFocus in app.js).
+    if (ownsKey(e.target, k)) return;
     if (k === " ") { e.preventDefault(); togglePlay(); }
     else if (k === "ArrowDown" || k === "j" || k === "о") { e.preventDefault(); step(1); }
     else if (k === "ArrowUp" || k === "k" || k === "л") { e.preventDefault(); step(-1); }
