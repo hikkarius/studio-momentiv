@@ -500,9 +500,9 @@ const Vertical = (() => {
   // ─── «Стрім: вебка + гра» ──────────────────────────────────────────────────
   const OW = 1080, OH = 1920;
   const LOOK_DEFAULT = { layout: "top", share: 0.34, cam_zoom: 1, game_zoom: 1, cam_fx: null, cam_fy: null, game_x: 0.5, game_y: 0.5,
-    pip_x: 0.04, pip_y: 0.035, pip_w: 0.48, game_w: null, game_cx: 0.5, game_cy: 0.5, round: false, frame: "white", divider: false,
+    pip_x: 0.04, pip_y: 0.035, pip_w: 0.48, game_w: null, game_cx: 0.5, game_cy: 0.5, full_win: null, round: false, frame: "white", divider: false,
     nick: "", nick_style: "twitch", nick_x: null, nick_y: null };
-  const SIZE_KEYS = ["share", "cam_zoom", "game_zoom", "cam_fx", "cam_fy", "game_x", "game_y", "pip_x", "pip_y", "pip_w", "game_w", "game_cx", "game_cy"];
+  const SIZE_KEYS = ["share", "cam_zoom", "game_zoom", "cam_fx", "cam_fy", "game_x", "game_y", "pip_x", "pip_y", "pip_w", "game_w", "game_cx", "game_cy", "full_win"];
   const FRAME_COLORS = { none: null, white: "FFFFFF", cam: "9146FF", gold: "E6C068" };
   const PIP_BORDER = 6, PIP_RADIUS = 28, NICK_TOP = [36, 48];
   // streamer.NICK_STYLES: canvas font, size, uppercase, padding x, padding y, icon width
@@ -520,6 +520,17 @@ const Vertical = (() => {
   const r4 = (v) => Math.round(v * 10000) / 10000;
 
   /** Same ranges as streamer.clean_look. */
+  const FULL_WIN_RANGES = { cam_w: [0.25, 1], cam_x: [0, 1], cam_y: [0, 1], game_w: [0.2, 4], game_cx: [-1, 2], game_cy: [-1, 2] };
+  /** «Вебка + вся гра» windows the user moved (twin of streamer._clean_full_win); nothing → null (the preset). */
+  function cleanFullWin(v) {
+    if (!v || typeof v !== "object") return null;
+    const out = {};
+    for (const [k, [lo, hi]] of Object.entries(FULL_WIN_RANGES)) {
+      const n = v[k] === null || v[k] === undefined ? NaN : Number(v[k]);
+      if (Number.isFinite(n)) out[k] = Math.round(clampN(n, lo, hi) * 1e4) / 1e4;
+    }
+    return Object.keys(out).length ? out : null;
+  }
   function cleanLook(raw) {
     const o = { ...LOOK_DEFAULT, ...(raw || {}) };
     const num = (k, lo, hi, nullable) => {
@@ -532,6 +543,7 @@ const Vertical = (() => {
     num("cam_fx", 0, 1, true); num("cam_fy", 0, 1, true); num("game_x", 0, 1); num("game_y", 0, 1);
     num("pip_w", 0.25, 1); num("pip_x", 0, 1); num("pip_y", 0, 1); num("nick_x", 0, 1, true); num("nick_y", 0, 1, true);
     num("game_w", 0.2, 4, true); num("game_cx", -1, 2); num("game_cy", -1, 2);
+    o.full_win = cleanFullWin(o.full_win);
     if (!(o.nick_style in NICK_STYLES)) o.nick_style = "twitch";
     if (!(o.frame in FRAME_COLORS)) o.frame = "white";
     o.round = !!o.round; o.divider = !!o.divider;
@@ -590,26 +602,33 @@ const Vertical = (() => {
     if (layout === "game") {
       parts.push(part("game", fit(OW / OH, frame, gf, lk.game_zoom, 0.5), [0, 0, OW, OH]));
       at = NICK_TOP;
-    } else if (layout === "top" || layout === "full") {
+    } else if (layout === "top") {
       const ch = even(OH * lk.share);
       parts.push(part("cam", fit(OW / ch, cb, f, lk.cam_zoom), [0, 0, OW, ch]));
-      if (layout === "top") {
-        const gh = OH - ch;
-        parts.push(part("game", fit(OW / gh, frame, gf, lk.game_zoom, 0.5), [0, ch, OW, gh]));
-        pos = Math.round(1000 * ch / OH) / 10;
-      } else {
-        // the whole game without the strip where the webcam sits
-        let gbox = frame;
-        const camL = cam[0], camR = cam[0] + cam[2];
-        if (camR <= 0.4) gbox = [camR * W + 2, 0, W - camR * W - 2, H];
-        else if (camL >= 0.6) gbox = [0, 0, camL * W - 2, H];
-        const gh = Math.min(even(OW * gbox[3] / gbox[2]), even(OH - ch - 260));
-        bg = true;
-        parts.push(part("game", fit(OW / gh, gbox, gf, lk.game_zoom, 0.5), [0, ch, OW, gh]));
-        pos = Math.round(10 * Math.min(85, 100 * (ch + gh + 150) / OH)) / 10;
-      }
+      const gh = OH - ch;
+      parts.push(part("game", fit(OW / gh, frame, gf, lk.game_zoom, 0.5), [0, ch, OW, gh]));
+      pos = Math.round(1000 * ch / OH) / 10;
       if (lk.divider) divider = [0, ch - 3, OW, 6];
       at = NICK_TOP;
+    } else if (layout === "full") {
+      // two windows: the webcam (full width on top at first) and the whole game under it, without the webcam's strip
+      const fw = lk.full_win || {}, get = (k, d) => (fw[k] === undefined ? d : fw[k]);
+      const pw = even(OW * get("cam_w", 1)), ph = even(pw * cb[3] / cb[2]);
+      const px = Math.trunc(clampN(get("cam_x", 0) * OW, 0, OW - pw)), py = Math.trunc(clampN(get("cam_y", 0) * OH, 0, OH - ph));
+      let gbox = frame;
+      const camL = cam[0], camR = cam[0] + cam[2];
+      if (camR <= 0.4) gbox = [camR * W + 2, 0, W - camR * W - 2, H];
+      else if (camL >= 0.6) gbox = [0, 0, camL * W - 2, H];
+      const gw0 = get("game_w", 1), gh0 = OW * gw0 * gbox[3] / gbox[2];
+      const gl = { ...lk, game_w: gw0, game_cx: get("game_cx", 0.5), game_cy: get("game_cy", (py + ph + gh0 / 2) / OH) };
+      const gw = gameWindow(gl, gbox, gf);
+      bg = gw.bg;
+      parts.push({ ...part("game", gw.src, gw.dst), win: gw.win });
+      parts.push(part("cam", fit(cb[2] / cb[3], cb, f, lk.cam_zoom), [px, py, pw, ph]));
+      const gd = gw.dst;
+      pos = Math.round(10 * Math.min(85, 100 * (Math.max(py + ph, gd[1] + gd[3]) + 150) / OH)) / 10;
+      if (lk.divider) divider = [px, py + ph - 3, pw, 6];
+      at = [px + NICK_TOP[0], py + NICK_TOP[1]];
     } else {
       const b = color ? PIP_BORDER : 0;
       const pw = Math.min(even(OW * lk.pip_w), OW - 2 * b), ph = even(pw * cb[3] / cb[2]);
@@ -809,7 +828,8 @@ const Vertical = (() => {
     const lk = look();
     $("vxSelName").textContent = part.role === "cam" ? (sp.layout === "pip" ? "Вікно з вебкою" : "Вебка") : "Гра";
     let pct = `${Math.round((part.role === "cam" ? lk.cam_zoom : lk.game_zoom) * 100)}%`;
-    if (part.role === "cam" && sp.layout === "pip") pct = `${Math.round((w / OW) * 100)}% ширини`;
+    if (part.role === "cam" && (sp.layout === "pip" || sp.layout === "full")) pct = `${Math.round((w / OW) * 100)}% ширини`;
+    else if (part.role === "game" && sp.layout === "full") pct = `${Math.round((part.win[2] / OW) * 100)}% ширини`;
     else if (part.role === "game" && sp.layout === "pip") {
       // the window's width against the phone's; the zoom inside it, if any
       pct = (lk.game_w === null ? "на весь екран" : `${Math.round((part.win[2] / OW) * 100)}% ширини`) + (lk.game_zoom > 1 ? ` · наближення ${Math.round(lk.game_zoom * 100)}%` : "");
@@ -820,6 +840,14 @@ const Vertical = (() => {
   /** «↺» on the box: the selected picture as at first (styling and the other picture stay). */
   function resetSel() {
     const d = LOOK_DEFAULT;
+    const sp = curSp();
+    if (sp && sp.layout === "full") {
+      // that window back where the preset puts it; the other stays
+      const fw = { ...(look().full_win || {}) };
+      Object.keys(fw).filter((k) => k.startsWith(st.sel === "cam" ? "cam_" : "game_")).forEach((k) => delete fw[k]);
+      commitLook(st.sel === "cam" ? { cam_zoom: 1, cam_fx: null, cam_fy: null, full_win: fw } : { game_zoom: 1, game_x: 0.5, game_y: 0.5, full_win: fw });
+      return;
+    }
     if (st.sel === "cam") commitLook({ cam_zoom: 1, cam_fx: null, cam_fy: null, share: d.share, pip_x: d.pip_x, pip_y: d.pip_y, pip_w: d.pip_w });
     else if (st.sel === "game") commitLook({ game_zoom: 1, game_x: 0.5, game_y: 0.5, game_w: null, game_cx: 0.5, game_cy: 0.5 });
   }
@@ -986,16 +1014,26 @@ const Vertical = (() => {
         if (Math.abs(x - hx) < HANDLE && Math.abs(y - hy) < HANDLE) return { mode: "corner", h, part: sel };
       }
     }
-    if (cam && sp.layout !== "pip" && Math.abs(y - cam.dst[3]) < 30) return { mode: "seam", part: cam };
-    if (cam && sp.layout === "pip" && inside(cam.dst)) return { mode: "pipmove", part: cam };
+    const free = sp.layout === "pip" || sp.layout === "full";  // pictures are windows: move them, resize by a corner
+    if (cam && sp.layout === "top" && Math.abs(y - cam.dst[3]) < 30) return { mode: "seam", part: cam };
+    if (cam && free && inside(cam.dst)) return { mode: "pipmove", part: cam };
     if (inside(cam && cam.dst)) return { mode: "cam", part: cam };
-    if (inside(game && game.dst)) return { mode: sp.layout === "pip" ? "gamemove" : "game", part: game };
+    if (inside(game && game.dst)) return { mode: free ? "gamemove" : "game", part: game };
     return null;
   }
   const CURSOR = { seam: "ns-resize", corner: "nwse-resize", pipmove: "move", gamemove: "move", cam: "grab", game: "grab", nick: "move" };
   function phoneXY(e) {
     const r = $("vxCanvas").getBoundingClientRect();
     return [((e.clientX - r.left) / r.width) * OW, ((e.clientY - r.top) / r.height) * OH];
+  }
+
+  const fullNowOrPip = (sp) => sp.layout === "pip" || sp.layout === "full";
+  /** «Вебка + вся гра»: where both windows are now, as full_win keys (so moving one keeps the other in place). */
+  function fullWinOf(sp) {
+    const cam = sp.parts.find((p) => p.role === "cam"), game = sp.parts.find((p) => p.role === "game");
+    const [wx, wy, ww, wh] = game.win;
+    return { cam_w: cam.dst[2] / OW, cam_x: cam.dst[0] / OW, cam_y: cam.dst[1] / OH,
+      game_w: ww / OW, game_cx: (wx + ww / 2) / OW, game_cy: (wy + wh / 2) / OH };
   }
 
   function phoneDown(e) {
@@ -1020,6 +1058,15 @@ const Vertical = (() => {
       start.gx = sx + sw / 2; start.gy = sy + sh / 2;
     }
     st.gesture = { moved: false };
+    // «Вебка + вся гра» keeps its windows apart from «Гра на весь екран»: the same moves, written into full_win
+    const fullNow = sp.layout === "full" ? fullWinOf(sp) : null;
+    const liveWin = (patch) => {
+      if (!fullNow) return liveLook(patch);
+      const names = { pip_w: "cam_w", pip_x: "cam_x", pip_y: "cam_y", game_w: "game_w", game_cx: "game_cx", game_cy: "game_cy" };
+      const fw = { ...fullNow };
+      for (const [k, v] of Object.entries(patch)) fw[names[k]] = v;
+      liveLook({ full_win: fw });
+    };
     const move = (ev) => {
       const [x, y] = phoneXY(ev);
       const dx = x - x0, dy = y - y0;
@@ -1039,20 +1086,20 @@ const Vertical = (() => {
         liveLook({ game_x: clampN(start.gx - (dx / pw) * sw, 0, 1), game_y: clampN(start.gy - (dy / phh) * sh, 0, 1) });
       } else if (hit.mode === "gamemove") {
         const [wx, wy, ww, wh] = p.win;
-        liveLook({ game_w: ww / OW, game_cx: (wx + dx + ww / 2) / OW, game_cy: (wy + dy + wh / 2) / OH });
-      } else if (hit.mode === "corner" && p.role === "game" && sp.layout === "pip") {
+        liveWin({ game_w: ww / OW, game_cx: (wx + dx + ww / 2) / OW, game_cy: (wy + dy + wh / 2) / OH });
+      } else if (hit.mode === "corner" && p.role === "game" && fullNowOrPip(sp)) {
         // the game window grows or shrinks around the opposite corner of what is seen of it
         const [wx, wy, ww, wh] = p.win;
         const ax = hit.h.includes("e") ? px : px + pw, ay = hit.h.includes("s") ? py : py + phh;
         const k = clampN(Math.hypot(x - ax, y - ay) / Math.max(1, Math.hypot(x0 - ax, y0 - ay)), (0.2 * OW) / ww, (4 * OW) / ww);
         const nx = ax + (wx - ax) * k, ny = ay + (wy - ay) * k;
-        liveLook({ game_w: (ww * k) / OW, game_cx: (nx + ww * k / 2) / OW, game_cy: (ny + wh * k / 2) / OH });
-      } else if (hit.mode === "pipmove") liveLook({ pip_x: clampN(px + dx, 0, OW - pw) / OW, pip_y: clampN(py + dy, 0, OH - phh) / OH });
-      else if (hit.mode === "corner" && p.role === "cam" && sp.layout === "pip") {
+        liveWin({ game_w: (ww * k) / OW, game_cx: (nx + ww * k / 2) / OW, game_cy: (ny + wh * k / 2) / OH });
+      } else if (hit.mode === "pipmove") liveWin({ pip_x: clampN(px + dx, 0, OW - pw) / OW, pip_y: clampN(py + dy, 0, OH - phh) / OH });
+      else if (hit.mode === "corner" && p.role === "cam" && fullNowOrPip(sp)) {
         const b = (p.border || 0) * 2, east = hit.h.includes("e"), south = hit.h.includes("s");
         const ow = clampN(pw + (east ? dx : -dx), OW * 0.25 + b, OW);
         const oh = b + (ow - b) * (phh - b) / (pw - b);
-        liveLook({ pip_w: (ow - b) / OW, pip_x: clampN(east ? px : px + pw - ow, 0, OW - ow) / OW, pip_y: clampN(south ? py : py + phh - oh, 0, OH - oh) / OH });
+        liveWin({ pip_w: (ow - b) / OW, pip_x: clampN(east ? px : px + pw - ow, 0, OW - ow) / OW, pip_y: clampN(south ? py : py + phh - oh, 0, OH - oh) / OH });
       } else if (hit.mode === "corner") {
         // a corner pulled away from the middle of the picture zooms in, towards it zooms out
         const cx = px + pw / 2, cy = py + phh / 2;

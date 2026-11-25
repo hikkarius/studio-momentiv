@@ -112,13 +112,25 @@ def test_plan_share_game_x_and_other_layouts():
     assert _inside(edge["parts"][1]["src"])
 
     full = streamer.plan(CAM, FACE, 1920, 1080, {"layout": "full"})
-    # the whole game without the strip where the webcam sits (left here): no blurred streamer in the game
-    g = full["parts"][1]
+    # two windows: the webcam full width on top, under it the whole game without the strip where the webcam sits
+    g, c = full["parts"]
+    assert c["role"] == "cam" and c["dst"][:3] == [0, 0, 1080]
     assert full["bg"] and g["src"][0] >= CAM[0] + CAM[2] and g["src"][0] + g["src"][2] == pytest.approx(1.0, abs=1e-3)
     assert g["src"][3] == pytest.approx(1.0, abs=1e-3) and g["dst"][2] == 1080 and g["dst"][3] > 608
-    assert full["pos"] > 100 * (full["parts"][0]["dst"][3] + g["dst"][3]) / 1920
-    mid = streamer.plan([0.4, 0.05, 0.2, 0.25], None, 1920, 1080, {"layout": "full"})["parts"][1]
-    assert mid["src"] == pytest.approx([0, 0, 1, 1], abs=0.002) and mid["dst"][3] == 608  # a webcam in the middle: nothing to cut, it is blurred
+    assert abs(g["dst"][1] - c["dst"][3]) <= 1  # right under the webcam
+    assert full["pos"] > 100 * (c["dst"][3] + g["dst"][3]) / 1920
+    mid = streamer.plan([0.4, 0.05, 0.2, 0.25], None, 1920, 1080, {"layout": "full"})["parts"][0]
+    assert mid["src"] == pytest.approx([0, 0, 1, 1], abs=0.002) and mid["dst"][3] == 607  # a webcam in the middle: nothing to cut, it is blurred
+    # both windows moved and resized: the webcam smaller at the bottom right, the game bigger on top
+    moved = streamer.plan(CAM, FACE, 1920, 1080, {"layout": "full", "divider": True, "nick": "lebiga", "full_win": {
+        "cam_w": 0.5, "cam_x": 1, "cam_y": 1, "game_w": 1.3, "game_cy": 0.3}})
+    g, c = moved["parts"]
+    assert c["dst"][0] + c["dst"][2] == 1080 and c["dst"][1] + c["dst"][3] == 1920 and c["dst"][2] == 540
+    assert g["win"][2] == pytest.approx(1404, abs=1) and g["dst"][0] == 0 and g["dst"][2] == 1080
+    assert moved["divider"] == [c["dst"][0], c["dst"][1] + c["dst"][3] - 3, 540, 6]
+    assert moved["nick"]["x"] == c["dst"][0] + 36 and moved["nick"]["y"] == c["dst"][1] + 48
+    assert streamer.clean_look({"full_win": {"cam_w": 7, "x": 1}})["full_win"] == {"cam_w": 1.0}
+    assert streamer.clean_look({"full_win": {"x": 1}})["full_win"] is None
 
     pip = streamer.plan(CAM, FACE, 1920, 1080, {"layout": "pip"})
     game, cam = pip["parts"]
@@ -265,6 +277,7 @@ def test_render_with_scenes_real(tmp_path):
 @needs_ffmpeg
 @pytest.mark.parametrize("look", [{"layout": "top", "divider": True, "nick": "lebiga", "cam_zoom": 1.5},
                                   {"layout": "full", "game_zoom": 1.4, "nick": "lebiga", "nick_style": "tape"},
+                                  {"layout": "full", "full_win": {"cam_w": 0.5, "cam_x": 1, "cam_y": 0.8, "game_w": 1.5, "game_cy": 0.3}},
                                   {"layout": "top", "nick": "lebiga", "nick_style": "neon"},
                                   {"layout": "pip", "pip_w": 1.0, "nick": "lebiga", "nick_style": "pill"},
                                   {"layout": "pip", "round": True, "frame": "gold", "pip_x": 1, "pip_y": 1},
