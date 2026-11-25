@@ -1929,7 +1929,8 @@ def _settings_view() -> Dict[str, Any]:
 
 
 def _experimental_model_choices() -> List[Dict[str, str]]:
-    """«Модель ШІ для 🧪 експериментального пошуку»: auto, the strongest free model by name, fast."""
+    """«Модель ШІ для 🧪 експериментального пошуку»: auto (strongest free that answers) or fast.
+    A model id set by hand in user_settings.json still works and shows as «Вибрано вручну»."""
     from backend.gemini_models import pretty_name
     from config_loader import app_config
 
@@ -1937,9 +1938,6 @@ def _experimental_model_choices() -> List[Dict[str, str]]:
     chain = ", далі ".join(pretty_name(m) for m in strong[:3]) or "найсильнішу безкоштовну модель"
     out = [{"value": "auto", "label": "Авто: найсильніша вільна", "tag": "Рекомендовано",
             "hint": f"Пробує {chain}. Якщо всі зайняті, бере швидку."}]
-    if strong:
-        out.append({"value": strong[0], "label": pretty_name(strong[0]),
-                    "hint": "Найрозумніша з безкоштовних. Якщо перевантажена, студія чекає до хвилини, потім бере наступну сильну."})
     out.append({"value": "fast", "label": "Швидка",
                 "hint": "Як у класичному: відповідь за секунди, найбільший денний ліміт."})
     return out

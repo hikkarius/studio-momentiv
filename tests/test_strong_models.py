@@ -218,9 +218,9 @@ def test_models_endpoints_and_the_experimental_model_setting(monkeypatch, auto):
 
     view = client.get("/api/settings").json()
     assert view["values"]["gemini"]["experimental_model"] == "auto"
-    assert [c["value"] for c in view["choices"]["experimental_model"]] == ["auto", HYDROGEN, "fast"]
-    assert client.post("/api/settings", json={"gemini": {"experimental_model": HYDROGEN}}).status_code == 200
-    assert app_config.gemini.experimental_model == HYDROGEN
+    assert [c["value"] for c in view["choices"]["experimental_model"]] == ["auto", "fast"]
+    assert client.post("/api/settings", json={"gemini": {"experimental_model": "fast"}}).status_code == 200
+    assert app_config.gemini.experimental_model == "fast"
     assert client.post("/api/settings", json={"gemini": {"experimental_model": "gpt-5"}}).status_code == 400
 
 

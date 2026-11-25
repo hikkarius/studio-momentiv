@@ -23,11 +23,11 @@ def test_choose_experimental_model_and_check_models(page, studio, project, monke
     _open_ai(page, studio)
     cards = page.locator("#setExpModel button")
     cards.first.wait_for()
-    assert cards.count() == 3
+    assert cards.count() == 2
     assert page.locator("#setExpModel [data-v=auto]").get_attribute("aria-pressed") == "true"
-    page.click("#setExpModel [data-v='gemini-4-hydrogen']")
-    page.wait_for_function("document.querySelector(\"#setExpModel [data-v='gemini-4-hydrogen']\").getAttribute('aria-pressed') === 'true'")
-    assert config_loader.app_config.gemini.experimental_model == "gemini-4-hydrogen"
+    page.click("#setExpModel [data-v='fast']")
+    page.wait_for_function("document.querySelector(\"#setExpModel [data-v='fast']\").getAttribute('aria-pressed') === 'true'")
+    assert config_loader.app_config.gemini.experimental_model == "fast"
 
     page.click("#setModelsCheck")
     page.locator("#setModelsList li").nth(1).wait_for()
