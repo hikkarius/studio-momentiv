@@ -15,6 +15,8 @@ class WhisperConfig(BaseModel):
     cpu_threads: int = Field(default=8, ge=1, le=64)
     faster_whisper: bool = True
     beam_size: int = Field(default=5, ge=1, le=10)
+    batch_size: int = Field(default=8, ge=0, le=64)
+    idle_unload_min: int = Field(default=10, ge=0, le=1440)
 
 
 class ClipsConfig(BaseModel):
@@ -39,12 +41,13 @@ class GeminiConfig(BaseModel):
         default_factory=lambda: [
             "gemini-3.1-flash-lite",
             "gemini-3.5-flash-lite",
-            "gemini-flash-lite-latest",
-            "gemini-3.5-flash",
         ],
         min_length=1,
     )
     rerank: bool = True
+    parallel_windows: int = Field(default=3, ge=1, le=8)
+    thinking_level: str = Field(default="minimal", pattern=r"^(|minimal|low|medium|high)$")
+    max_rpm_per_model: int = Field(default=12, ge=0, le=1000)
 
 
 class CacheConfig(BaseModel):
@@ -63,6 +66,9 @@ class StudioConfig(BaseModel):
     default_clips: int = Field(default=0, ge=0, le=100)         # 0 = auto (by video length)
     default_filter: str = Field(default="Viral Hooks")
     cleanup_days: int = Field(default=0, ge=0, le=3650)         # delete re-creatable clip files older than N days; 0 = never
+    daily_backup: bool = True       # copy the database and transcripts to backups/ once a day, keep 7
+    keep_awake: bool = True         # Windows: do not let the laptop sleep while the queue has work
+    wait_for_limit: bool = True     # Gemini limit exhausted: pause the queue and resume, instead of failing
 
 
 class AppConfig(BaseModel):

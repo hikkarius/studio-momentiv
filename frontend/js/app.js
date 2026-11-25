@@ -1056,13 +1056,21 @@ const ERROR_SHORT = [
   ["не приймає ключ", "Google не приймає ключ Gemini", "Встав ключ ще раз: «Налаштування → Ключ і розпізнавання»."],
   ["перевантажений", "Gemini зараз перевантажений", "Транскрипцію збережено. Спробуй за кілька хвилин."],
   ["перезапуском студії", "Перервано: студію перезапустили", "Натисни «Ще раз», і пошук піде знову."],
+  // tip null: the rest of the message after its first sentence (it carries the sizes)
+  ["Не вистачає місця на диску", "Не вистачає місця на диску", null],
 ];
 function errorSummaryHtml(text) {
   const full = String(text || "").trim();
   const known = ERROR_SHORT.find(([mark]) => full.includes(mark));
   let head = "Не вдалося знайти кліпи";
   let tip = "Натисни «Ще раз».";
-  if (known) [, head, tip] = known;
+  if (known) {
+    [, head, tip] = known;
+    if (tip === null) {
+      tip = full.slice(full.indexOf(head) + head.length).replace(/^[.:]\s*/, "") || "Звільни місце і натисни «Ще раз».";
+      return `<span class="err-sum"><b>${escapeHtml(head)}</b><span>${escapeHtml(tip)}</span></span>`; // already the whole message
+    }
+  }
   else if (full) {
     const first = (full.match(/^.+?[.!?](\s|$)/) || [full])[0].trim();
     tip = first.length > 140 ? first.slice(0, 137) + "…" : first;
