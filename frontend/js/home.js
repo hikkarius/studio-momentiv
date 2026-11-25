@@ -215,6 +215,7 @@ const Home = (() => {
     const own = projects.filter((p) => !hide.has(p.id)).length;
     $("historyCount").textContent = queueCount ? `${own} · у черзі ${queueCount}` : String(own);
     document.body.classList.toggle("home-empty", loaded && !any);
+    fitDropHint();
     $("historyCard").hidden = !any;
     const tools = projects.length > 6;
     document.querySelector(".home-search").hidden = !tools;
@@ -237,6 +238,18 @@ const Home = (() => {
     const search = s && s.value === "experimental" ? "🧪 експериментальний пошук" : "📼 класичний пошук";
     const chips = [filter, search, `кліпи ${defaults.min}–${defaults.max} с`, count, `мова: ${lang}`];
     $("heroHint").innerHTML = chips.map((t) => `<span class="home-chip">${escapeHtml(t)}</span>`).join("");
+    fitDropHint();
+  }
+
+  /** «або просто перетягни відео у вікно» is only a hint: when the chips leave no room on their line, hide it
+   * instead of letting it drop to a line of its own. */
+  function fitDropHint() {
+    const hint = document.querySelector(".home-drop-hint");
+    const edit = $("homeOptsEdit");
+    if (!hint || !edit) return;
+    hint.classList.remove("no-room");
+    if (!hint.offsetParent) return; // hidden anyway (first run, phone width)
+    if (hint.offsetTop > edit.offsetTop + edit.offsetHeight / 2) hint.classList.add("no-room");
   }
 
   // ── drag files anywhere ─────────────────────────────────────────────────────
@@ -268,6 +281,7 @@ const Home = (() => {
   function init() {
     initDrop();
     renderOpts();
+    window.addEventListener("resize", fitDropHint);
     ["heroFilter", "heroClips", "heroLang", "heroSearch"].forEach((id) => $(id)?.addEventListener("change", renderOpts));
     $("homeOptsEdit").addEventListener("click", () => {
       const panel = $("homeOptsPanel");

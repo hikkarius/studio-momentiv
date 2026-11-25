@@ -1099,6 +1099,7 @@ body.home-empty .home-opts { justify-content: center; }
 .home-opts-edit:hover, .linkish:hover { text-decoration: underline; }
 .linkish { padding: 0; }
 .home-drop-hint { margin-left: auto; color: var(--text-muted); }
+.home-drop-hint.no-room { display: none; }
 .home-opts-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px; border-radius: var(--r-md); background: var(--bg-card-alt); border: 1px solid var(--border-color); }
 .home-opts-panel[hidden] { display: none; }
 .home-opts-note { font-size: var(--fs-sm); color: var(--text-muted); }
