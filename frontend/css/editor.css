@@ -668,9 +668,16 @@
 .vx-hint { margin: 0; font-size: var(--fs-sm); line-height: 1.4; color: var(--ed-muted); }
 .vx-lookfoot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid var(--ed-line2); }
 .vx-lookfoot .ed-btn { background: var(--ed-panel); }
+.vx-hist { display: flex; gap: 6px; }
+.vx-lookfoot .ed-btn:disabled { opacity: .45; cursor: default; }
 /* «Стрім»: the selection box on the phone (click the webcam or the game) */
 .vx-sel { position: absolute; z-index: 6; border: 2px solid var(--cam); box-shadow: 0 0 0 1px rgb(var(--scrim-rgb) / .6); pointer-events: none; }
 .vx-sel.game { border-color: var(--ed-accent); }
+/* snapping guides while a window or the nick is dragged (centre, edges, the other picture's edges) */
+.vx-guides { position: absolute; inset: 0; z-index: 7; pointer-events: none; }
+.vx-guides i { position: absolute; background: var(--cam); box-shadow: 0 0 0 1px rgb(var(--scrim-rgb) / .5); }
+.vx-guides i.v { top: 0; bottom: 0; width: 2px; margin-left: -1px; }
+.vx-guides i.h { left: 0; right: 0; height: 2px; margin-top: -1px; }
 .vx-sel[hidden] { display: none; }
 .vx-sel i { position: absolute; width: 14px; height: 14px; border-radius: 3px; background: var(--white); border: 2px solid var(--black); }
 /* where each handle sits is set from vertical.js: at the phone's edge they move in, past its rounded corners */

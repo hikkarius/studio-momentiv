@@ -732,6 +732,7 @@
                   <div class="vx-cap" id="vxCap"></div>
                   <div class="vx-bigplay" id="vxBigPlay" aria-hidden="true">▶</div>
                   <div class="vx-busy" id="vxBusy" hidden>Шукаю обличчя…</div>
+                  <div class="vx-guides" id="vxGuides" aria-hidden="true"></div>
                   <div class="vx-sel" id="vxSel" hidden><i data-h="nw"></i><i data-h="ne"></i><i data-h="sw"></i><i data-h="se"></i>
                     <div class="vx-selchip" id="vxSelChip"><span id="vxSelName">Вебка</span> <b id="vxSelPct">100%</b> <button type="button" id="vxSelReset" title="Як було">↺</button></div></div>
                 </div>
@@ -794,7 +795,7 @@
                     <button type="button" data-v="pip"><i class="m"><s class="g" style="flex:1"></s><s class="c pip"></s></i>Гра на весь екран</button>
                   </div>
                   <div class="vx-look" id="vxLook">
-                    <p class="vx-hint" id="vxLookHint"><b>Клікни по вебці або по грі на телефоні</b>: з'явиться рамка. Тягни кут, щоб збільшити чи зменшити, тягни всередині, щоб посунути. Коліщатко миші теж наближує.</p>
+                    <p class="vx-hint" id="vxLookHint"><b>Клікни по вебці або по грі на телефоні</b>: з'явиться рамка. Тягни кут, щоб збільшити чи зменшити, тягни всередині, щоб посунути. Коліщатко миші теж наближує. Вікна прилипають до центру й країв (з Alt — вільно), Ctrl+Z скасовує.</p>
                     <div class="vx-row" id="vxRoundRow"><div class="vx-lbl">Кути вікна</div>
                       <div class="vx-seg" id="vxCamRound">
                         <button type="button" data-v="0">Прямі кути</button>
@@ -819,7 +820,11 @@
                     </div>
                     <div class="vx-lookfoot">
                       <label class="vx-check"><input type="checkbox" id="vxLookOwn"> Лише для цього кліпу</label>
-                      <button type="button" class="ed-btn sm" id="vxLookReset" title="Розміри й наближення як спочатку">↺ Як було</button>
+                      <span class="vx-hist">
+                        <button type="button" class="ed-btn sm" id="vxUndo" title="Скасувати (Ctrl+Z)" aria-label="Скасувати" disabled>↶</button>
+                        <button type="button" class="ed-btn sm" id="vxRedo" title="Повернути (Ctrl+Shift+Z)" aria-label="Повернути" disabled>↷</button>
+                        <button type="button" class="ed-btn sm" id="vxLookReset" title="Розміри й наближення як спочатку">↺ Як було</button>
+                      </span>
                     </div>
                   </div>
                 </div>

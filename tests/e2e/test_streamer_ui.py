@@ -326,3 +326,44 @@ def test_webcam_and_whole_game_are_windows(page, studio, project, monkeypatch):
     page.click("#vxSelReset")
     page.wait_for_function("Vertical.state().stream.parts[1].dst[2] === 1080")
     assert page.evaluate("Vertical.state().stream.parts[0].dst[1]") == gy
+
+
+def test_snapping_and_undo(page, studio, project, monkeypatch):
+    """Moving a window snaps it to the middle (a guide line shows); Ctrl+Z / Ctrl+Shift+Z undo and redo."""
+    monkeypatch.setattr(streamer, "detect_webcam",
+                        lambda source, **k: {"cam": CAM, "face": [0.17, 0.78], "w": 320, "h": 180, "note": ""})
+    keep_first_clip()
+    open_editor(page, studio)
+    page.click("#edMode button[data-m='vx']")
+    page.wait_for_function("document.getElementById('vxSmTitle').textContent.includes('Схоже')", timeout=20000)
+    page.click("#vxSmOk")
+    vx_tab(page, "frame")
+    page.wait_for_function("Vertical.state().layout === 'stream' && !!Vertical.state().cam", timeout=20000)
+    page.click("#vxLay button[data-v='pip']")
+    page.wait_for_function("Vertical.state().stream.layout === 'pip'")
+    assert page.locator("#vxUndo").is_disabled() is False  # switching the layout is one step back already
+    page.evaluate("document.getElementById('edVideo').pause()")
+    box = page.locator("#vxCanvas").bounding_box()
+    k = box["height"] / 1920
+    at = lambda x, y: (box["x"] + x * k, box["y"] + y * k)  # noqa: E731
+    c = page.evaluate("Vertical.state().stream.parts[1].dst")
+    before = page.evaluate("Vertical.state().look.pip_x")
+    mid = (c[0] + c[2] / 2, c[1] + c[3] / 2)
+    page.mouse.click(*at(*mid))
+    page.mouse.move(*at(*mid))
+    page.mouse.down()
+    # near the middle of the phone (a few px off): it snaps exactly onto it, with a vertical guide line
+    page.mouse.move(*at(540 + 10, mid[1] + 300), steps=8)
+    assert page.locator("#vxGuides i.v").count() >= 1
+    page.mouse.up()
+    assert page.locator("#vxGuides i").count() == 0
+    page.wait_for_function("(() => { const d = Vertical.state().stream.parts[1].dst; return Math.abs(d[0] + d[2] / 2 - 540) <= 1; })()")
+
+    page.locator("#vxCanvas").focus()
+    page.keyboard.press("Control+z")
+    page.wait_for_function(f"Math.abs(Vertical.state().look.pip_x - {before}) < 0.001")
+    page.keyboard.press("Control+Shift+z")
+    page.wait_for_function(f"Math.abs(Vertical.state().look.pip_x - {before}) > 0.05")
+    assert page.locator("#vxRedo").is_disabled()
+    page.click("#vxUndo")
+    page.wait_for_function(f"Math.abs(Vertical.state().look.pip_x - {before}) < 0.001")

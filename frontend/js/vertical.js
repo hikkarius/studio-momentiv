@@ -857,9 +857,31 @@ const Vertical = (() => {
     st.live = { ...look(), ...patch };
     afterLook();
   }
+  /** Ctrl+Z / Ctrl+Shift+Z over the stream look (sizes, places, styling) of the open clip. */
+  const hist = { undo: [], redo: [] };
+  const savedLook = () => cleanLook((st.opts && st.opts.stream_look) || (st.stream && st.stream.look));
+  function undoLook(back) {
+    const from = back ? hist.undo : hist.redo, to = back ? hist.redo : hist.undo;
+    if (!from.length || !streamOn()) return false;
+    to.push(savedLook());
+    commitLook(from.pop(), { keepHistory: true });
+    ctx.toast(back ? "↶ Скасовано" : "↷ Повернуто");
+    return true;
+  }
+  function renderHist() {
+    $("vxUndo").disabled = !hist.undo.length;
+    $("vxRedo").disabled = !hist.redo.length;
+  }
+
   /** Keeps the change: in this clip (own look) or in the video (every clip without its own). */
-  async function commitLook(patch) {
+  async function commitLook(patch, { keepHistory = false } = {}) {
+    const before = savedLook();
     const lk = cleanLook({ ...look(), ...patch });
+    if (!keepHistory && JSON.stringify(before) !== JSON.stringify(cleanLook(lk))) {
+      hist.undo.push(before);
+      if (hist.undo.length > 50) hist.undo.shift();
+      hist.redo.length = 0;
+    }
     SIZE_KEYS.forEach((k) => { if (typeof lk[k] === "number") lk[k] = r4(lk[k]); });
     st.live = null;
     if (st.opts.stream_look) {
@@ -885,6 +907,7 @@ const Vertical = (() => {
   }
   function afterLook() {
     renderLook();
+    renderHist();
     const sp = curSp();
     if (sp && st.opts.pos == null && sp.pos != null) { $("vxPos").value = sp.pos; $("vxCap").style.top = `${sp.pos}%`; }
     if (sp && st.opts.hook_pos == null) { const hp = sp.hook_pos ?? 9.9; $("vxHookPos").value = hp; $("vxHook").style.top = `${hp}%`; }
@@ -1027,6 +1050,41 @@ const Vertical = (() => {
     return [((e.clientX - r.left) / r.width) * OW, ((e.clientY - r.top) / r.height) * OH];
   }
 
+  /** CapCut-like snapping while moving a window or the nick: to the phone's middle and edges and to the other
+   *  picture's edges, with guide lines; Alt held = no snapping. Returns the snapped top-left. */
+  const SNAP = 24;
+  function snapRect(x, y, w, h, other, off) {
+    const gx = [], gy = [];
+    const pick = (v, size, cands, guides) => {
+      if (off) return v;
+      let best = null;
+      for (const [line, aligned] of cands) {
+        for (const [pos, edge] of [[line, "a"], [line - size / 2, "m"], [line - size, "b"]]) {
+          if (aligned !== edge && !(aligned === "*" && edge !== "m")) continue;
+          if (Math.abs(v - pos) < SNAP && (!best || Math.abs(v - pos) < Math.abs(v - best[0]))) best = [pos, line];
+        }
+      }
+      if (!best) return v;
+      guides.push(best[1]);
+      return best[0];
+    };
+    // [line, which edge of the moved box meets it]: a = its start, m = its middle, b = its end, * = start or end
+    const xs = [[OW / 2, "m"], [0, "a"], [OW, "b"]], ys = [[OH / 2, "m"], [0, "a"], [OH, "b"]];
+    if (other) {
+      const [ox, oy, ow, oh] = other;
+      xs.push([ox, "*"], [ox + ow, "*"]);
+      ys.push([oy, "*"], [oy + oh, "*"]);
+    }
+    const nx = pick(x, w, xs, gx), ny = pick(y, h, ys, gy);
+    showGuides(gx, gy);
+    return [nx, ny];
+  }
+  function showGuides(xs, ys) {
+    const box = $("vxGuides");
+    box.innerHTML = xs.map((v) => `<i class="v" style="left:${(v / OW) * 100}%"></i>`).join("")
+      + ys.map((v) => `<i class="h" style="top:${(v / OH) * 100}%"></i>`).join("");
+  }
+
   const fullNowOrPip = (sp) => sp.layout === "pip" || sp.layout === "full";
   /** «Вебка + вся гра»: where both windows are now, as full_win keys (so moving one keeps the other in place). */
   function fullWinOf(sp) {
@@ -1067,6 +1125,8 @@ const Vertical = (() => {
       for (const [k, v] of Object.entries(patch)) fw[names[k]] = v;
       liveLook({ full_win: fw });
     };
+    const other = p && sp.parts.find((q) => q.role !== p.role);
+    const otherDst = other ? other.dst : null;
     const move = (ev) => {
       const [x, y] = phoneXY(ev);
       const dx = x - x0, dy = y - y0;
@@ -1076,7 +1136,8 @@ const Vertical = (() => {
       const [px, py, pw, phh] = start.dst || [0, 0, 1, 1];
       if (hit.mode === "nick") {
         const [nx, ny, nw, nh] = start.nick;
-        liveLook({ nick_x: clampN(nx + dx, 0, OW - nw) / OW, nick_y: clampN(ny + dy, 0, OH - nh) / OH });
+        const [sx, sy] = snapRect(clampN(nx + dx, 0, OW - nw), clampN(ny + dy, 0, OH - nh), nw, nh, null, ev.altKey);
+        liveLook({ nick_x: sx / OW, nick_y: sy / OH });
       } else if (hit.mode === "seam") liveLook({ share: clampN(y / OH, 0.22, 0.6) });
       else if (hit.mode === "cam") {
         const [, , sw, sh] = start.src;
@@ -1086,7 +1147,8 @@ const Vertical = (() => {
         liveLook({ game_x: clampN(start.gx - (dx / pw) * sw, 0, 1), game_y: clampN(start.gy - (dy / phh) * sh, 0, 1) });
       } else if (hit.mode === "gamemove") {
         const [wx, wy, ww, wh] = p.win;
-        liveWin({ game_w: ww / OW, game_cx: (wx + dx + ww / 2) / OW, game_cy: (wy + dy + wh / 2) / OH });
+        const [sx, sy] = snapRect(wx + dx, wy + dy, ww, wh, otherDst, ev.altKey);
+        liveWin({ game_w: ww / OW, game_cx: (sx + ww / 2) / OW, game_cy: (sy + wh / 2) / OH });
       } else if (hit.mode === "corner" && p.role === "game" && fullNowOrPip(sp)) {
         // the game window grows or shrinks around the opposite corner of what is seen of it
         const [wx, wy, ww, wh] = p.win;
@@ -1094,7 +1156,10 @@ const Vertical = (() => {
         const k = clampN(Math.hypot(x - ax, y - ay) / Math.max(1, Math.hypot(x0 - ax, y0 - ay)), (0.2 * OW) / ww, (4 * OW) / ww);
         const nx = ax + (wx - ax) * k, ny = ay + (wy - ay) * k;
         liveWin({ game_w: (ww * k) / OW, game_cx: (nx + ww * k / 2) / OW, game_cy: (ny + wh * k / 2) / OH });
-      } else if (hit.mode === "pipmove") liveWin({ pip_x: clampN(px + dx, 0, OW - pw) / OW, pip_y: clampN(py + dy, 0, OH - phh) / OH });
+      } else if (hit.mode === "pipmove") {
+        const [sx, sy] = snapRect(clampN(px + dx, 0, OW - pw), clampN(py + dy, 0, OH - phh), pw, phh, otherDst, ev.altKey);
+        liveWin({ pip_x: sx / OW, pip_y: sy / OH });
+      }
       else if (hit.mode === "corner" && p.role === "cam" && fullNowOrPip(sp)) {
         const b = (p.border || 0) * 2, east = hit.h.includes("e"), south = hit.h.includes("s");
         const ow = clampN(pw + (east ? dx : -dx), OW * 0.25 + b, OW);
@@ -1112,6 +1177,7 @@ const Vertical = (() => {
       ph.removeEventListener("pointerup", up);
       ph.removeEventListener("pointercancel", up);
       ph.style.cursor = "";
+      showGuides([], []);
       const moved = st.gesture && st.gesture.moved;
       st.gesture = null;
       if (moved || picked) st.suppressClick = true;
@@ -1226,6 +1292,7 @@ const Vertical = (() => {
     if (!c) return;
     flush();
     st.opts = optsFor(c);
+    hist.undo.length = 0; hist.redo.length = 0;  // another clip: its own history
     st.plan = null;
     st.planKey = "";
     st.words = [];
@@ -1276,6 +1343,16 @@ const Vertical = (() => {
     $("vxSelReset").addEventListener("pointerdown", (e) => e.stopPropagation());
     $("vxNick").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); e.stopPropagation(); });
     $("vxLookOwn").addEventListener("change", (e) => setOwnLook(e.target.checked));
+    $("vxUndo").addEventListener("click", () => undoLook(true));
+    $("vxRedo").addEventListener("click", () => undoLook(false));
+    document.addEventListener("keydown", (e) => {
+      // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y on step 2 (by key position, so it works with the Ukrainian layout too)
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || $("edVx").hidden || $("editor").hidden) return;
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable) return;
+      const redo = e.code === "KeyY" || (e.code === "KeyZ" && e.shiftKey);
+      if (e.code !== "KeyZ" && e.code !== "KeyY") return;
+      if (undoLook(!redo)) e.preventDefault();
+    });
     $("vxLookReset").addEventListener("click", () => {
       const d = {};
       SIZE_KEYS.forEach((k) => { d[k] = LOOK_DEFAULT[k]; });
