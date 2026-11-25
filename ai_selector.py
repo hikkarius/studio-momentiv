@@ -698,7 +698,9 @@ def _call_gemini_single_window(
     overload = overload or _OverloadWatch()
     gave_up = False
     plan = _attempt_plan(models)
-    for attempt, model_name in enumerate(plan + _fallback_models()):
+    # the fallback is a stronger model with a small free daily limit: only the experimental search
+    # (1-3 requests per video) uses it, the classic one (many windows) would use it up
+    for attempt, model_name in enumerate(plan + (_fallback_models() if experimental else [])):
         if error_kinds and all(k == "bad_key" for k in error_kinds):
             break  # a wrong key will not start working after a pause
         fallback = attempt >= len(plan)

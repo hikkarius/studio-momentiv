@@ -66,10 +66,11 @@ def test_one_window_makes_at_most_four_requests_per_round(sleeps):
     with pytest.raises(GeminiIncompleteError):
         analyze_and_find_clips(client=fake, segments=_segments(20), count=5)
     assert MAX_ATTEMPTS_PER_WINDOW == 4
-    # 4 tries of the Lite models + 1 of the fallback; no second round when Google answered nothing
-    assert fake.models.generate_content.call_count == 4 + 1
+    # 4 tries of the Lite models; no second round when Google answered nothing; the classic search
+    # does not spend the fallback model's small daily limit
+    assert fake.models.generate_content.call_count == 4
     models = [c.kwargs["model"] for c in fake.models.generate_content.call_args_list]
-    assert models == ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite"] * 2 + ["gemini-3.6-flash"]
+    assert models == ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite"] * 2
 
 
 def test_worst_case_for_a_long_video_is_bounded(sleeps):
@@ -79,15 +80,15 @@ def test_worst_case_for_a_long_video_is_bounded(sleeps):
     fake.models.generate_content.side_effect = Exception("503 UNAVAILABLE")
     with pytest.raises(GeminiIncompleteError):
         analyze_and_find_clips(client=fake, segments=_segments(), count=75)
-    assert fake.models.generate_content.call_count <= ai_selector.OVERLOAD_TRIP + 3 + 1  # + windows in flight + fallback
+    assert fake.models.generate_content.call_count <= ai_selector.OVERLOAD_TRIP + 3  # + windows in flight
     models = [c.kwargs["model"] for c in fake.models.generate_content.call_args_list]
-    assert models.count("gemini-3.6-flash") == 1
+    assert "gemini-3.6-flash" not in models
 
 
-def test_fallback_model_answers_when_every_lite_model_is_overloaded(sleeps):
+def test_fallback_model_answers_the_experimental_search_when_every_lite_model_is_overloaded(sleeps):
     fake = MagicMock()
     fake.models.generate_content.side_effect = [Exception("503 UNAVAILABLE")] * 4 + [_ok()]
-    clips = analyze_and_find_clips(client=fake, segments=_segments(20), count=1)
+    clips = ai_selector.find_clips_experimental(client=fake, segments=_segments(20), count=1)
     assert clips[0]["title"] == "ОК"
     assert fake.models.generate_content.call_args_list[-1].kwargs["model"] == "gemini-3.6-flash"
 

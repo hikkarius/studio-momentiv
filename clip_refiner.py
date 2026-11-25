@@ -276,7 +276,49 @@ def align_start_to_hook(clip: dict, words: list[dict]) -> dict:
                 best = i
     if best is None:
         return clip
+    best = _sentence_start_before(words, best, _end_flags(words))
     return {**clip, "start": words[best]["start"], "hook_aligned": True}
+
+
+# A hook found mid-sentence («…, тімфайт в топі…») moves back to its sentence start, at most this far
+_SENTENCE_BACK = 8.0
+
+
+def _sentence_start_before(words: list[dict], i: int, flags: list[bool], back: float = _SENTENCE_BACK) -> int:
+    """Index of the first word of the sentence holding words[i], if it is at most `back` seconds earlier;
+    otherwise i (a long run-on sentence keeps the hook)."""
+    j = i
+    while j > 0 and not flags[j - 1]:
+        j -= 1
+        if words[i]["start"] - words[j]["start"] > back:
+            return i
+    return j
+
+
+def start_on_sentence(clip: dict, words: list[dict], min_len: float, max_len: float,
+                      flags: list[bool] | None = None, fwd: float = 6.0) -> dict:
+    """Experimental search: a clip that still opens mid-sentence (after overlaps were trimmed) starts at the
+    previous sentence start when the clip stays within max_len, else at the next one when it stays ≥ min_len."""
+    if not words:
+        return clip
+    flags = flags if flags is not None else _end_flags(words)
+    s, e = float(clip["start"]), float(clip["end"])
+    i = next((k for k, w in enumerate(words) if w["start"] >= s - 0.05), None)
+    if i is None or i == 0 or flags[i - 1] or words[i]["start"] >= e:
+        return clip
+    j = _sentence_start_before(words, i, flags)
+    if j != i and e - words[j]["start"] + _START_PAD <= max_len:
+        new_start = max(words[j]["start"] - _START_PAD, words[j - 1]["end"] if j > 0 else 0.0)
+    else:
+        k = next((k for k in range(i, len(words) - 1) if flags[k]), None)
+        if k is None or words[k + 1]["start"] - s > fwd or e - words[k + 1]["start"] < min_len - 0.5:
+            return clip
+        new_start = max(words[k + 1]["start"] - _START_PAD, words[k]["end"])
+        j = k + 1
+    out = {**clip, "start": round(new_start, 2)}
+    if clip.get("hook_text"):
+        out["hook_text"] = " ".join(w["word"] for w in words[j:j + 14])
+    return out
 
 
 def trim_lead_fillers(clip: dict, words: list[dict], min_len: float, max_words: int = 3) -> dict:
@@ -388,6 +430,9 @@ def refine_clips(
             prepared.append(snapped)
 
     result = resolve_overlaps(prepared, w, min_len, max_len, video_duration, max_overlap, seg_ends)
+    if hook_first and w:
+        flags = _end_flags(w, seg_ends)
+        result = [start_on_sentence(c, w, min_len, max_len, flags) for c in result]
     result.sort(key=lambda c: c.get("score", 0), reverse=True)
     result = result[:count]
     result.sort(key=lambda c: c["start"])

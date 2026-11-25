@@ -374,3 +374,15 @@ def test_compare_save_retries_while_windows_holds_the_file(monkeypatch):
     monkeypatch.setattr(compare.time, "sleep", lambda s: None)
     compare._save("p_busy", {"status": "ready", "pairs": []})
     assert fails["n"] == 0 and compare.load("p_busy")["status"] == "ready"
+
+
+def test_hook_found_mid_sentence_moves_back_to_the_sentence_start():
+    from clip_refiner import start_on_sentence
+    words = _words("Все погано. Прилетів снайпер, у котрого три заряди, тімфайт в топі пропав. Далі.")
+    clip = {"start": 4.0, "end": 30.0, "hook_text": "тімфайт в топі пропав"}
+    out = align_start_to_hook(clip, words)
+    assert out["start"] == words[2]["start"]  # «Прилетів»
+    # a clip left mid-sentence after overlaps: back to the sentence start if it fits, else forward
+    assert start_on_sentence({"start": words[8]["start"], "end": 30.0}, words, 15, 60)["start"] < words[2]["start"] + 0.01
+    fwd = start_on_sentence({"start": words[8]["start"], "end": 30.0}, words, 1, words[-1]["end"] + 0.5 - words[2]["start"] - 0.5)
+    assert fwd["start"] >= words[11]["end"] - 0.01  # «Далі.»
