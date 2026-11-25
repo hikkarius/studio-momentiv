@@ -90,15 +90,6 @@ def test_gpu_capabilities_caching_and_reset(mock_probe):
     assert mock_probe.call_count == 2
 
 
-def test_warmup_whisper():
-    state = AppState()
-    mock_model = MagicMock()
-    with patch.object(state, "get_whisper", return_value=mock_model) as mock_get:
-        res = state.warmup_whisper()
-        assert res is mock_model
-        mock_get.assert_called_once()
-
-
 def test_gemini_client_missing_key_raises(monkeypatch):
     state = AppState()
     monkeypatch.setattr("state.ensure_gemini_api_key", lambda: None)

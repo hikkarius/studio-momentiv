@@ -549,7 +549,6 @@ def delete_project(project_id: str) -> bool:
 
 QUEUE_ACTIVE = ("downloading", "analyzing")
 QUEUE_PENDING = ("waiting", "limit")  # not started yet / paused until the Gemini limit resets
-QUEUE_FINISHED = ("done", "failed")
 
 
 def add_queue_item(

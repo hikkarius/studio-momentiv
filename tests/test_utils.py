@@ -14,14 +14,11 @@ from utils import (
     download_from_url,
     download_from_url_with_title,
     extract_audio,
-    extract_audio_slice,
     extract_clip_slice,
-    extract_compressed_audio,
     find_duplicate_video,
     generate_video_thumbnail,
     get_video_duration,
     probe_gpu_capabilities,
-    setup_console_encoding,
     wait_for_file_ready,
 )
 
@@ -130,41 +127,6 @@ def test_extract_clip_slice_cpu_only_fallback(mock_run, tmp_path, monkeypatch):
 
 
 @patch("subprocess.run")
-def test_extract_compressed_audio_and_missing(mock_run, tmp_path):
-    with pytest.raises(FileNotFoundError):
-        extract_compressed_audio("does_not_exist.mp4", str(tmp_path / "out.mp3"))
-
-    src = tmp_path / "vid.mp4"
-    src.write_bytes(b"video")
-    out = tmp_path / "audio" / "out.mp3"
-    mock_run.return_value = MagicMock(returncode=0)
-
-    res = extract_compressed_audio(str(src), str(out), bitrate="64k")
-    assert res == str(out)
-    assert "libmp3lame" in mock_run.call_args[0][0]
-
-
-@patch("subprocess.run")
-def test_extract_audio_slice_fallback_reencode(mock_run, tmp_path):
-    with pytest.raises(FileNotFoundError):
-        extract_audio_slice("missing.mp3", str(tmp_path / "slice.mp3"), 0.0, 5.0)
-
-    src = tmp_path / "full.mp3"
-    src.write_bytes(b"mp3data")
-    out = tmp_path / "slice.mp3"
-
-    # Stream copy fails -> falls back to libmp3lame re-encode
-    mock_run.side_effect = [
-        MagicMock(returncode=1),
-        MagicMock(returncode=0),
-    ]
-    res = extract_audio_slice(str(src), str(out), 10.0, 30.0)
-    assert res == str(out)
-    assert mock_run.call_count == 2
-    assert "libmp3lame" in mock_run.call_args_list[1][0][0]
-
-
-@patch("subprocess.run")
 def test_generate_video_thumbnail(mock_run, tmp_path):
     assert generate_video_thumbnail("missing.mp4", str(tmp_path / "t.jpg")) is None
 
@@ -243,20 +205,6 @@ def test_download_from_url_scheme_and_ssrf_validation():
         download_from_url("http://192.168.1.1/admin")
 
 
-def test_gpu_capabilities_badges():
-    caps_both = GpuCapabilities(has_nvenc=True, nvenc_device_name="RTX 4050", has_cuda=True, cuda_device_name="RTX 4050")
-    assert "NVENC + CUDA Whisper" in caps_both.summary_badge
-
-    caps_nvenc = GpuCapabilities(has_nvenc=True, nvenc_device_name="RTX 4050", has_cuda=False)
-    assert "NVENC" in caps_nvenc.summary_badge
-
-    caps_cuda = GpuCapabilities(has_nvenc=False, has_cuda=True, cuda_device_name="RTX 4050")
-    assert "CUDA Whisper" in caps_cuda.summary_badge
-
-    caps_cpu = GpuCapabilities(has_nvenc=False, has_cuda=False)
-    assert "CPU" in caps_cpu.summary_badge
-
-
 @patch("subprocess.run")
 def test_probe_gpu_capabilities_ctranslate2_cuda(mock_run):
     def mock_subproc(cmd, **kwargs):
@@ -281,10 +229,6 @@ def test_probe_gpu_capabilities_ctranslate2_cuda(mock_run):
         caps_none = probe_gpu_capabilities()
         assert caps_none.has_nvenc is False
         assert caps_none.has_cuda is False
-
-
-def test_setup_console_encoding():
-    setup_console_encoding()
 
 
 def test_wait_for_file_ready(tmp_path):

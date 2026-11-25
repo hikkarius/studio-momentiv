@@ -19,9 +19,6 @@
 .update-pill { padding: 7px 14px; font-size: var(--fs-sm); }
 .update-pill[hidden] { display: none; }
 @media (max-width: 600px) { .welcome-body { padding: 6px 16px 16px; } }
-.report-foot { border-top: 1px dashed var(--border-color); }
-.report-foot span { flex: 1; min-width: 220px; }
-.report-foot .btn { text-decoration: none; white-space: nowrap; }
 
 /* «Пізніше» sits under the key field as a normal quiet button; the version is in «Про студію» */
 .welcome-later { align-self: flex-start; margin-top: 4px; }

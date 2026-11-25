@@ -121,9 +121,7 @@ a.linkish { color: var(--orange-text); font-weight: 700; text-decoration: none; 
 .disk-legend span { display: flex; flex-direction: column; }
 .disk-legend small { color: var(--text-muted); font-size: var(--fs-xs); }
 .disk-legend b { font-family: "JetBrains Mono", monospace; font-size: var(--fs-sm); }
-.disk-action { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-bottom: 12px; border-bottom: 1px dashed var(--border-color); }
-.disk-action > div:first-child { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-md); min-width: 0; }
-.set-l b span, .disk-action b span { font-weight: 500; font-family: "JetBrains Mono", monospace; font-size: var(--fs-sm); color: var(--text-muted); }
+.set-l b span { font-weight: 500; font-family: "JetBrains Mono", monospace; font-size: var(--fs-sm); color: var(--text-muted); }
 .disk-action-ctl { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
 .disk-action-ctl .input-select { width: auto; }
 .disk-projects { list-style: none; margin: 0; padding: 6px 18px; display: flex; flex-direction: column; gap: 0; }

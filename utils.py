@@ -257,67 +257,6 @@ def extract_clip_slice(source_path: str, start_sec: float, end_sec: float, outpu
     return output_path
 
 
-def extract_compressed_audio(video_path: str, output_path: str, bitrate: str = "64k") -> str:
-    """
-    Extracts a lightweight compressed MP3 audio track from video_path.
-    Synchronized with video PTS via aresample and avoid_negative_ts to prevent timestamp drift.
-    """
-    if not os.path.exists(video_path):
-        raise FileNotFoundError(f"Video file not found: {video_path}")
-
-    _ensure_ffmpeg_on_path()
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", video_path,
-        "-vn",
-        "-af", "aresample=async=1:min_hard_comp=0.100000:first_pts=0",
-        "-avoid_negative_ts", "make_zero",
-        "-acodec", "libmp3lame",
-        "-b:a", bitrate,
-        "-ar", "16000",
-        "-ac", "1",
-        output_path,
-    ]
-    subprocess.run(cmd, capture_output=True, check=True, timeout=300)
-    return output_path
-
-
-def extract_audio_slice(audio_path: str, output_path: str, start_sec: float, duration_sec: float) -> str:
-    """
-    Extracts a chronological audio slice from an existing MP3 file rapidly using ffmpeg.
-    Uses stream copy when possible, falling back to lightweight mp3 re-encode if needed.
-    """
-    if not os.path.exists(audio_path):
-        raise FileNotFoundError(f"Audio file not found: {audio_path}")
-
-    _ensure_ffmpeg_on_path()
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-
-    cmd = [
-        "ffmpeg", "-y",
-        "-ss", f"{max(0.0, start_sec):.2f}",
-        "-t", f"{max(0.1, duration_sec):.2f}",
-        "-i", audio_path,
-        "-acodec", "copy",
-        output_path,
-    ]
-    res = subprocess.run(cmd, capture_output=True, timeout=60)
-    if res.returncode != 0:
-        fallback_cmd = [
-            "ffmpeg", "-y",
-            "-ss", f"{max(0.0, start_sec):.2f}",
-            "-t", f"{max(0.1, duration_sec):.2f}",
-            "-i", audio_path,
-            "-acodec", "libmp3lame",
-            "-b:a", "64k",
-            output_path,
-        ]
-        subprocess.run(fallback_cmd, capture_output=True, check=True, timeout=120)
-    return output_path
-
-
 def generate_video_thumbnail(video_path: str, output_image_path: str, at_sec: float = 3.0) -> Optional[str]:
     """
     Extracts a lightweight JPG poster thumbnail from video_path at at_sec.
@@ -560,19 +499,6 @@ class GpuCapabilities:
     nvenc_device_name: str = ""
     has_cuda: bool = False
     cuda_device_name: str = ""
-
-    @property
-    def summary_badge(self) -> str:
-        gpu_name = self.nvenc_device_name or self.cuda_device_name
-        if self.has_nvenc and self.has_cuda:
-            return f"⚡ **GPU Активно**: {gpu_name} (NVENC + CUDA Whisper)"
-        elif self.has_nvenc:
-            return f"⚡ **GPU Активно**: {gpu_name} (NVENC)"
-        elif self.has_cuda:
-            return f"⚡ **GPU Активно**: {gpu_name} (CUDA Whisper)"
-        else:
-            return "🖥 **Режим**: CPU (libx264 + CPU Whisper)"
-
 
 def probe_gpu_capabilities() -> GpuCapabilities:
     """

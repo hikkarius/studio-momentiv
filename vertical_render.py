@@ -26,7 +26,7 @@ import uuid
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 log = logging.getLogger("shorts_core")
 
@@ -495,13 +495,6 @@ class Layout:
         return {"kind": self.kind, "keyframes": [[round(t, 2), round(x, 4)] for t, x in self.keyframes],
                 "split": [[round(a, 4), round(b, 4), round(c, 4)] for a, b, c in self.split],
                 "faces_found": round(self.faces_found, 2), "note": self.note, "stream": self.stream}
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "Layout":
-        return cls(kind=d.get("kind", "center"), keyframes=[tuple(k) for k in d.get("keyframes", [])],
-                   split=[tuple(s) for s in d.get("split", [])], faces_found=float(d.get("faces_found", 0.0)),
-                   note=d.get("note", ""), stream=d.get("stream") or {})
-
 
 def probe_size(path: str) -> Tuple[int, int]:
     out = subprocess.run(

@@ -42,6 +42,10 @@ def isolate_test_database(tmp_path, monkeypatch):
     import config_loader
     monkeypatch.setattr(config_loader, "USER_SETTINGS_PATH", isolated_root / "user_settings.json")
     monkeypatch.setattr(config_loader, "ENV_PATH", isolated_root / ".env")
+    # No Gemini key unless the test sets one: the real key from .env (loaded when config_loader
+    # is imported) and keys left by other tests must not make a test pass by luck.
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.delenv("GEMINI_API_KEY")
     saved_cfg = config_loader.app_config.model_copy(deep=True)
 
     # Whisper transcripts and render temp files also go to tmp_path. Without this the disk

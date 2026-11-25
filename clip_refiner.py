@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Iterable
+from typing import Iterable
 
 log = logging.getLogger("shorts_core")
 
@@ -24,8 +24,6 @@ _END_PAD = 0.35
 _START_SEARCH_BACK = 6.0
 _START_SEARCH_FWD = 3.0
 _END_SEARCH_BACK = 5.0
-_END_SEARCH_FWD = 6.0
-
 _SENTENCE_END_RE = re.compile(r"[.!?…]+[\"»”')\]]*$")
 
 # Categories that are not worth publishing as a short
@@ -110,19 +108,6 @@ def _end_flags(words: list[dict], segment_ends: list[float] | None = None) -> li
         if _starts_upper(nxt["word"]) and (at_seg_end or gap >= 0.3):
             flags[i] = True
     return flags
-
-
-def sentence_ends(words: list[dict], segment_ends: list[float] | None = None) -> list[int]:
-    """Indices of words that close a sentence."""
-    return [i for i, f in enumerate(_end_flags(words, segment_ends)) if f]
-
-
-def sentence_starts(words: list[dict], segment_ends: list[float] | None = None) -> list[int]:
-    """Indices of words that open a sentence (the first word, and every word after a sentence end)."""
-    if not words:
-        return []
-    flags = _end_flags(words, segment_ends)
-    return [0] + [i + 1 for i in range(len(words) - 1) if flags[i]]
 
 
 # ─── Scoring ─────────────────────────────────────────────────────────────────
@@ -341,29 +326,3 @@ def refine_clips(
     )
     return result
 
-
-def trim_silence(
-    words: Iterable[dict] | None,
-    start: float,
-    end: float,
-    lead: float = _START_PAD,
-    tail: float = _END_PAD,
-    min_len: float = 5.0,
-    min_gain: float = 0.1,
-) -> tuple[float, float] | None:
-    """
-    Tightens clip bounds to the speech: from just before the first word to just after the last one.
-    Only shrinks the clip (never extends it), keeps at least min_len seconds.
-    Returns (new_start, new_end), or None when there is nothing worth trimming or no words.
-    """
-    inside = [w for w in _clean_words(words) if w["end"] > start and w["start"] < end]
-    if not inside:
-        return None
-    new_start = max(start, inside[0]["start"] - lead)
-    new_end = min(end, inside[-1]["end"] + tail)
-    if new_end - new_start < min_len:
-        return None
-    new_start, new_end = round(new_start, 2), round(new_end, 2)
-    if (new_start - start) + (end - new_end) < min_gain:
-        return None
-    return new_start, new_end
