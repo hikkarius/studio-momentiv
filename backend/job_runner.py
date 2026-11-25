@@ -11,14 +11,13 @@ import json
 import logging
 import math
 import os
-import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, Optional, Set
 
 from backend import db
-from constants import FILTER_INSTRUCTIONS, resolve_filter_mode
+from constants import resolve_filter_mode
 from core import (
     analyze_and_find_clips,
     app_config,
@@ -175,19 +174,6 @@ def _run_analyze_worker(
         _run_analyze_worker_locked(job_id, project_id, clips_count, filter_mode, engine, language)
     finally:
         _analyze_lock.release()
-
-
-def run_analyze_now(
-    project_id: str, clips_count: int = 0, filter_mode: str = "Viral Hooks", language: Optional[str] = None
-) -> str:
-    """Runs the analysis in the calling thread (used by the processing queue). Returns the job ID."""
-    proj = db.get_project(project_id)
-    if clips_count <= 0:
-        clips_count = auto_clips_count(proj["duration"] if proj else 0)
-    job_id = _new_job_id(project_id)
-    db.create_job(job_id, project_id, "analyze")
-    _run_analyze_worker(job_id, project_id, clips_count, filter_mode, language=language)
-    return job_id
 
 
 def _new_job_id(project_id: str) -> str:

@@ -130,11 +130,6 @@ class AppState:
                     f"Не вдалося ініціалізувати Whisper модель (перевірте faster-whisper або whisper): {e}"
                 ) from e
 
-    def warmup_whisper(self):
-        """Eagerly warms up the Whisper model."""
-        log.info("Warming up Whisper model...")
-        return self.get_whisper()
-
     def set_whisper_fallback(self, model, engine: str = "faster_whisper") -> None:
         """Thread-safely caches a fallback Whisper model (e.g. CPU int8) after runtime GPU failure."""
         with self._whisper_lock:

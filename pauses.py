@@ -25,7 +25,6 @@ log = logging.getLogger("shorts_core")
 
 LEVEL_RATE = 50          # loudness values per second
 DEFAULT_MIN_GAP = 0.6    # pauses longer than this are cut
-MIN_GAP_CHOICES = (0.4, 0.6, 1.0)
 KEEP = 0.2               # silence left in place of a cut pause
 # «Темп» in the editor: (min_gap, keep) — calm keeps more air, dense cuts tighter
 TEMPOS = {"calm": (1.0, 0.3), "normal": (0.6, 0.2), "dense": (0.4, 0.1)}

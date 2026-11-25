@@ -18,10 +18,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import uvicorn
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -29,7 +28,6 @@ import pauses
 import subtitles_generator
 import vertical_render
 from backend import app_update, backup, db, job_runner, keep_awake, queue_runner, storage, support_report
-from clip_refiner import trim_silence
 from constants import resolve_filter_mode
 from state import app_state
 from transcription import load_transcript_cache
@@ -1181,15 +1179,6 @@ def _ensure_vertical(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any]
     return str(path), filename
 
 
-@app.get("/api/caption-styles")
-def get_caption_styles():
-    return {
-        "default": vertical_render.DEFAULT_STYLE,
-        "styles": [{"id": s.id, "name": s.name, "pos": s.default_pos} for s in vertical_render.CAPTION_STYLES.values()],
-        "frames": list(vertical_render.FRAME_MODES),
-    }
-
-
 @app.get("/api/projects/{project_id}/clips/{clip_index}/vertical-plan")
 def get_vertical_plan(project_id: str, clip_index: int, frame: Optional[str] = None):
     """What the vertical clip will look like: crop plan + caption words (for the live preview)."""
@@ -1359,25 +1348,6 @@ def _after_bounds_change(project_id: str, clip_index: int, updated_clip: Dict[st
         except Exception as ex:
             log.warning(f"Could not update metadata.json after trim: {ex}")
     return updated_clip
-
-
-@app.post("/api/projects/{project_id}/clips/{clip_index}/trim-silence")
-def trim_clip_silence(project_id: str, clip_index: int):
-    """«Підрізати тишу»: moves the clip bounds to the first and last spoken word (pauses inside stay)."""
-    proj, clip = _get_project_and_clip(project_id, clip_index)
-    cached = load_transcript_cache(proj["source_path"], any_model=True)
-    if not cached:
-        raise HTTPException(status_code=409, detail="Немає транскрипції слів для цього відео, тому не видно, де тиша.")
-    _, words, _ = cached
-    start, end = float(clip["start_sec"]), float(clip["end_sec"])
-    bounds = trim_silence(words, start, end)
-    if not bounds:
-        return {"status": "unchanged", "clip": clip, "trimmed_sec": 0.0}
-    updated = db.update_clip_bounds(project_id, clip_index, bounds[0], bounds[1])
-    if not updated:
-        raise HTTPException(status_code=404, detail="Кліп не знайдено.")
-    trimmed = round((bounds[0] - start) + (end - bounds[1]), 2)
-    return {"status": "updated", "clip": _after_bounds_change(project_id, clip_index, updated), "trimmed_sec": trimmed}
 
 
 # ─── Safe Media Streaming (HTTP 206 Range Requests) ───────────────────────────
