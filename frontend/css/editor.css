@@ -772,3 +772,45 @@
   .vx-lrow > :nth-child(n+5) { grid-column: 2; }
   .vx-lth { display: none; }
 }
+
+/* ═══ Крок 2 за макетами 2026-11-25: логотип, перемикач вигляду, шаблони, допис, рамка тексту на телефоні ═══ */
+.ed-rail-brand { display: flex; align-items: center; gap: 9px; border: 0; background: none; color: var(--ed-fg); font: 800 var(--fs-lg) var(--ed-sans); letter-spacing: -.01em; padding: 6px 8px 2px; border-radius: var(--r-md); cursor: pointer; white-space: nowrap; text-align: left; }
+.ed-rail-brand:hover { background: var(--ed-panel); }
+.ed-brand-dot { flex: none; width: 12px; height: 12px; border-radius: 3px; background: var(--accent-grad); }
+#editor.rail-mini .ed-rail-brand { justify-content: center; padding: 10px 0; }
+#editor.rail-mini .ed-brand-dot { width: 16px; height: 16px; border-radius: 4px; }
+.ed-textcap { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.ed-textcap small { font-weight: 600; letter-spacing: 0; text-transform: none; font-size: var(--fs-xs); }
+.vx-hview { flex-wrap: nowrap; gap: 4px; }
+.vx-hview button { padding: 6px 11px; font-size: 13px; white-space: nowrap; }
+.vx-lhint { font-size: var(--fs-sm); color: var(--ed-muted); }
+.vx-tplbar { position: sticky; top: calc(-1 * var(--vx-tp-pad, 20px)); z-index: 3; margin: calc(-1 * var(--vx-tp-pad, 20px)) calc(-1 * var(--vx-tp-pad, 20px)) 16px; padding: 12px var(--vx-tp-pad, 20px); background: var(--ed-panel); border-bottom: 1px solid var(--ed-line); display: flex; flex-direction: column; gap: 8px; }
+.vx-tplbar .vx-ltpl { flex: 1; min-width: 0; }
+.vx-tplbar .vx-ltpl select { flex: 1; min-width: 0; }
+@media (max-width: 1439px) { .vx-tp { --vx-tp-pad: 16px; } }
+.vx-draghint { padding: 8px 10px; border-radius: var(--r-md); background: var(--ed-panel2); }
+.vx-tsel { position: absolute; z-index: 6; border: 2px dashed var(--ed-accent); border-radius: 6px; pointer-events: none; }
+.vx-tsel[hidden] { display: none; }
+.vx-tsel i { position: absolute; width: 10px; height: 10px; border-radius: 2px; background: var(--ed-accent); }
+.vx-tsel i[data-h="nw"] { left: -6px; top: -6px; } .vx-tsel i[data-h="ne"] { right: -6px; top: -6px; }
+.vx-tsel i[data-h="sw"] { left: -6px; bottom: -6px; } .vx-tsel i[data-h="se"] { right: -6px; bottom: -6px; }
+.vx-post .ed-field textarea { min-height: 96px; resize: vertical; }
+.vx-posthook { margin: 0; padding: 10px 12px; border: 1px solid var(--ed-line); border-radius: var(--r-md); background: var(--ed-panel2); font-size: var(--fs-md); color: var(--ed-muted); }
+.vx-posthook b { color: var(--ed-fg); }
+.vx-posthook .link { border: 0; background: none; padding: 0; color: var(--ed-accent-text); font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
+.vx-tm { width: min(720px, 100%); max-height: calc(100vh - 32px); overflow: auto; display: flex; flex-direction: column; gap: 14px; }
+.vx-tm-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.vx-tm-head h3 { margin: 0; }
+.vx-tm .vx-lead { margin: 0; }
+.vx-tm-steps { counter-reset: tm; list-style: none; margin: 0; padding: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; background: var(--ed-panel2); border-radius: var(--r-md); }
+.vx-tm-steps li { counter-increment: tm; display: grid; grid-template-columns: 28px 1fr; column-gap: 10px; align-items: start; font-size: var(--fs-md); }
+.vx-tm-steps li::before { content: counter(tm); grid-row: span 2; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--ed-accent); color: var(--ed-accent-ink); font-weight: 800; }
+.vx-tm-steps small { color: var(--ed-muted); font-size: var(--fs-sm); }
+.vx-tm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.vx-tm-list { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-md); color: var(--ed-muted); }
+.vx-tm-list b { color: var(--ed-fg); margin-right: 4px; }
+.vx-tm-mine { display: flex; flex-direction: column; gap: 6px; }
+.vx-tm-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--ed-line); border-radius: var(--r-md); }
+.vx-tm-row.on { border-color: var(--ed-accent); background: var(--ed-accent-soft); }
+.vx-tm-row > span { flex: 1; }
+@media (max-width: 760px) { .vx-tm-steps, .vx-tm-grid { grid-template-columns: 1fr; } }

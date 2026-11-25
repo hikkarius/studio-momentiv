@@ -25,7 +25,7 @@ const Vertical = (() => {
   let ctx = null;
   const st = { opts: null, plan: null, planKey: "", words: [], loading: false, raf: 0, saveTimer: null, pending: null, selWord: null, zipJob: null, capKey: "",
     stream: null, streamPid: "", autoPid: "", sel: null, view: "phone", drag: null, live: null, gesture: null, suppressClick: false, wheelTimer: null, spMemo: null,
-    ideasBusy: null, ideasAsked: new Set(), templates: [], status: new Map(), batch: null, listTimer: 0, listZip: null, viewRestored: false };
+    ideasBusy: null, ideasAsked: new Set(), tsel: null, tselTimer: 0, templates: [], status: new Map(), batch: null, listTimer: 0, listZip: null, viewRestored: false };
 
   // What each style tile shows: one short phrase drawn in that style
   const TILE = { none: "<i>без тексту</i>", hl: "ЦЕ <i>ВОНО</i>", kar: "<i>ЦЕ</i> ВОНО", one: "ВОНО", box: "<i>Це воно</i>", gold: "ЦЕ <i>ВОНО</i>", min: "це воно" };
@@ -1111,7 +1111,13 @@ const Vertical = (() => {
   }
 
   function phoneDown(e) {
-    if (e.button !== 0 || !streamOn()) return;
+    if (e.button !== 0) return;
+    // a stream's seam, corners and nick keep their grip even under the text; elsewhere the text wins
+    const sh = streamOn() ? phoneHit(...phoneXY(e)) : null;
+    const th = sh && ["seam", "corner", "nick"].includes(sh.mode) ? null : textHit(e);
+    if (th) { st.sel = null; if (streamOn()) renderSel(); textDown(e, th); return; }
+    if (st.tsel) { selectText(null); st.suppressClick = true; return; }
+    if (!streamOn()) return;
     const [x0, y0] = phoneXY(e);
     const hit = phoneHit(x0, y0);
     const before = st.sel;
@@ -1209,9 +1215,85 @@ const Vertical = (() => {
     ph.addEventListener("pointercancel", up);
   }
 
+  // ─── Subtitles and the title on the phone: drag up-down, a corner = size (CapCut-like); the sliders follow ───
+  // which → [element, its slider for the height, its slider for the size, the settings tab]
+  const TEXT_EL = { cap: ["vxCap", "vxPos", "vxSize", "style"], hook: ["vxHook", "vxHookPos", "vxHookSize", "hook"] };
+  function textRect(which) {
+    const el = $(TEXT_EL[which][0]);
+    if (el.hidden || !el.textContent.trim() || getComputedStyle(el).display === "none") return null;
+    let r;
+    if (which === "hook") r = el.querySelector("span").getBoundingClientRect();
+    else { const rg = document.createRange(); rg.selectNodeContents(el); r = rg.getBoundingClientRect(); }
+    return r.width && r.height ? r : null;
+  }
+  /** What is under the pointer: the title or the subtitles, and a corner of the selected one (= size). */
+  function textHit(e) {
+    for (const which of ["hook", "cap"]) {
+      const r = textRect(which);
+      if (!r) continue;
+      const pad = 10;
+      if (e.clientX < r.left - pad || e.clientX > r.right + pad || e.clientY < r.top - pad || e.clientY > r.bottom + pad) continue;
+      const nearX = Math.min(Math.abs(e.clientX - r.left), Math.abs(e.clientX - r.right)) < 14;
+      const nearY = Math.min(Math.abs(e.clientY - r.top), Math.abs(e.clientY - r.bottom)) < 14;
+      return { which, rect: r, mode: st.tsel === which && nearX && nearY ? "size" : "move" };
+    }
+    return null;
+  }
+  function placeTSel() {
+    const box = $("vxTSel");
+    const r = st.tsel && !$("edVx").hidden ? textRect(st.tsel) : null;
+    if (!r) { box.hidden = true; return; }
+    const pr = $("vxPhone").getBoundingClientRect(), pad = 6;
+    Object.assign(box.style, { left: `${r.left - pr.left - pad}px`, top: `${r.top - pr.top - pad}px`, width: `${r.width + 2 * pad}px`, height: `${r.height + 2 * pad}px` });
+    box.hidden = false;
+  }
+  function selectText(which) {
+    st.tsel = which;
+    clearInterval(st.tselTimer);
+    if (which) {
+      const tab = document.querySelector(`#vxTabs button[data-t="${TEXT_EL[which][3]}"]`);
+      if (tab && tab.getAttribute("aria-selected") !== "true") tab.click();
+      st.tselTimer = setInterval(placeTSel, 200);  // the subtitle line changes while the clip plays
+    }
+    placeTSel();
+  }
+  function textDown(e, hit) {
+    const [, posId, sizeId] = TEXT_EL[hit.which];
+    selectText(hit.which);
+    const ph = $("vxPhone"), pr = ph.getBoundingClientRect();
+    const inp = $(hit.mode === "size" ? sizeId : posId);
+    const v0 = Number(inp.value), cx = hit.rect.left + hit.rect.width / 2, d0 = Math.max(20, Math.abs(e.clientX - cx));
+    const lo = Number(inp.min), hi = Number(inp.max);
+    let moved = false;
+    try { ph.setPointerCapture(e.pointerId); } catch (_) {}
+    ph.style.cursor = hit.mode === "size" ? "nwse-resize" : "grabbing";
+    const move = (ev) => {
+      if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 4) return;
+      moved = true;
+      const v = hit.mode === "size" ? Math.round((v0 * Math.abs(ev.clientX - cx)) / d0 / 5) * 5 : Math.round(v0 + ((ev.clientY - e.clientY) / pr.height) * 100);
+      inp.value = Math.min(hi, Math.max(lo, v));
+      inp.dispatchEvent(new Event("input"));
+      placeTSel();
+    };
+    const up = () => {
+      ph.removeEventListener("pointermove", move);
+      ph.removeEventListener("pointerup", up);
+      ph.removeEventListener("pointercancel", up);
+      ph.style.cursor = "";
+      st.suppressClick = true;  // a click on the text selects it, it doesn't play the clip
+      if (moved) inp.dispatchEvent(new Event("change"));
+    };
+    ph.addEventListener("pointermove", move);
+    ph.addEventListener("pointerup", up);
+    ph.addEventListener("pointercancel", up);
+  }
+
   function phoneHover(e) {
     if (st.gesture) return;
     const ph = $("vxPhone");
+    const sh = streamOn() && e.buttons === 0 ? phoneHit(...phoneXY(e)) : null;
+    const th = e.buttons === 0 && !(sh && ["seam", "corner", "nick"].includes(sh.mode)) ? textHit(e) : null;
+    if (th) { ph.style.cursor = th.mode === "size" ? "nwse-resize" : "grab"; return; }
     const hit = streamOn() && e.buttons === 0 ? phoneHit(...phoneXY(e)) : null;
     let c = hit ? CURSOR[hit.mode] : "";
     if (hit && hit.mode === "corner") c = hit.h === "nw" || hit.h === "se" ? "nwse-resize" : "nesw-resize";
@@ -1373,7 +1455,7 @@ const Vertical = (() => {
   function renderTemplates() {
     if (!st.opts) return;
     const cur = tplMatch(st.opts);
-    $("vxTpl").innerHTML = tplOptions(cur, st.templates.length ? "— свій вигляд —" : "— ще немає шаблонів —");
+    $("vxTpl").innerHTML = tplOptions(cur, st.templates.length ? "свій вигляд" : "ще немає");
     $("vxTplDel").hidden = !cur;
     const keepSel = $("vxLTpl").value;
     $("vxLTpl").innerHTML = tplOptions(keepSel || (st.templates[0] || {}).name, st.templates.length ? "" : "— ще немає шаблонів —");
@@ -1405,6 +1487,37 @@ const Vertical = (() => {
       renderTemplates();
       ctx.toast(exists ? `Шаблон «${name}» оновлено` : `Шаблон «${name}» збережено`);
     } catch (e) { ctx.toast(e.message, true); }
+  }
+
+  async function deleteTemplate(name) {
+    if (!name) return;
+    try {
+      st.templates = (await ctx.api(`/api/vertical-templates/${encodeURIComponent(name)}`, { method: "DELETE" })).templates;
+      renderTemplates();
+      ctx.toast(`Шаблон «${name}» видалено. Кліпи не змінились.`);
+    } catch (e) { ctx.toast(e.message, true); }
+  }
+  /** «Шаблони»: what a template is, what it keeps, and the saved ones (use on this clip, delete). */
+  function renderTplMine() {
+    const cur = st.opts ? tplMatch(st.opts) : "";
+    $("vxTmMine").innerHTML = st.templates.length ? st.templates.map((t) => {
+      const n = escapeText(t.name), on = t.name === cur;
+      return `<div class="vx-tm-row${on ? " on" : ""}"><b>${n}</b><span class="ed-small">${on ? "на цьому кліпі" : ""}</span>` +
+        `<button type="button" class="ed-btn sm" data-use="${n}"${on ? " disabled" : ""}>Обрати для цього кліпу</button>` +
+        `<button type="button" class="ed-btn sm ghost" data-del="${n}" aria-label="Видалити шаблон «${n}»">Видалити</button></div>`;
+    }).join("") : `<p class="ed-small">Ще жодного. Налаштуй кліп і натисни «Зберегти як…» над вкладками.</p>`;
+  }
+  function openTplModal() {
+    renderTplMine();
+    st.tmFocus = document.activeElement;
+    $("vxTplModal").hidden = false;
+    $("vxTmOk").focus();
+  }
+  function closeTplModal() {
+    const m = $("vxTplModal");
+    if (m.hidden) return;
+    m.hidden = true;
+    if (st.tmFocus && st.tmFocus.focus) st.tmFocus.focus();
   }
 
   // ─── «Усі разом»: every clip «В роботі» as a row ───────────────────────────
@@ -1580,6 +1693,7 @@ const Vertical = (() => {
       commitLook(d);
     });
     $("vxPhone").addEventListener("pointerdown", phoneDown);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && st.tsel) selectText(null); });
     $("vxPhone").addEventListener("pointermove", phoneHover);
     $("vxPhone").addEventListener("wheel", phoneWheel, { passive: false });
     $("vxView").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setView(b.dataset.v); });
@@ -1621,14 +1735,19 @@ const Vertical = (() => {
     $("vxTplSave").addEventListener("click", () => { $("vxTplNew").hidden = false; $("vxTplName").value = tplMatch(st.opts); $("vxTplName").focus(); });
     $("vxTplOk").addEventListener("click", saveTemplate);
     $("vxTplName").addEventListener("keydown", (e) => { if (e.key === "Enter") saveTemplate(); if (e.key === "Escape") $("vxTplNew").hidden = true; e.stopPropagation(); });
-    $("vxTplDel").addEventListener("click", async () => {
-      const name = tplMatch(st.opts);
-      if (!name) return;
-      try {
-        st.templates = (await ctx.api(`/api/vertical-templates/${encodeURIComponent(name)}`, { method: "DELETE" })).templates;
-        renderTemplates();
-        ctx.toast(`Шаблон «${name}» видалено. Кліпи не змінились.`);
-      } catch (e) { ctx.toast(e.message, true); }
+    $("vxTplDel").addEventListener("click", () => deleteTemplate(tplMatch(st.opts)));
+    $("vxTplHelp").addEventListener("click", openTplModal);
+    $("vxTmOk").addEventListener("click", closeTplModal);
+    $("vxTmClose").addEventListener("click", closeTplModal);
+    $("vxTplModal").addEventListener("click", (e) => { if (e.target === e.currentTarget) closeTplModal(); });
+    $("vxTplModal").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); closeTplModal(); } });
+    $("vxTmMine").addEventListener("click", async (e) => {
+      const use = e.target.closest("button[data-use]"), del = e.target.closest("button[data-del]");
+      if (use) {
+        try { await applyTemplate(use.dataset.use, [ctx.clip().clip_index]); ctx.toast(`Кліп тепер у шаблоні «${use.dataset.use}»`); } catch (err) { ctx.toast(err.message, true); }
+        renderTplMine();
+      }
+      if (del) { await deleteTemplate(del.dataset.del); renderTplMine(); $("vxTmOk").focus(); }
     });
     $("vxToList").addEventListener("click", () => setListView(true));
     $("vxToOne").addEventListener("click", () => setListView(false));
@@ -1700,5 +1819,8 @@ const Vertical = (() => {
   /** The preview's plan for a look (tests compare it with streamer.plan). */
   function twin(lk) { return st.stream ? streamPlan(st.stream.cam, st.stream.face, st.plan.src.w, st.plan.src.h, lk) : null; }
 
-  return { attach, onClip, onShow, onHookPane, state, twin, setListView };
+  /** Another settings tab: the frame on the phone stays only on the text that tab is about. */
+  function onTab(t) { if (st.tsel && TEXT_EL[st.tsel][3] !== t) selectText(null); }
+
+  return { attach, onClip, onShow, onHookPane, onTab, state, twin, setListView };
 })();
