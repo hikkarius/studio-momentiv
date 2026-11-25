@@ -1558,6 +1558,11 @@ const Editor = (() => {
     $("edCopyShorts").addEventListener("click", () => copy(shortsTitle()));
     $("edMp4").addEventListener("click", () => { toast("Готуємо відео…"); download(`/api/projects/${pid()}/clips/${clip().clip_index}/download`); });
     $("edMp4WholeBtn").addEventListener("click", () => $("edMp4").click());
+    $("edTop3").addEventListener("click", () => {
+      if (typeof Top3 === "undefined") return;
+      if (st.clips.filter((c) => c.kind !== "story" && c.review_status !== "drop").length < 2) { toast("Для топу потрібно щонайменше 2 кліпи", true); return; }
+      Top3.open(pid(), st.clips);
+    });
     $("edMp4Parts").addEventListener("click", (e) => {
       const b = e.target.closest("button[data-part]");
       if (!b) return;

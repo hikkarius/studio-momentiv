@@ -1787,7 +1787,87 @@ def download_vertical_job(job_id: str):
     job = _vjobs.get(job_id)
     if not job or job.get("status") != "completed" or not os.path.exists(job.get("file", "")):
         raise HTTPException(status_code=404, detail="Архів ще не готовий.")
-    return FileResponse(job["file"], media_type="application/zip", filename=job["filename"])
+    return FileResponse(job["file"], media_type=job.get("media_type") or "application/zip", filename=job["filename"])
+
+
+# ─── «🏆 Топ-3»: a few short clips glued into one countdown video ─────────────
+
+class TopRequest(BaseModel):
+    clips: List[int] = Field(min_length=2, max_length=5)  # in the order shown: #N first, #1 last
+    title: str = Field(default="", max_length=120)
+    numbers: bool = True  # a big «#3, #2, #1» for the first second of each clip
+    vertical: bool = False  # 9:16 with subtitles (each clip's own look) instead of the clean 16:9
+
+
+def _run_top(job_id: str, project_id: str, proj: Dict[str, Any], chosen: List[Dict[str, Any]], payload: TopRequest) -> None:
+    from backend import top3
+
+    job = _vjobs[job_id]
+    try:
+        files = []
+        for rank, c in enumerate(chosen, 1):
+            job["current"] = c.get("title", "")
+            if payload.vertical:
+                files.append(_ensure_vertical(project_id, proj, c, True)[0])
+            elif _clip_cuts(c):
+                files.append(_ensure_clip_file(project_id, proj, c)[0])
+            else:  # no pauses cut: straight from the source, to the frame
+                if not os.path.exists(proj["source_path"]):
+                    raise HTTPException(status_code=404, detail="Вихідне відео не знайдено на диску.")
+                files.append((proj["source_path"], float(c["start_sec"]), float(c["end_sec"]) - float(c["start_sec"])))
+            job["done"] = rank
+        job["current"] = "Склеюю…"
+        key = hashlib.sha1(json.dumps([[f if isinstance(f, str) else list(f) for f in files], payload.title, payload.numbers],
+                                      ensure_ascii=False).encode()).hexdigest()[:10]
+        out_dir = _safe_project_output_dir(project_id) / "top"
+        out = out_dir / f"top_{key}_{'v' if payload.vertical else 'h'}.mp4"
+        if not out.exists():
+            for old in out_dir.glob(f"top_*_{'v' if payload.vertical else 'h'}.mp4"):  # one top per format is kept
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+            top3.build(files, str(out), title=payload.title, numbers=payload.numbers,
+                       has_nvenc=app_state.get_gpu_capabilities().has_nvenc)
+        job["file"] = str(out)
+        job["done"] = len(chosen)
+        job["status"] = "completed"
+    except Exception as e:
+        detail = e.detail if isinstance(e, HTTPException) else str(e)
+        log.error(f"Top failed: {detail}")
+        job["status"] = "failed"
+        job["error"] = str(detail)
+
+
+@app.post("/api/projects/{project_id}/top3")
+def start_top(project_id: str, payload: TopRequest):
+    """«🏆 Топ-3»: renders the chosen clips (16:9 or 9:16) and joins them; poll /api/vertical-jobs/{id}."""
+    from backend import top3
+
+    _validate_project_id(project_id)
+    proj = db.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Проєкт не знайдено.")
+    if len(set(payload.clips)) != len(payload.clips):
+        raise HTTPException(status_code=400, detail="Один кліп двічі в топі.")
+    by_idx = {c["clip_index"]: c for c in db.get_candidate_clips(project_id)}
+    chosen = [by_idx.get(i) for i in payload.clips]
+    if any(c is None for c in chosen):
+        raise HTTPException(status_code=404, detail="Кліп не знайдено.")
+    if any(c.get("kind") == "story" for c in chosen):
+        raise HTTPException(status_code=400, detail="Довга історія не влізе в топ: обери короткі кліпи.")
+    total = sum(float(c["end_sec"]) - float(c["start_sec"]) - pauses.removed(_clip_cuts(c)) for c in chosen)
+    if total > top3.MAX_TOTAL_SEC + 1:
+        raise HTTPException(status_code=400, detail=f"Разом {int(total // 60)}:{int(total % 60):02d}, а Shorts і TikTok "
+                                                    "беруть до 3 хв. Прибери або вкороти кліп.")
+    job_id = uuid.uuid4().hex[:12]
+    name = re.sub(r'[\x00-\x1f\\/:*?"<>|]', "", payload.title).strip(" .")[:60] or f"Топ-{len(chosen)}"
+    with _vjobs_lock:
+        _vjobs[job_id] = {"id": job_id, "kind": "top", "project_id": project_id, "status": "running", "done": 0,
+                          "total": len(chosen), "current": "", "error": "", "file": "", "media_type": "video/mp4",
+                          "filename": f"{name} {'9x16' if payload.vertical else '16x9'}.mp4"}
+    threading.Thread(target=_run_top, args=(job_id, project_id, proj, chosen, payload), daemon=True).start()
+    return {k: v for k, v in _vjobs[job_id].items() if k != "file"}
 
 
 class StoryRequest(BaseModel):
