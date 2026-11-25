@@ -130,7 +130,7 @@ const Settings = (() => {
 
   function get(key) {
     const [sec, k] = key.split(".");
-    return view.values[sec][k];
+    return (view.values[sec] || {})[k];
   }
 
   /** A value set by hand in config.yaml that has no button gets a button of its own, so it shows as chosen. */
@@ -141,7 +141,7 @@ const Settings = (() => {
     b.dataset.v = String(v);
     b.dataset.extra = "1";
     if (group.classList.contains("set-cards")) {
-      const list = group.id === "setExpModel" ? view.choices.experimental_model : view.choices.whisper_model;
+      const list = (group.id === "setExpModel" ? view.choices.experimental_model : view.choices.whisper_model) || [];
       const label = (list.find((c) => c.value === v) || {}).label || String(v);
       b.innerHTML = `<b>${escapeHtml(label)}</b><small>Вибрано вручну</small>`;
     } else {
@@ -155,6 +155,7 @@ const Settings = (() => {
     renderModelCards();
     sheet().querySelectorAll("[data-key]").forEach((el) => {
       const v = get(el.dataset.key);
+      if (v === undefined) return; // a studio started before this setting existed (restart it): leave the control as is
       if (el.classList.contains("set-seg") || el.classList.contains("set-cards")) {
         ensureChoice(el, v);
         el.querySelectorAll("[data-v]").forEach((b) => {
@@ -192,6 +193,7 @@ const Settings = (() => {
     const sig = list.map((c) => c.value).join("|");
     if (box.dataset.sig === sig) return;
     box.dataset.sig = sig;
+    if (!list.length) { box.innerHTML = `<small class="set-note">${escapeHtml(RESTART_NOTE)}</small>`; return; }
     box.innerHTML = list.map((c) => `<button type="button" data-v="${escapeHtml(c.value)}">` +
       (c.tag ? `<span class="set-tag">${escapeHtml(c.tag)}</span>` : "") +
       `<b>${escapeHtml(c.label)}</b><small>${escapeHtml(c.hint)}</small></button>`).join("");
@@ -218,11 +220,13 @@ const Settings = (() => {
     list.hidden = false;
   }
 
+  const RESTART_NOTE = "Студія оновилась, але працює ще стара версія. Закрий вікно студії, запусти її знову й натисни Ctrl+F5.";
   let modelsLoaded = false;
   async function loadModels() {
     if (modelsLoaded) return;
     try {
       const res = await fetch("/api/gemini/models");
+      if (res.status === 404) { $("setModelsNote").textContent = RESTART_NOTE; return; }
       if (!res.ok) return;
       modelsLoaded = true;
       renderModels((await res.json()).check);
@@ -239,7 +243,12 @@ const Settings = (() => {
     $("setModelsNote").textContent = "Питаю кожну модель. Сильні моделі думають довше, це може тривати до хвилини.";
     try {
       const res = await fetch("/api/gemini/models/check", { method: "POST" });
-      if (!res.ok) { showToast(await errorText(res), "error"); $("setModelsNote").textContent = "Не вдалося перевірити."; return; }
+      if (!res.ok) {
+        const msg = res.status === 404 ? RESTART_NOTE : await errorText(res);
+        showToast(msg, "error");
+        $("setModelsNote").textContent = msg;
+        return;
+      }
       modelsLoaded = true;
       renderModels((await res.json()).check);
     } catch (err) {
