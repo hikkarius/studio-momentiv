@@ -97,9 +97,11 @@ def test_all_models_503_raises_gemini_unavailable_without_fake_clips(no_sleep):
             max_len=30,
         )
     assert "перевантажений" in str(exc.value)
-    # 3 full passes over every candidate model, with two back-off pauses in between
-    assert mock_client.models.generate_content.call_count == 3 * len(CANDIDATE_MODELS)
-    assert no_sleep == [5.0, 20.0]
+    # at most 4 requests per window (the models in turn, a pause when the list starts over), then the
+    # same again in a second round (its 90 s wait is switched off in tests)
+    from ai_selector import MAX_ATTEMPTS_PER_WINDOW
+    assert mock_client.models.generate_content.call_count == 2 * MAX_ATTEMPTS_PER_WINDOW
+    assert no_sleep == [5.0] * (2 * (MAX_ATTEMPTS_PER_WINDOW // len(CANDIDATE_MODELS) - 1))
 
 
 def test_recovers_on_second_pass(no_sleep):
@@ -284,3 +286,37 @@ def test_mixed_errors_fall_back_to_overloaded_message(no_sleep):
     with pytest.raises(GeminiUnavailableError) as exc:
         analyze_and_find_clips(client=mock_client, segments=_SEGMENTS, count=2, min_len=15, max_len=30)
     assert "перевантажений" in str(exc.value)
+
+
+def test_gemini_calls_request_schema_json():
+    """Both Gemini calls ask for schema-checked JSON, so a broken answer can't slip through."""
+    from ai_selector import _CLIPS_SCHEMA, _RERANK_SCHEMA, rerank_clips
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = _resp(
+        '[{"start": 5.0, "end": 35.0, "title": "ОК", "score": 90}]'
+    )
+    analyze_and_find_clips(client=mock_client, segments=[{"start": 0.0, "end": 60.0, "text": "Т"}], count=1)
+    cfg = mock_client.models.generate_content.call_args.kwargs["config"]
+    assert cfg.response_mime_type == "application/json"
+    assert cfg.response_json_schema == _CLIPS_SCHEMA
+    assert cfg.automatic_function_calling.disable is True
+
+    mock_client.models.generate_content.return_value = _resp('[{"n": 1, "score": 90}, {"n": 2, "score": 40}]')
+    rerank_clips([{"start": 0, "end": 20, "score": 60}, {"start": 30, "end": 50, "score": 60}], client=mock_client)
+    assert mock_client.models.generate_content.call_args.kwargs["config"].response_json_schema == _RERANK_SCHEMA
+
+
+def test_default_models_have_no_dead_alias():
+    """gemini-flash-lite-latest answers 404 on API v1 (SDK >= 3), so it only wastes a try."""
+    from config_schema import GeminiConfig
+
+    assert "gemini-flash-lite-latest" not in GeminiConfig().candidate_models
+    assert "gemini-flash-lite-latest" not in CANDIDATE_MODELS
+
+
+def test_gemini_timeout_is_long_enough():
+    """45 s cut long transcript windows with 504 DEADLINE_EXCEEDED."""
+    import state
+
+    assert state.GEMINI_TIMEOUT_MS >= 90_000

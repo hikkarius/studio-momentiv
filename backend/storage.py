@@ -306,3 +306,85 @@ def auto_cleanup(uploads: Path, output: Path) -> Optional[Dict[str, Any]]:
     if days <= 0:
         return None
     return cleanup(uploads, output, junk=True, clips=True, older_than_days=days)
+
+
+# ── free space before a download ─────────────────────────────────────────────
+
+GB = 1024 ** 3
+# Kept free on top of the video itself: Whisper audio, cut clips and 9:16 renders of a long video
+SPACE_RESERVE_BYTES = 1 * GB
+# Home page notice: yellow under LOW, red under FULL
+SPACE_LOW_BYTES = 10 * GB
+SPACE_FULL_BYTES = 2 * GB
+# A YouTube video in 1080p H.264 is about 1.5 GB per hour; used for «вистачить приблизно на N годин»
+BYTES_PER_VIDEO_HOUR = int(1.5 * GB)
+NO_SPACE_MARK = "Не вистачає місця на диску"
+
+
+class NotEnoughSpaceError(RuntimeError):
+    """The video does not fit on the disk; the message is ready to show to the person."""
+
+    def __init__(self, need: int, free: int):
+        self.need, self.free = need, free
+        super().__init__(f"{NO_SPACE_MARK}. Треба близько {fmt_gb(need)}, а вільно лише {fmt_gb(free)}.")
+
+
+def fmt_gb(n: int) -> str:
+    """1.5 GB → «1,5 ГБ» (Ukrainian decimal comma); under 1 GB in MB."""
+    if n < GB:
+        return f"{max(1, round(n / 1024 ** 2))} МБ"
+    return f"{n / GB:.1f}".replace(".", ",") + " ГБ"
+
+
+def drive_label(path: Path) -> str:
+    """«C:» on Windows, «» elsewhere."""
+    try:
+        return Path(path).resolve().drive
+    except OSError:
+        return ""
+
+
+def free_bytes(path: Path) -> Optional[int]:
+    """Free bytes on the disk that holds path (or its nearest existing parent); None if unknown."""
+    p = Path(path)
+    while not p.exists() and p != p.parent:
+        p = p.parent
+    try:
+        return shutil.disk_usage(p).free
+    except OSError:
+        return None
+
+
+def ensure_space(path: Path, size: Optional[int]) -> None:
+    """Raises NotEnoughSpaceError when a file of size bytes (plus the reserve) does not fit next to path.
+    Unknown size or unknown free space never blocks: the studio then just tries."""
+    if not size or size <= 0:
+        return
+    free = free_bytes(path)
+    if free is None:
+        return
+    need = size + SPACE_RESERVE_BYTES
+    if free < need:
+        raise NotEnoughSpaceError(need, free)
+
+
+def disk_status(path: Path) -> Dict[str, Any]:
+    """Short disk state for the home page notice: level is «ok», «low» or «full»."""
+    free = free_bytes(path)
+    if free is None:
+        return {"level": "ok", "free": None}
+    level = "full" if free < SPACE_FULL_BYTES else "low" if free < SPACE_LOW_BYTES else "ok"
+    return {
+        "level": level,
+        "free": free,
+        "free_text": fmt_gb(free),
+        "drive": drive_label(path),
+        "video_hours": round(max(0, free - SPACE_RESERVE_BYTES) / BYTES_PER_VIDEO_HOUR, 1),
+    }
+
+
+def is_no_space_error(text: str) -> bool:
+    """Was this failure a full disk? Our own check, or the OS refusing to write (Linux, macOS, Windows)."""
+    t = (text or "").lower()
+    return any(m in t for m in (NO_SPACE_MARK.lower(), "no space left on device", "not enough space on the disk",
+                                "errno 28", "winerror 112"))

@@ -213,3 +213,63 @@ def test_language_choice_on_home_goes_into_queue(page, studio, project):
     page.locator("#queueList .q-item").first.wait_for()
     assert [i["language"] for i in db.list_queue_items()] == ["auto"]
     assert not page.errors
+
+
+# ─── Free disk space ─────────────────────────────────────────────────────────
+
+GB = 1024 ** 3
+
+
+def test_disk_notice_shows_only_when_space_runs_low(page, studio, project, monkeypatch):
+    from backend import storage
+    monkeypatch.setattr(storage, "free_bytes", lambda p: 200 * GB)
+    page.goto(studio["url"] + "/")
+    page.locator("#queueList").wait_for(state="attached")
+    page.wait_for_timeout(300)
+    assert page.locator("#diskNotice").is_hidden()
+
+    monkeypatch.setattr(storage, "free_bytes", lambda p: int(9.4 * GB))
+    page.reload()
+    notice = page.locator("#diskNotice")
+    notice.wait_for()
+    assert "лишилось 9,4 ГБ" in notice.inner_text() and "приблизно на 5 годин" in notice.inner_text()
+    assert "full" not in notice.get_attribute("class")
+
+    monkeypatch.setattr(storage, "free_bytes", lambda p: int(0.8 * GB))
+    page.reload()
+    notice.wait_for()
+    assert "Нові відео не влізуть" in notice.inner_text() and "full" in notice.get_attribute("class")
+    page.click("#diskNoticeBtn")  # «Звільнити місце» opens Settings on the disk tab
+    page.locator("#settingsScreen [data-panel='disk']").wait_for()
+    assert not page.errors
+
+
+def test_no_space_queue_item_offers_to_free_space(page, studio, project):
+    db.add_queue_item("q_full", source_url="https://youtu.be/big", title="https://youtu.be/big")
+    db.update_queue_item("q_full", status="failed",
+                         error="Не вистачає місця на диску. Треба близько 10,0 ГБ, а вільно лише 2,0 ГБ.")
+    page.goto(studio["url"] + "/")
+    row = page.locator("#queueList .q-item.failed")
+    row.wait_for()
+    assert row.locator(".vc-badge").inner_text() == "Немає місця"
+    assert "Треба близько 10,0 ГБ, а вільно лише 2,0 ГБ." in row.inner_text()
+    row.locator("[data-free-space]").click()
+    page.locator("#settingsScreen [data-panel='disk']").wait_for()
+    assert not page.errors
+
+
+def test_file_that_does_not_fit_is_not_sent(page, studio, project, monkeypatch, tmp_path):
+    from backend import storage
+    monkeypatch.setattr(storage, "free_bytes", lambda p: storage.SPACE_RESERVE_BYTES + 1000)
+    big = tmp_path / "big.mp4"
+    big.write_bytes(b"\0" * 5000)
+    sent = []
+    page.on("request", lambda r: sent.append(r.url) if r.url.endswith("/api/upload") else None)
+    page.goto(studio["url"] + "/")
+    page.set_input_files("#fileInput", str(big))
+    row = page.locator("#queueList .q-item.failed")
+    row.wait_for()
+    assert row.locator(".vc-badge").inner_text() == "Немає місця"
+    assert row.locator("[data-free-space]").count() == 1
+    assert sent == []
+    assert not page.errors

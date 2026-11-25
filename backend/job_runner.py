@@ -14,7 +14,7 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, Optional, Set
+from typing import Any, Callable, Dict, Optional, Set
 
 from backend import db
 from constants import resolve_filter_mode
@@ -24,7 +24,7 @@ from core import (
     transcribe_video,
     validate_clips,
 )
-from ai_selector import rerank_clips
+from ai_selector import GeminiIncompleteError, GeminiQuotaError, rerank_clips
 from clip_refiner import refine_clips
 from languages import language_label
 
@@ -85,6 +85,73 @@ def broadcast_update(job_id: str, data: Dict[str, Any]):
 
 # One analysis at a time: Whisper on the GPU and the Gemini quota do not like parallel videos.
 _analyze_lock = threading.Lock()
+
+# Jobs that stopped on the Gemini free limit or on Google overload (some windows unanswered):
+# the queue reads these to pause instead of failing.
+_quota_hits: Dict[str, Exception] = {}
+_quota_lock = threading.Lock()
+
+
+def pop_quota_hit(job_id: str) -> Optional[Exception]:
+    """The limit / overload error a finished job stopped on, or None (read once).
+    It has .daily and .retry_after; GeminiIncompleteError also .overloaded, .done and .total."""
+    with _quota_lock:
+        return _quota_hits.pop(job_id, None)
+
+
+# Windows Gemini already answered for a project, kept until the analysis completes, so a pause
+# or a studio restart only re-asks the missing ones.
+_WINDOWS_FILE = "gemini_windows.json"
+
+
+def _windows_path(project_id: str) -> str:
+    return os.path.join(OUTPUT_DIR, project_id, _WINDOWS_FILE)
+
+
+def load_done_windows(project_id: str) -> Dict[str, Any]:
+    try:
+        with open(_windows_path(project_id), encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_done_windows(project_id: str, done: Dict[str, Any]) -> None:
+    path = _windows_path(project_id)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(done, f, ensure_ascii=False)
+        os.replace(tmp, path)
+    except OSError as e:
+        log.warning(f"Could not save finished Gemini windows for {project_id}: {e}")
+
+
+def clear_done_windows(project_id: str) -> None:
+    try:
+        os.remove(_windows_path(project_id))
+    except OSError:
+        pass
+
+
+def transcribe_only(project_id: str, language: Optional[str] = None,
+                    progress_cb: Optional[Callable[[float, str], None]] = None) -> None:
+    """Only the Whisper step (its result is cached): the queue uses it while Gemini's limit is
+    exhausted, so the later analysis goes straight to Gemini."""
+    proj = db.get_project(project_id)
+    if not proj:
+        raise ValueError(f"Проєкт {project_id} не знайдено.")
+
+    def cb(*args):
+        if progress_cb and len(args) >= 2 and isinstance(args[0], (int, float)):
+            progress_cb(max(0.0, min(1.0, float(args[0]))), str(args[1]))
+
+    with _analyze_lock:
+        segments, _words, _lang, _cached = transcribe_video(proj["source_path"], status_cb=cb, language=language)
+    if not segments:
+        raise RuntimeError("У відео не виявлено мовлення або транскрипція порожня.")
 
 
 def auto_clips_count(duration: float) -> int:
@@ -158,16 +225,24 @@ def _run_analyze_worker_locked(
         request_count = min(app_config.clips.max_count, math.ceil(clips_count * 1.5))
         # Clips must not overlap, so the requested count limits their length: aim for ~80% coverage
         target_len = max(min_len + 3, min(45.0, proj["duration"] * 0.8 / max(1, clips_count)))
-        raw_candidates = analyze_and_find_clips(
-            client=None,
-            segments=segments,
-            count=request_count,
-            min_len=min_len,
-            max_len=max_len,
-            filter_mode=canonical_filter,
-            detected_lang=detected_lang,
-            target_len=target_len,
-        )
+        done_windows = load_done_windows(project_id)
+        try:
+            raw_candidates = analyze_and_find_clips(
+                client=None,
+                segments=segments,
+                count=request_count,
+                min_len=min_len,
+                max_len=max_len,
+                filter_mode=canonical_filter,
+                detected_lang=detected_lang,
+                target_len=target_len,
+                done_windows=done_windows,
+            )
+        except GeminiIncompleteError as e:
+            if e.done:
+                save_done_windows(project_id, {**done_windows, **e.done})
+            raise
+        clear_done_windows(project_id)
 
         broadcast_update(job_id, {"status": "running", "progress": 0.85, "message": "Підганяємо межі кліпів під речення..."})
         # Loose sanity check only: the refiner below snaps short clips out to full sentences
@@ -247,8 +322,14 @@ def _run_analyze_worker_locked(
 
     except Exception as e:
         log.exception(f"Analyze job {job_id} failed: {e}")
+        if isinstance(e, (GeminiQuotaError, GeminiIncompleteError)):
+            with _quota_lock:
+                _quota_hits[job_id] = e
+        err_text = str(e)
+        if isinstance(e, GeminiIncompleteError) and e.overloaded:
+            err_text += " Натисни «Знайти моменти» ще раз через кілька хвилин: доробимо лише те, чого бракує."
         db.update_project_status(project_id, "failed")
-        broadcast_update(job_id, {"status": "failed", "progress": 1.0, "error": str(e), "message": f"Помилка: {e}"})
+        broadcast_update(job_id, {"status": "failed", "progress": 1.0, "error": err_text, "message": f"Помилка: {err_text}"})
 
 
 def enqueue_analyze_job(

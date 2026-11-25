@@ -5,6 +5,7 @@ for AI Video Moments Analyzer Studio.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import threading
 import ipaddress
@@ -335,23 +336,19 @@ def _run_ytdlp_with_progress(cmd: list, env: dict, progress_cb: Callable[[float,
     return "".join(out_lines)
 
 
-def download_from_url_with_title(
-    url: str,
-    output_dir: str = "web_uploads",
-    progress_cb: Optional[Callable[[float, str], None]] = None,
-) -> tuple[str, str]:
-    """
-    Returns (local_path, title). The title is the video's real name on the site
-    (e.g. the YouTube title), or "" when the site does not provide one.
+_YTDLP_FORMAT = [
+    "-S", "vcodec:h264,res,acodec:m4a",
+    "-f", "bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[vcodec^=avc1]+bestaudio/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+]
 
-    Downloads a video from a public URL (YouTube, TikTok, Vimeo, etc.) using yt-dlp.
-    Enforces http/https scheme validation, SSRF host blocking, '--' CLI separator,
-    and strict Path.resolve().is_relative_to() containment.
-    """
+
+def _checked_url(url: str) -> str:
+    """Returns the stripped URL, or raises ValueError for a bad scheme, a missing host or a local/private host (SSRF)."""
     if not url or not url.strip():
         raise ValueError("URL cannot be empty")
 
-    parsed = urlparse(url.strip())
+    url = url.strip()
+    parsed = urlparse(url)
     if parsed.scheme.lower() not in ("http", "https"):
         raise ValueError(f"Неприпустима схема URL: {parsed.scheme!r}. Дозволені тільки http:// та https://")
 
@@ -368,12 +365,98 @@ def download_from_url_with_title(
         if "заборонено" in str(ip_err):
             raise
 
+    return url
+
+
+def probe_download_size(url: str, timeout: int = 90) -> Optional[int]:
+    """
+    Bytes the video at url will take once downloaded in the same format as download_from_url_with_title,
+    asked from the site without downloading. None when the site does not tell (the download then just goes ahead).
+    """
+    url = _checked_url(url)
+    cmd = [sys.executable, "-m", "yt_dlp", *_YTDLP_FORMAT, "--no-playlist", "--skip-download", "-j", "--", url]
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                check=True, timeout=timeout, env=env)
+        line = next((ln for ln in reversed(result.stdout.splitlines()) if ln.startswith("{")), "")
+        info = json.loads(line) if line else {}
+    except Exception as e:
+        log.warning(f"Could not ask the size of {url}: {str(e)[:200]}")
+        return None
+    return estimate_download_size(info)
+
+
+def estimate_download_size(info: dict) -> Optional[int]:
+    """Size from a yt-dlp info dict: the chosen video + audio formats, or bitrate × duration as a fallback."""
+    def one(f: dict) -> int:
+        size = f.get("filesize") or f.get("filesize_approx")
+        if size:
+            return int(size)
+        if f.get("tbr") and (f.get("duration") or info.get("duration")):
+            return int(float(f["tbr"]) * 1000 / 8 * float(f.get("duration") or info["duration"]))
+        return 0
+
+    parts = info.get("requested_formats") or [info]
+    total = sum(one(f) for f in parts)
+    return total or None
+
+
+# Audio track only: the same m4a stream the video download merges in, so timestamps match
+_YTDLP_AUDIO_FORMAT = ["-f", "bestaudio[acodec^=mp4a]/bestaudio[ext=m4a]/bestaudio"]
+
+
+def download_audio_from_url(url: str, output_dir: str, timeout: int = 1800) -> str:
+    """Downloads only the audio of a link (a few MB, seconds) so Whisper can start while the
+    video is still downloading. Same URL checks and output containment as the video download."""
+    url = _checked_url(url)
+    os.makedirs(output_dir, exist_ok=True)
+    cmd = [
+        sys.executable, "-m", "yt_dlp",
+        *_YTDLP_AUDIO_FORMAT,
+        "-o", os.path.join(output_dir, "%(id)s.audio.%(ext)s"),
+        "--no-playlist",
+        "--print", "after_move:filepath",
+        "--",
+        url,
+    ]
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        check=True, timeout=timeout, env=env,
+    )
+    lines = [ln for ln in result.stdout.strip().splitlines() if ln.strip()]
+    if not lines:
+        raise RuntimeError("yt-dlp did not return an audio file path.")
+    path = os.path.normpath(lines[-1])
+    if not Path(path).resolve().is_relative_to(Path(output_dir).resolve()):
+        raise ValueError(f"Downloaded audio {path!r} resolved outside output directory {output_dir!r}")
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        raise RuntimeError(f"Downloaded audio does not exist or is empty: {path}")
+    log.info(f"Audio downloaded → {path}")
+    return path
+
+
+def download_from_url_with_title(
+    url: str,
+    output_dir: str = "web_uploads",
+    progress_cb: Optional[Callable[[float, str], None]] = None,
+) -> tuple[str, str]:
+    """
+    Returns (local_path, title). The title is the video's real name on the site
+    (e.g. the YouTube title), or "" when the site does not provide one.
+
+    Downloads a video from a public URL (YouTube, TikTok, Vimeo, etc.) using yt-dlp.
+    Enforces http/https scheme validation, SSRF host blocking, '--' CLI separator,
+    and strict Path.resolve().is_relative_to() containment.
+    """
+    url = _checked_url(url)
+
     os.makedirs(output_dir, exist_ok=True)
     tpl = os.path.join(output_dir, "%(id)s.%(ext)s")
     cmd = [
         sys.executable, "-m", "yt_dlp",
-        "-S", "vcodec:h264,res,acodec:m4a",
-        "-f", "bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[vcodec^=avc1]+bestaudio/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        *_YTDLP_FORMAT,
         "--merge-output-format", "mp4",
         "-o", tpl,
         "--no-playlist",
