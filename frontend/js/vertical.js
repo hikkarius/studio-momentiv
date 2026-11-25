@@ -1413,6 +1413,9 @@ const Vertical = (() => {
     renderList();
     if (st.batch && st.batch.status === "running") st.listTimer = setTimeout(refreshList, 1500);
   }
+  /** «1 незроблений», «3 незроблені», «7 незроблених» */
+  const undoneWord = (n) => (n % 10 === 1 && n % 100 !== 11 ? "незроблений"
+    : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "незроблені" : "незроблених");
   function renderList() {
     const rows = kept();
     const ready = rows.filter((c) => (st.status.get(c.clip_index) || {}).ready);
@@ -1420,7 +1423,7 @@ const Vertical = (() => {
     const job = st.batch && st.batch.status === "running" ? st.batch : null;
     $("vxLSum").innerHTML = `В роботі: <b>${rows.length}</b> · готово ${ready.length}`;
     $("vxLMake").disabled = !!job || !todo;
-    $("vxLMake").textContent = job ? `Роблю ${Math.min(job.done + 1, job.total)} з ${job.total}…` : todo ? `Зробити ${todo} незроблен${todo === 1 ? "ий" : "і"}` : "Усі зроблені";
+    $("vxLMake").textContent = job ? `Роблю ${Math.min(job.done + 1, job.total)} з ${job.total}…` : todo ? `Зробити ${todo} ${undoneWord(todo)}` : "Усі зроблені";
     $("vxLZip").disabled = !ready.length || !!st.listZip;
     $("vxLProg").hidden = !job;
     if (job) $("vxLProgBar").style.width = `${Math.round((job.done / Math.max(1, job.total)) * 100)}%`;
@@ -1436,7 +1439,7 @@ const Vertical = (() => {
       else if (job && !(job.ready || []).includes(c.clip_index)) state = `<span class="vx-lmuted">У черзі</span>`;
       else state = `<span class="vx-lmuted">Не зроблено</span>`;
       return `<div class="vx-lrow" role="row" data-i="${c.clip_index}">` +
-        `<span role="cell"><img class="vx-lthumb" alt="" loading="lazy" src="/api/projects/${encodeURIComponent(ctx.pid())}/clips/${c.clip_index}/thumbnail"></span>` +
+        `<span role="cell"><img class="vx-lthumb" alt="" loading="lazy" src="/api/projects/${ctx.pid()}/clips/${c.clip_index}/thumbnail"></span>` +
         `<span role="cell"><button type="button" class="vx-lname" data-open="${c.clip_index}">№${c.num} ${escapeText(c.title || "")}<small>з ${fmt(c.start_sec)}</small></button></span>` +
         `<span role="cell" class="vx-lmuted">${fmt(c.end_sec - c.start_sec)}</span>` +
         `<span role="cell" class="vx-lhook">${hook ? escapeText(hook) : `<button type="button" data-hook="${c.clip_index}">${ideas ? "обрати з 3" : "обрати заголовок"}</button>`}</span>` +

@@ -577,10 +577,11 @@ def test_vertical_list_templates_and_make_all(page, studio, project):
     rows.first.wait_for()
     assert rows.count() == 2
     assert "Не зроблено" in rows.nth(0).inner_text()
+    page.wait_for_function("[...document.querySelectorAll('#vxLRows img')].every((i) => i.complete && i.naturalWidth > 0)", timeout=20000)
     page.click("#vxLApply")
     assert wait_for(page, lambda: all(c["vertical_opts"].get("style") == "one" for c in db.get_candidate_clips(PROJECT_ID) if c["review_status"] == "keep"))
     page.wait_for_function("[...document.querySelectorAll('#vxLRows select')].every((s) => s.value === 'Подкаст')")
-    assert "Зробити 2" in page.locator("#vxLMake").inner_text()
+    assert page.locator("#vxLMake").inner_text() == "Зробити 2 незроблені"
     page.click("#vxLMake")
     page.wait_for_function("document.querySelectorAll('#vxLRows .vx-lok').length === 2", timeout=180000)
     assert page.locator("#vxLMake").inner_text() == "Усі зроблені"

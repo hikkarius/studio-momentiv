@@ -108,7 +108,8 @@ def suggest_titles(clip_text: str, current_title: str, lang_code: str = "uk",
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt,
-                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.8),
+                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.8,
+                                                   automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)),
             )
             variants = parse_variants(response.text or "")
             if len(variants) >= 2:
