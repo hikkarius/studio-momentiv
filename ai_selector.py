@@ -700,7 +700,7 @@ def _call_gemini_single_window(
     plan = _attempt_plan(models)
     # the fallback is a stronger model with a small free daily limit: only the experimental search
     # (1-3 requests per video) uses it, the classic one (many windows) would use it up
-    for attempt, model_name in enumerate(plan + (_fallback_models() if experimental else [])):
+    for attempt, model_name in enumerate(plan + ([m for m in _fallback_models() if m not in {n for n, _ in strong or []}] if experimental else [])):
         if error_kinds and all(k == "bad_key" for k in error_kinds):
             break  # a wrong key will not start working after a pause
         fallback = attempt >= len(plan)

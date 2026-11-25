@@ -85,7 +85,8 @@ def test_worst_case_for_a_long_video_is_bounded(sleeps):
     assert "gemini-3.6-flash" not in models
 
 
-def test_fallback_model_answers_the_experimental_search_when_every_lite_model_is_overloaded(sleeps):
+def test_fallback_model_answers_the_experimental_search_when_every_lite_model_is_overloaded(sleeps, monkeypatch):
+    monkeypatch.setattr(ai_selector.app_config.gemini, "experimental_model", "fast")  # no strong models first
     fake = MagicMock()
     fake.models.generate_content.side_effect = [Exception("503 UNAVAILABLE")] * 4 + [_ok()]
     clips = ai_selector.find_clips_experimental(client=fake, segments=_segments(20), count=1)

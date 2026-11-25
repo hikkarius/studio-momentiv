@@ -231,3 +231,10 @@ def test_a_strong_model_that_times_out_sends_the_search_to_the_fast_ones(auto):
     clips = find_clips_experimental(client=mc, segments=_segments(22), count=10)
     assert mc.asked == [HYDROGEN, lite]  # 3.8 and 3.6 would wait just as long on this video
     assert clips[0]["_model"] == lite
+
+
+def test_a_strong_model_already_asked_is_not_asked_again_as_the_fallback(auto, no_sleep):
+    mc = _client({})  # everything busy
+    with pytest.raises(ai_selector.GeminiUnavailableError):
+        find_clips_experimental(client=mc, segments=_segments(22), count=10)
+    assert mc.asked.count(FLASH36) == 1
