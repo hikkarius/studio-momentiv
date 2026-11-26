@@ -121,7 +121,7 @@ with sync_playwright() as pw:
     pg.evaluate("localStorage.setItem('studio-theme','dark')")
     pg.reload()
     pg.locator("#welcomeScreen").wait_for(state="visible"); wait(1.5); shot("01-welcome")
-    pg.hover("a[href*='aistudio']"); wait(1.2)
+    pg.locator("a[href*='aistudio']:visible").first.hover(); wait(1.2)
     pg.click("#welcomeKey"); pg.keyboard.type("AIzaSyB" + "x7Qk2mN" * 4 + "Ab12", delay=25); wait(0.6)
     shot("02-key-pasted")
     pg.click("#welcomeSave"); pg.locator("#welcomeMsg.ok").wait_for(); wait(0.3); shot("03-key-ok")
