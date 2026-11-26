@@ -215,6 +215,9 @@ const Editor = (() => {
       b.querySelector(".ed-sdot").dataset.s = c.review_status || "";
       b.querySelector(".ed-sbtn-l").textContent = STATUS[c.review_status || ""];
     });
+    const kept = c.review_status === "keep"; // «✓ В роботі» is the most frequent pick: its own button next to the status menu
+    $("edKeep").disabled = kept;
+    $("edKeep").querySelector(".ed-keep-l").textContent = kept ? "Уже в роботі" : "В роботі";
     const sig = (c.signals || []).filter((k) => SIGNALS[k])
       .map((k) => `<span class="ed-sig" title="${esc(SIGNALS[k][1])}">${esc(SIGNALS[k][0])}</span>`).join("");
     $("edWhy").innerHTML = (sig ? `<span class="ed-sigs">${sig}</span>` : "") + (c.reason ? `<b>Чому:</b> ${esc(c.reason)}` : "");
@@ -1473,6 +1476,7 @@ const Editor = (() => {
     $("edScrollNext").addEventListener("click", () => { $("edList").scrollLeft += $("edList").clientWidth * 0.8; });
     $("edFold").addEventListener("click", () => setRail(!$("editor").classList.contains("rail-mini"), true));
     $("edGoNext").addEventListener("click", () => step(1));
+    $("edKeep").addEventListener("click", () => mark("keep"));
     const T0 = $("edClipTitle");
     T0.addEventListener("keydown", (e) => {
       if (e.key === "Enter") { e.preventDefault(); T0.blur(); }

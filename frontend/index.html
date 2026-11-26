@@ -655,6 +655,11 @@
         <div class="ed-prog" id="edProg">
           <div class="ed-stat keep ed-stat-vx"><span>В роботі</span><b id="edCntPick">0</b></div>
         </div>
+        <div class="vx-seg vx-lview vx-hview" id="vxViewSw" role="group" aria-label="Як показувати кліпи">
+          <button type="button" id="vxToOne" aria-pressed="true" title="Налаштовуєш кліп за кліпом">По одному</button>
+          <button type="button" id="vxToList" aria-pressed="false" title="Усі кліпи «В роботі» таблицею: заголовок, шаблон, стан">☰ Усі разом</button>
+        </div>
+        <span class="vx-hhint" id="vxViewHint">Налаштовуєш кліп за кліпом. «Усі разом»: таблиця всіх кліпів.</span>
         <span class="ed-spacer"></span>
         <span class="ed-search-mode" id="edSearchMode" hidden></span>
         <button class="ed-reanalyze" id="edReanalyze" type="button" title="Gemini ще раз перегляне розмову і запропонує нові кліпи (можна вибрати інший спосіб пошуку). Транскрипція береться з кешу, тож це швидко.">
@@ -708,6 +713,7 @@
             <span class="ed-spacer"></span>
             <div class="ed-decide" id="edDecide">
               <button class="ed-sbtn" id="edStatus" type="button" aria-haspopup="menu" aria-expanded="false" title="Статус кліпу"><i class="ed-sdot"></i><span class="ed-sbtn-l">Нове</span><small aria-hidden="true">▾</small></button>
+              <button type="button" class="ed-keep" id="edKeep" title="Взяти кліп у роботу: він піде на крок 2 (клавіша Y)"><span aria-hidden="true">✓</span> <span class="ed-keep-l">В роботі</span></button>
               <button type="button" class="ed-btn ed-gonext" id="edGoNext" title="Наступний кліп (↓)">Наступний <kbd>↓</kbd></button>
             </div>
           </div>
@@ -741,11 +747,6 @@
           </div>
           <div class="vx-list" id="vxList" hidden>
             <div class="vx-lhead">
-              <div class="vx-seg vx-lview" role="group" aria-label="Як показувати кліпи">
-                <button type="button" id="vxToOne" aria-pressed="false">По одному</button>
-                <button type="button" aria-pressed="true">☰ Усі разом</button>
-              </div>
-              <span class="vx-lhint">Клік по кліпу відкриває його «По одному».</span>
               <span class="vx-lsum" id="vxLSum"></span>
               <span class="vx-lsp"></span>
               <label class="vx-ltpl"><span>Шаблон для всіх</span><select id="vxLTpl"></select></label>
@@ -774,10 +775,6 @@
                 <div class="vx-nav">
                   <button type="button" class="ed-btn sm" id="vxPrev" title="Попередній кліп (↑)" aria-label="Попередній кліп">↑</button>
                   <button type="button" class="ed-btn sm" id="vxNext" title="Наступний кліп (↓)" aria-label="Наступний кліп">↓</button>
-                </div>
-                <div class="vx-seg vx-lview vx-hview" role="group" aria-label="Як показувати кліпи">
-                  <button type="button" aria-pressed="true" title="Налаштовуєш кліп за кліпом">По одному</button>
-                  <button type="button" id="vxToList" aria-pressed="false" title="Усі кліпи «В роботі» таблицею: заголовок, шаблон, стан">☰ Усі разом</button>
                 </div>
               </div>
               <div class="vx-view vx-seg" id="vxView" role="group" aria-label="Що показати" hidden>

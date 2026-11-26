@@ -1539,6 +1539,9 @@ const Vertical = (() => {
   function setListView(list, remember = true) {
     $("vxList").hidden = !list;
     $("edVx").classList.toggle("is-list", list);
+    $("vxToOne").setAttribute("aria-pressed", String(!list));
+    $("vxToList").setAttribute("aria-pressed", String(list));
+    $("vxViewHint").textContent = list ? "Клік по кліпу відкриває його «По одному»." : "Налаштовуєш кліп за кліпом. «Усі разом»: таблиця всіх кліпів.";
     if (remember) { try { localStorage.setItem("studio-vx-view", list ? "all" : "one"); } catch (_) {} }
     if (list) { flush(); refreshList(); } else { clearTimeout(st.listTimer); onShow(); }
   }
