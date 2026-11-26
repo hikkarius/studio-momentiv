@@ -738,6 +738,8 @@ def delete_project(project_id: str) -> bool:
 
 QUEUE_ACTIVE = ("downloading", "analyzing")
 QUEUE_PENDING = ("waiting", "limit")  # not started yet / paused until the Gemini limit resets
+# Message of an active item whose «Скасувати» was pressed; the worker stops at its next progress report
+CANCEL_MSG = "Скасовую…"
 
 
 def add_queue_item(
@@ -880,8 +882,13 @@ def analysis_running() -> bool:
 
 
 def requeue_interrupted_items() -> int:
-    """Items cut off by a studio restart go back to the front of the queue."""
+    """Items cut off by a studio restart go back to the front of the queue
+    (except those the user was cancelling: they stay cancelled)."""
     with get_db() as conn:
+        conn.execute(
+            "UPDATE queue_items SET status = 'cancelled', progress = 0.0, message = 'Скасовано' "
+            "WHERE status IN ('downloading', 'analyzing') AND message = ?", (CANCEL_MSG,)
+        )
         cur = conn.execute(
             "UPDATE queue_items SET status = 'waiting', progress = 0.0, "
             "message = 'Продовжимо після перезапуску студії', position = position - 1000000 "
@@ -898,7 +905,7 @@ def delete_queue_item(item_id: str) -> bool:
 
 def clear_finished_queue_items() -> int:
     with get_db() as conn:
-        cur = conn.execute("DELETE FROM queue_items WHERE status IN ('done', 'failed')")
+        cur = conn.execute("DELETE FROM queue_items WHERE status IN ('done', 'failed', 'cancelled')")
         return cur.rowcount or 0
 
 

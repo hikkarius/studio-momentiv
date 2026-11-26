@@ -31,6 +31,38 @@ def new_item_id() -> str:
     return "q_" + uuid.uuid4().hex[:10]
 
 
+# ─── «Скасувати» on a video that is being processed ─────────────────────────
+
+_cancel_items: set = set()
+_cancel_lock = threading.Lock()
+
+
+def request_cancel(item_id: str) -> bool:
+    """Asks the worker to stop the item at its next progress report (download line, Whisper
+    segment or analysis step). False when the item is not being processed."""
+    item = db.get_queue_item(item_id)
+    if not item or item["status"] not in db.QUEUE_ACTIVE:
+        return False
+    with _cancel_lock:
+        _cancel_items.add(item_id)
+    db.update_queue_item(item_id, message=db.CANCEL_MSG)
+    if item.get("job_id"):
+        job_runner.cancel_job(item["job_id"])
+    log.info(f"Черга: {item_id} скасовується на прохання користувача.")
+    return True
+
+
+def _check_cancel(item_id: str) -> None:
+    with _cancel_lock:
+        if item_id in _cancel_items:
+            raise job_runner.Cancelled()
+
+
+def _mark_cancelled(item_id: str) -> None:
+    db.update_queue_item(item_id, status="cancelled", progress=0.0, message="Скасовано", error=None)
+    log.info(f"Черга: {item_id} скасовано.")
+
+
 def notify() -> None:
     """Wakes the worker after something was added to the queue."""
     _wake.set()
@@ -173,6 +205,7 @@ def _prepare_while_paused(item: Dict[str, Any], project_id: str, paused_until: f
                          message="Поки чекаємо ліміт Gemini, розпізнаємо мову...")
 
     def on_progress(frac: float, msg: str) -> None:
+        _check_cancel(item_id)
         # same scale as a full analysis: speech recognition is the 15–55 % part
         db.update_queue_item(item_id, progress=round(0.15 + 0.40 * frac, 3), message=msg)
 
@@ -222,6 +255,9 @@ def process_next() -> Optional[Dict[str, Any]]:
         job_id = job_runner._new_job_id(project_id)
         db.create_job(job_id, project_id, "analyze")
         db.update_queue_item(item_id, job_id=job_id)
+        with _cancel_lock:
+            if item_id in _cancel_items:  # pressed between the download and the analysis
+                job_runner.cancel_job(job_id)
         clips_count = item["clips_count"] or job_runner.auto_clips_count(proj.get("duration") or 0)
         # «Довгі історії» chosen for this video (passed only then: '' = the setting, read by the worker)
         extra = {"stories": item["stories"] == "on"} if item.get("stories") in ("on", "off") else {}
@@ -233,14 +269,21 @@ def process_next() -> Optional[Dict[str, Any]]:
         quota = job_runner.pop_quota_hit(job_id)
         if job.get("status") != "completed" and quota is not None and _pause_on_limit(item, quota):
             return db.get_queue_item(item_id)
-        if job.get("status") == "completed":
+        if job.get("status") == "cancelled":
+            _mark_cancelled(item_id)
+        elif job.get("status") == "completed":
             db.update_queue_item(item_id, status="done", progress=1.0, message=job.get("message") or "Готово")
         else:
             err = job.get("error") or job.get("message") or "Аналіз не вдався."
             db.update_queue_item(item_id, status="failed", progress=1.0, error=err, message="Помилка аналізу")
+    except job_runner.Cancelled:
+        _mark_cancelled(item_id)
     except Exception as e:
         log.exception(f"Черга: {item_id} не вдалося: {e}")
         db.update_queue_item(item_id, status="failed", progress=1.0, error=str(e), message="Помилка")
+    finally:
+        with _cancel_lock:
+            _cancel_items.discard(item_id)
     return db.get_queue_item(item_id)
 
 
@@ -252,6 +295,7 @@ def _download(item: Dict[str, Any]) -> Optional[str]:
     db.update_queue_item(item_id, status="downloading", progress=0.0, message="Завантажуємо відео...")
 
     def on_progress(frac: float, msg: str) -> None:
+        _check_cancel(item_id)
         db.update_queue_item(item_id, progress=round(frac, 3), message=msg)
 
     try:
@@ -298,16 +342,27 @@ def download_audio_first(url: str, on_progress, language: Optional[str] = None):
             return server.ingest_url(url, progress_cb=on_progress)
 
         lock = threading.Lock()
-        progress = {"video": 0.0, "whisper": None}
+        progress = {"video": 0.0, "whisper": None, "whisper_t0": time.monotonic()}
 
         def report() -> None:
             v, w = progress["video"], progress["whisper"]
-            msg = f"Завантаження відео: {v * 100:.0f}%"
-            msg += " · мову вже розпізнано" if w is not None and w >= 1.0 else (
-                f" · розпізнавання мови: {w * 100:.0f}%" if w is not None else " · розпізнаємо мову...")
+            if v >= 1.0 and (w is None or w < 1.0):
+                # The video is in; the card's percent is now Whisper's, with the time left:
+                # «100%» of the download alone looked like a hang on slow graphics cards.
+                msg = "Відео скачано · " + (f"розпізнавання мови: {w * 100:.0f}%" if w is not None
+                                            else "розпізнаємо мову...")
+                left = whisper_time_left(w, time.monotonic() - progress["whisper_t0"])
+                if left:
+                    msg += f" · лишилось {left}"
+                frac = w or 0.0
+            else:
+                msg = f"Завантаження відео: {v * 100:.0f}%"
+                msg += " · мову вже розпізнано" if w is not None and w >= 1.0 else (
+                    f" · розпізнавання мови: {w * 100:.0f}%" if w is not None else " · розпізнаємо мову...")
+                frac = v
             try:
-                on_progress(v, msg)
-            except Exception:
+                on_progress(frac, msg)
+            except Exception:  # job_runner.Cancelled is not an Exception: it goes through
                 pass
 
         def video_cb(frac: float, _msg: str) -> None:
@@ -337,11 +392,16 @@ def download_audio_first(url: str, on_progress, language: Optional[str] = None):
         t0 = time.monotonic()
         try:
             with job_runner._analyze_lock:
+                progress["whisper_t0"] = time.monotonic()
                 transcript = transcription.transcribe_media(audio_path, cfg_lang, whisper_cb)
             log.info(f"Черга: мову розпізнано зі звуку за {time.monotonic() - t0:.0f} с, поки качалося відео.")
             with lock:
                 progress["whisper"] = 1.0
                 report()
+        except job_runner.Cancelled:
+            # the download stops at its next progress line; wait for it so no file is left half-written
+            video_thread.join(timeout=60)
+            raise
         except Exception as e:
             log.warning(f"Черга: не вдалося розпізнати звук заздалегідь ({e}); розпізнаємо з відео.")
 
@@ -359,6 +419,17 @@ def download_audio_first(url: str, on_progress, language: Optional[str] = None):
         shutil.rmtree(audio_dir, ignore_errors=True)
 
 
+def whisper_time_left(frac: Optional[float], elapsed: float) -> str:
+    """«≈ 35 хв» from Whisper's progress so far; '' while there is too little to judge."""
+    if not frac or frac < 0.03 or frac >= 1.0 or elapsed < 20:
+        return ""
+    minutes = max(1, round(elapsed * (1.0 - frac) / frac / 60))
+    if minutes < 60:
+        return f"≈ {minutes} хв"
+    h, m = divmod(minutes, 60)
+    return f"≈ {h} год {m} хв" if m else f"≈ {h} год"
+
+
 def _short_error(e: Exception) -> str:
     """yt-dlp errors carry the whole stderr; keep the line that says what went wrong."""
     stderr = getattr(e, "stderr", None) or ""
@@ -374,7 +445,7 @@ def public_item(item: Dict[str, Any]) -> Dict[str, Any]:
     """Queue item as the UI sees it: analysis progress comes live from its job."""
     out = dict(item)
     out["no_space"] = item["status"] == "failed" and storage.is_no_space_error(item.get("error") or "")
-    if item["status"] == "analyzing" and item.get("job_id"):
+    if item["status"] == "analyzing" and item.get("job_id") and item.get("message") != db.CANCEL_MSG:
         job = db.get_job(item["job_id"])
         if job:
             out["progress"] = job.get("progress") or 0.0

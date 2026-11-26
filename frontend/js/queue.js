@@ -181,6 +181,15 @@ const Queue = (() => {
   const remove = (id) => act(`/api/queue/${encodeURIComponent(id)}`, "DELETE");
   const retry = (id) => act(`/api/queue/${encodeURIComponent(id)}/retry`);
   const resume = (id) => act(`/api/queue/${encodeURIComponent(id)}/resume`);
+  const cancel = (id) => act(`/api/queue/${encodeURIComponent(id)}/cancel`);
+  // «Скасувати» asks once more on the card itself: the first click arms it for a few seconds
+  let armedCancel = "", armedTimer = null;
+  function armCancel(id) {
+    armedCancel = id;
+    clearTimeout(armedTimer);
+    armedTimer = setTimeout(() => { armedCancel = ""; render(); }, 5000);
+    render();
+  }
   const move = (id, direction) => act(`/api/queue/${encodeURIComponent(id)}/move`, "POST", { direction });
   const clearFinished = () => act("/api/queue/clear-finished");
 
@@ -231,6 +240,8 @@ const Queue = (() => {
           }
         } else if (it.status === "failed") {
           showToast(`Не вдалося: «${it.title}»`, "error");
+        } else if (it.status === "cancelled") {
+          showToast(`Скасовано: «${it.title}»`);
         } else if (it.status === "limit" && before !== "analyzing") {
           /* a video transcribed during the pause: no toast */
         } else if (it.status === "limit") {
@@ -253,9 +264,11 @@ const Queue = (() => {
     downloading: "Обробляється",
     analyzing: "Обробляється",
     failed: "Не вдалося",
+    cancelled: "Скасовано",
     limit: "⏸ Чекає на Gemini",
   };
-  const SHOWN = ["limit", "waiting", "downloading", "analyzing", "failed"];
+  const SHOWN = ["limit", "waiting", "downloading", "analyzing", "failed", "cancelled"];
+  const CANCELLING = "Скасовую…"; // the server's message while a running video is stopping
   let pause = { until: 0, daily: false, awake: false, overload: false };
 
   // ── Gemini limit pause ────────────────────────────────────────────────────
@@ -323,6 +336,8 @@ const Queue = (() => {
 
   /** Stage name without its own percent and engine details: the card shows one overall percent. */
   function stageText(msg) {
+    if (/^Відео скачано/.test(String(msg || ""))) return "Розпізнаю мову";
+    if (/^Завантаження відео/.test(String(msg || ""))) return "Скачую відео";
     const m = String(msg || "").replace(/\s*\([^)]*\)/g, "").replace(/:?\s*\d+(?:[.,]\d+)?\s*%\s*$/, "").trim();
     if (/^Транскрипці/i.test(m)) return "Розпізнаю мову";
     return m || "Обробляю…";
@@ -330,7 +345,7 @@ const Queue = (() => {
 
   /** Steps under the progress bar: download → speech recognition → search for moments. */
   function stepOf(it) {
-    if (it.status === "downloading") return 0;
+    if (it.status === "downloading") return /^Відео скачано/.test(it.message || "") ? 1 : 0;
     return (it.progress || 0) < 0.6 ? 1 : 2;
   }
   function steps(cur) {
@@ -367,6 +382,7 @@ const Queue = (() => {
     for (const it of shown) {
       const pct = Math.round((it.progress || 0) * 100);
       const busy = it.status === "downloading" || it.status === "analyzing";
+      const stopping = busy && it.message === CANCELLING;
       const wIndex = waiting.indexOf(it);
       const thumb = it.project_id
         ? `<img src="/api/projects/${encodeURIComponent(it.project_id)}/thumbnail" class="history-thumb-img" alt="" loading="lazy" onerror="this.remove()">`
@@ -384,8 +400,13 @@ const Queue = (() => {
       } else if (it.status === "waiting") {
         badge = wIndex === 0 ? (running ? "У черзі · наступне" : "Зараз почнемо") : `У черзі · ${wIndex + 1}-е`;
         meta = it.clips_count ? `Чекає своєї черги · ${it.clips_count} кліпів` : "Чекає своєї черги";
+      } else if (stopping) {
+        meta = "Зупиняю на найближчому кроці, це до хвилини";
       } else if (busy) {
-        meta = "Можна закрити вкладку";
+        const left = /лишилось ([^·]+)/.exec(it.message || "");
+        meta = left ? `Лишилось ${left[1].trim()} · можна закрити вкладку` : "Можна закрити вкладку";
+      } else if (it.status === "cancelled") {
+        meta = it.project_id ? "Відео збережено, його можна обробити ще раз" : "Можна почати ще раз";
       } else if (it.status === "failed") {
         meta = it.error || it.message || "Помилка";
       }
@@ -397,9 +418,9 @@ const Queue = (() => {
             </div>` : "";
       const over = !busy ? limitOver : `
             <div class="q-over">
-              <b>${escapeHtml(stageText(it.message))}${pct ? ` · ${pct}%` : ""}</b>
+              <b>${stopping ? "Скасовую…" : `${escapeHtml(stageText(it.message))}${pct ? ` · ${pct}%` : ""}`}</b>
               <div class="q-bar${it.status === "downloading" && !pct ? " busy" : ""}"><i style="width:${pct}%"></i></div>
-              <div class="q-steps">${steps(stepOf(it))}</div>
+              ${stopping ? "" : `<div class="q-steps">${steps(stepOf(it))}</div>`}
             </div>`;
       const menu = it.status === "limit" && pIndex > 0 ? `
           <button type="button" class="vc-dots" aria-haspopup="true" aria-expanded="false" title="Дії" aria-label="Дії">⋯</button>
@@ -417,7 +438,11 @@ const Queue = (() => {
             <div class="q-actions">
               <button type="button" class="btn btn-primary btn-sm" data-resume="${it.id}">${icon("refresh")}Спробувати зараз</button>
               <button type="button" class="btn btn-secondary btn-sm" data-remove="${it.id}">Прибрати</button>
-            </div>` : it.status === "failed" ? `
+            </div>` : busy && !stopping ? `
+            <div class="q-actions">${armedCancel === it.id
+              ? `<button type="button" class="btn btn-danger btn-sm" data-cancel="${it.id}">Так, скасувати</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-disarm="1">Ні</button>`
+              : `<button type="button" class="q-unqueue" data-arm-cancel="${it.id}">${icon("close")}Скасувати</button>`}</div>` : it.status === "failed" || it.status === "cancelled" ? `
             <div class="q-actions">${it.no_space ? FREE_BTN : ""}
               <button type="button" class="btn ${it.no_space ? "btn-secondary" : "btn-primary"} btn-sm" data-retry="${it.id}">${icon("refresh")}Ще раз</button>
               <button type="button" class="btn btn-secondary btn-sm" data-remove="${it.id}">Прибрати</button>
@@ -502,6 +527,9 @@ const Queue = (() => {
       Home.closeMenus();
       if (b.dataset.remove) remove(b.dataset.remove);
       else if (b.dataset.retry) retry(b.dataset.retry);
+      else if (b.dataset.armCancel) armCancel(b.dataset.armCancel);
+      else if (b.dataset.cancel) { armedCancel = ""; cancel(b.dataset.cancel); }
+      else if (b.dataset.disarm) { armedCancel = ""; render(); }
       else if (b.dataset.resume) resume(b.dataset.resume);
       else if (b.dataset.dismiss) dismissUpload(b.dataset.dismiss);
       else if (b.dataset.freeSpace) Settings.open("disk");
