@@ -31,7 +31,7 @@ import reactions
 import streamer
 import title_ideas
 import vertical_render
-from backend import app_update, backup, db, job_runner, keep_awake, queue_runner, storage, support_report
+from backend import app_update, backup, compare, db, job_runner, keep_awake, queue_runner, storage, support_report
 from constants import resolve_filter_mode
 from state import app_state
 from transcription import load_transcript_cache
@@ -189,6 +189,7 @@ class AnalyzeRequest(BaseModel):
     filter_mode: str = "Viral Hooks"
     engine: str = "whisper_local"
     language: str = ""   # '' = the language from the settings
+    search_mode: str = Field(default="", pattern=r"^(|classic|experimental)$")
 
     @field_validator("language")
     @classmethod
@@ -216,6 +217,7 @@ class QueueAddRequest(BaseModel):
     clips_count: int = Field(default=0, ge=0, le=100)   # 0 = auto by video length
     filter_mode: str = "Viral Hooks"
     language: str = ""   # '' = the language from the settings
+    search_mode: str = Field(default="", pattern=r"^(|classic|experimental)$")  # '' = the default from the settings
 
     @field_validator("language")
     @classmethod
@@ -431,6 +433,7 @@ def ingest_url(url: str, progress_cb=None, space_checked: bool = False) -> tuple
             source_path=video_path,
             duration=duration,
         )
+        db.set_project_source_url(project["id"], url)  # later: YouTube «most replayed» for the experimental search
         try:  # a Twitch VOD / YouTube stream: its chat replay helps find the reactions (best effort, ≤5 min)
             n = _fetch_chat(url, str(_safe_project_output_dir(project["id"]) / "chat.json"))
             if n:
@@ -486,8 +489,63 @@ def start_analyze(project_id: str, payload: AnalyzeRequest):
         filter_mode=payload.filter_mode,
         engine=payload.engine,
         language=payload.language or None,
+        search_mode=payload.search_mode or None,
     )
     return {"job_id": job_id, "project_id": project_id, "status": "queued"}
+
+
+# ─── «Порівняти наосліп»: classic vs experimental search ───────────────────────
+
+class CompareVoteRequest(BaseModel):
+    n: int = Field(ge=0, le=100)
+    pick: str = Field(pattern=r"^(left|right|same|)$")
+
+
+class CompareApplyRequest(BaseModel):
+    mode: str = Field(pattern=r"^(classic|experimental)$")
+
+
+@app.post("/api/projects/{project_id}/compare")
+def start_compare(project_id: str):
+    """Runs both searches on the cached transcript; the video's clips stay as they are."""
+    from config_loader import app_config
+
+    _validate_project_id(project_id)
+    proj = db.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Проєкт не знайдено.")
+    compare.start(project_id, job_runner.auto_clips_count(proj.get("duration") or 0), app_config.studio.default_filter)
+    return compare.view(project_id)
+
+
+@app.get("/api/projects/{project_id}/compare")
+def get_compare(project_id: str):
+    _validate_project_id(project_id)
+    return compare.view(project_id)
+
+
+@app.post("/api/projects/{project_id}/compare/vote")
+def vote_compare(project_id: str, payload: CompareVoteRequest):
+    _validate_project_id(project_id)
+    try:
+        return compare.vote(project_id, payload.n, payload.pick)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.post("/api/projects/{project_id}/compare/apply")
+def apply_compare(project_id: str, payload: CompareApplyRequest):
+    """«Взяти кліпи переможця»: the chosen search's clips replace the unmarked ones (marked clips stay)."""
+    _validate_project_id(project_id)
+    if not db.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Проєкт не знайдено.")
+    try:
+        clips = compare.clips_of(project_id, payload.mode)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    db.save_candidate_clips(project_id, clips, keep_reviewed=True)
+    db.set_project_search_mode(project_id, payload.mode)
+    return {"status": "applied", "clips": len(clips)}
 
 
 @app.get("/api/jobs/{job_id}/stream")
@@ -1765,7 +1823,7 @@ def add_to_queue(payload: QueueAddRequest):
     for url in dict.fromkeys(urls):
         added.append(db.add_queue_item(queue_runner.new_item_id(), source_url=url, title=url,
                                        clips_count=payload.clips_count, filter_mode=payload.filter_mode,
-                                       language=payload.language))
+                                       language=payload.language, search_mode=payload.search_mode))
     for pid in dict.fromkeys(payload.project_ids):
         _validate_project_id(pid)
         proj = db.get_project(pid)
@@ -1775,7 +1833,7 @@ def add_to_queue(payload: QueueAddRequest):
             continue
         added.append(db.add_queue_item(queue_runner.new_item_id(), project_id=pid, title=proj.get("title") or pid,
                                        clips_count=payload.clips_count, filter_mode=payload.filter_mode,
-                                       language=payload.language))
+                                       language=payload.language, search_mode=payload.search_mode))
     queue_runner.notify()
     return {"added": added}
 
@@ -1801,7 +1859,7 @@ def retry_queue_item(item_id: str):
     db.delete_queue_item(item_id)
     new = db.add_queue_item(queue_runner.new_item_id(), source_url=item["source_url"], project_id=item["project_id"],
                             title=item["title"], clips_count=item["clips_count"], filter_mode=item["filter_mode"],
-                            language=item.get("language") or "")
+                            language=item.get("language") or "", search_mode=item.get("search_mode") or "")
     queue_runner.notify()
     return {"item": new}
 
@@ -1841,12 +1899,19 @@ FILTER_CHOICES = [
     {"value": "Actionable Advice", "label": "💡 Експертні поради"},
     {"value": "Storytelling", "label": "🎭 Емоційні історії"},
 ]
+SEARCH_CHOICES = [
+    {"value": "classic", "label": "📼 Класичний",
+     "hint": "Рівномірно нарізає все відео. Багато кліпів, зокрема середніх. Перевірений спосіб."},
+    {"value": "experimental", "label": "🧪 Експериментальний",
+     "hint": "ШІ читає все відео разом і бере лише сильні місця, кліп починається з хука. Кліпів менше (до 40), зате кращі."},
+]
 # Only these settings can be changed from the browser
 _EDITABLE_SETTINGS = {
     "whisper": {"model", "language"},
     "clips": {"default_min_len", "default_max_len", "max_overlap_sec"},
-    "gemini": {"rerank"},
-    "studio": {"default_clips", "default_filter", "cleanup_days", "daily_backup", "keep_awake", "wait_for_limit"},
+    "gemini": {"rerank", "experimental_model"},
+    "studio": {"default_clips", "default_filter", "default_search", "cleanup_days", "daily_backup", "keep_awake",
+               "wait_for_limit"},
 }
 
 
@@ -1858,8 +1923,24 @@ def _settings_view() -> Dict[str, Any]:
     return {
         "values": {sec: {k: cfg[sec][k] for k in keys} for sec, keys in _EDITABLE_SETTINGS.items()},
         "gemini_key": {"set": bool(key), "hint": ("…" + key[-4:]) if len(key) >= 8 else ""},
-        "choices": {"whisper_model": WHISPER_MODEL_CHOICES, "language": LANGUAGE_CHOICES, "filter": FILTER_CHOICES},
+        "choices": {"whisper_model": WHISPER_MODEL_CHOICES, "language": LANGUAGE_CHOICES, "filter": FILTER_CHOICES,
+                    "search": SEARCH_CHOICES, "experimental_model": _experimental_model_choices()},
     }
+
+
+def _experimental_model_choices() -> List[Dict[str, str]]:
+    """«Модель ШІ для 🧪 експериментального пошуку»: auto (strongest free that answers) or fast.
+    A model id set by hand in user_settings.json still works and shows as «Вибрано вручну»."""
+    from backend.gemini_models import pretty_name
+    from config_loader import app_config
+
+    strong = list(app_config.gemini.strong_models or [])
+    chain = ", далі ".join(pretty_name(m) for m in strong[:3]) or "найсильнішу безкоштовну модель"
+    out = [{"value": "auto", "label": "Авто: найсильніша вільна", "tag": "Рекомендовано",
+            "hint": f"Пробує {chain}. Якщо всі зайняті, бере швидку."}]
+    out.append({"value": "fast", "label": "Швидка",
+                "hint": "Як у класичному: відповідь за секунди, найбільший денний ліміт."})
+    return out
 
 
 @app.get("/api/settings")
@@ -1886,6 +1967,12 @@ def update_settings(payload: Dict[str, Any]):
     if "studio" in patch and "default_filter" in patch["studio"]:
         if patch["studio"]["default_filter"] not in {c["value"] for c in FILTER_CHOICES}:
             raise HTTPException(status_code=400, detail="Невідомий стиль пошуку.")
+    if "studio" in patch and "default_search" in patch["studio"]:
+        if patch["studio"]["default_search"] not in {c["value"] for c in SEARCH_CHOICES}:
+            raise HTTPException(status_code=400, detail="Невідомий спосіб пошуку.")
+    if "gemini" in patch and "experimental_model" in patch["gemini"]:
+        if patch["gemini"]["experimental_model"] not in {c["value"] for c in _experimental_model_choices()}:
+            raise HTTPException(status_code=400, detail="Невідома модель ШІ.")
     if "whisper" in patch and "language" in patch["whisper"]:
         if not is_supported(str(patch["whisper"]["language"])):
             raise HTTPException(status_code=400, detail="Невідома мова відео.")
@@ -1910,6 +1997,25 @@ def update_settings(payload: Dict[str, Any]):
 class _KeyCheck(BaseModel):
     key: str
     save: bool = True
+
+
+@app.get("/api/gemini/models")
+def gemini_models_last():
+    """The last «Перевірити зараз» result (null before the first check)."""
+    from backend.gemini_models import last_check
+
+    return {"check": last_check()}
+
+
+@app.post("/api/gemini/models/check")
+def gemini_models_check():
+    """One tiny request to each model the studio may use: which ones this key can use right now."""
+    from backend.gemini_models import check_models
+    from config_loader import ensure_gemini_api_key
+
+    if not (ensure_gemini_api_key() or "").strip():
+        raise HTTPException(status_code=400, detail="Спершу додай ключ Gemini.")
+    return {"check": check_models()}
 
 
 @app.post("/api/settings/check-saved-key")

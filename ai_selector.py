@@ -26,6 +26,22 @@ log = logging.getLogger("shorts_core")
 # ~100,000 characters corresponds to ~20,000-25,000 spoken words (~2 hours of speech).
 _MAX_TRANSCRIPT_CHARS: int = 100_000
 
+# «Експериментальний» search: the whole transcript goes into one prompt (current Gemini models take
+# ~1M tokens, ~400k characters is about 4 hours of speech). Longer videos use overlapping windows.
+EXPERIMENTAL_MAX_CHARS: int = 400_000
+EXPERIMENTAL_OVERLAP_SEC: float = 120.0
+# More clips than this in one answer makes the model output long and unreliable
+EXPERIMENTAL_MAX_CLIPS: int = 40
+
+SEARCH_CLASSIC = "classic"
+SEARCH_EXPERIMENTAL = "experimental"
+SEARCH_MODES = (SEARCH_CLASSIC, SEARCH_EXPERIMENTAL)
+
+
+def resolve_search_mode(value: Optional[str]) -> str:
+    v = (value or "").strip().lower()
+    return v if v in SEARCH_MODES else SEARCH_CLASSIC
+
 
 def validate_clips(
     clips: list[dict],
@@ -254,14 +270,17 @@ _RERANK_SCHEMA: dict = {
 }
 
 
-def _json_config(schema: dict, temperature: float, thinking_level: Optional[str] = None):
+def _json_config(schema: dict, temperature: float, thinking_level: Optional[str] = None,
+                 timeout_ms: Optional[int] = None):
     """generate_content config: JSON that follows the schema, no automatic function calling,
-    and the thinking level when one is given."""
+    the thinking level when one is given, and a longer timeout for this request when given."""
     from google.genai import types
 
     extra = {}
     if thinking_level:
         extra["thinking_config"] = types.ThinkingConfig(thinking_level=thinking_level)
+    if timeout_ms:
+        extra["http_options"] = types.HttpOptions(timeout=int(timeout_ms))
     return types.GenerateContentConfig(
         response_mime_type="application/json",
         response_json_schema=schema,
@@ -333,6 +352,60 @@ def available_models() -> list[str]:
     return [m for m in CANDIDATE_MODELS if m not in gone]
 
 
+def _fallback_models() -> list[str]:
+    """Stronger models asked once when every candidate is overloaded (not those out of today's limit)."""
+    gone = _exhausted_today()
+    extra = getattr(app_config.gemini, "fallback_models", None) or []
+    return [m for m in extra if m not in gone and m not in CANDIDATE_MODELS]
+
+
+# After this many «overloaded» answers in one analysis with no answer at all, Google is down:
+# the other windows stop asking instead of burning 4 requests each (and a second round)
+OVERLOAD_TRIP = 6
+
+
+class _OverloadWatch:
+    """Shared by the windows of one analysis: counts «overloaded» answers until the first real answer."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._fails = 0
+        self._answers = 0
+        self._fallback_failed = False
+        self._fallback_busy = False
+
+    def failed(self, fallback: bool = False) -> None:
+        with self._lock:
+            self._fails += 1
+            if fallback:
+                self._fallback_failed = True
+
+    def answered(self) -> None:
+        with self._lock:
+            self._answers += 1
+
+    def tripped(self) -> bool:
+        with self._lock:
+            return self._answers == 0 and self._fails >= OVERLOAD_TRIP
+
+    def down(self) -> bool:
+        """Nothing answered at all, only «overloaded»."""
+        with self._lock:
+            return self._answers == 0 and self._fails > 0
+
+    def claim_fallback(self) -> bool:
+        """One window at a time tries the fallback model; none after it was overloaded too."""
+        with self._lock:
+            if self._fallback_failed or self._fallback_busy:
+                return False
+            self._fallback_busy = True
+            return True
+
+    def release_fallback(self) -> None:
+        with self._lock:
+            self._fallback_busy = False
+
+
 class _RateLimiter:
     """At most `limit` requests per model in any 60 s, shared by all threads."""
 
@@ -376,22 +449,25 @@ _NO_THINKING_LEVEL: set[str] = set()
 _NO_THINKING_LOCK = threading.Lock()
 
 
-def _thinking_level_for(model_name: str) -> Optional[str]:
-    level = str(getattr(app_config.gemini, "thinking_level", "") or "").strip().upper()
+def _thinking_level_for(model_name: str, strong: bool = False) -> Optional[str]:
+    key = "strong_thinking_level" if strong else "thinking_level"
+    level = str(getattr(app_config.gemini, key, "") or "").strip().upper()
     if not level:
         return None
     with _NO_THINKING_LOCK:
         return None if model_name in _NO_THINKING_LEVEL else level
 
 
-def _generate(client, model_name: str, prompt: str, schema: dict, temperature: float):
+def _generate(client, model_name: str, prompt: str, schema: dict, temperature: float, strong: bool = False):
     """generate_content with schema JSON and the configured thinking level (dropped for a model
-    that does not accept it)."""
-    level = _thinking_level_for(model_name)
+    that does not accept it). strong: one of the stronger models of the experimental search, which
+    thinks a little more and gets a longer timeout."""
+    level = _thinking_level_for(model_name, strong)
+    timeout_ms = int(getattr(app_config.gemini, "strong_timeout_sec", 480) or 480) * 1000 if strong else None
     _rate_limiter.acquire(model_name, _max_rpm())
     try:
         return client.models.generate_content(
-            model=model_name, contents=prompt, config=_json_config(schema, temperature, level))
+            model=model_name, contents=prompt, config=_json_config(schema, temperature, level, timeout_ms))
     except Exception as e:
         low = str(e).lower()
         if level and "thinking" in low and ("400" in low or "invalid" in low):
@@ -399,8 +475,84 @@ def _generate(client, model_name: str, prompt: str, schema: dict, temperature: f
                 _NO_THINKING_LEVEL.add(model_name)
             log.warning(f"{model_name} does not accept thinking_level={level}; asking without it")
             return client.models.generate_content(
-                model=model_name, contents=prompt, config=_json_config(schema, temperature, None))
+                model=model_name, contents=prompt, config=_json_config(schema, temperature, None, timeout_ms))
         raise
+
+
+# ─── Stronger models for the experimental search ────────────────────────────
+# The experimental search sends 1–2 big requests per video, so it can use a stronger model whose free
+# daily limit is small. Each strong model is asked before the candidate models; if none answers,
+# the usual plan (candidate models + fallback) runs, so a busy strong model never fails the video.
+EXPERIMENTAL_MODEL_AUTO = "auto"
+EXPERIMENTAL_MODEL_FAST = "fast"
+# A model chosen by name gets this many tries (with a pause) before the search moves on
+_CHOSEN_MODEL_WAITS: tuple[float, ...] = (20.0, 40.0)
+
+
+def _is_paid_only(err_str: str) -> bool:
+    """The free tier of this key has no quota for the model at all («limit: 0»)."""
+    return re.search(r"limit:\s*0(?![\d.])", err_str) is not None
+
+
+def strong_plan() -> list[tuple[str, int]]:
+    """[(model, tries)] for the experimental search, without models out of today's limit."""
+    choice = str(getattr(app_config.gemini, "experimental_model", EXPERIMENTAL_MODEL_AUTO) or EXPERIMENTAL_MODEL_AUTO)
+    if choice == EXPERIMENTAL_MODEL_FAST:
+        return []
+    gone = _exhausted_today()
+    if choice == EXPERIMENTAL_MODEL_AUTO:
+        models = list(getattr(app_config.gemini, "strong_models", None) or [])
+        return [(m, 1) for m in models if m not in gone and m not in CANDIDATE_MODELS]
+    # the chosen model gets a few tries, then the other strong models once each, then the fast ones
+    others = [m for m in (getattr(app_config.gemini, "strong_models", None) or [])
+              if m != choice and m not in gone and m not in CANDIDATE_MODELS]
+    first = [] if choice in gone else [(choice, 1 + len(_CHOSEN_MODEL_WAITS))]
+    return first + [(m, 1) for m in others]
+
+
+def _ask_strong(client, plan: list[tuple[str, int]], prompt: str, schema: dict, temperature: float, parse):
+    """Asks the strong models in order; returns (parsed answer, model) or (None, None).
+    A daily limit (or a model this key cannot use for free) is remembered until Google resets it."""
+    for model_name, tries in plan:
+        for attempt in range(tries):
+            if model_name in _exhausted_today():
+                break
+            if attempt:
+                wait = _CHOSEN_MODEL_WAITS[min(attempt - 1, len(_CHOSEN_MODEL_WAITS) - 1)]
+                log.warning(f"{model_name} перевантажена, ще раз через {wait:.0f} с")
+                time.sleep(wait)
+            started = time.monotonic()
+            try:
+                log.info(f"Trying strong Gemini model: {model_name} (try {attempt + 1}/{tries})")
+                response = _generate(client, model_name, prompt, schema, temperature, strong=True)
+                raw_text = (response.text or "").strip() if response else ""
+                if not raw_text:
+                    log.warning(f"{model_name}: порожня відповідь")
+                    break
+                result = parse(raw_text)
+                log.info(f"Gemini {model_name} answered in {time.monotonic() - started:.1f} s")
+                return result, model_name
+            except Exception as e:
+                err = str(e)
+                kind = _gemini_error_kind(err)
+                if kind == "quota" and (_is_daily_quota(err) or _is_paid_only(err)):
+                    mark_exhausted_today(model_name)
+                    break
+                if kind == "bad_key":
+                    return None, None  # the candidate models will report the wrong key
+                low = err.lower()
+                if "timed out" in low or "timeout" in low or "deadline" in low:
+                    # a long video took too long: the next strong model would wait as long, go to the fast ones
+                    log.warning(f"{model_name} не встигла за {time.monotonic() - started:.0f} с, беремо швидкі моделі")
+                    return None, None
+                if _is_transient_error(err) and kind != "quota":
+                    log.info(f"⚡ Сильна модель {model_name} зараз недоступна ({err[:120]})")
+                    continue
+                log.warning(f"Strong model {model_name} failed: {err[:300]}")
+                break
+    if plan:
+        log.warning("Сильні моделі Gemini не відповіли, беремо звичайні швидкі")
+    return None, None
 
 
 def _call_gemini_single_window(
@@ -413,19 +565,24 @@ def _call_gemini_single_window(
     detected_lang: str,
     target_len: Optional[float] = None,
     gate: Optional["_SharedBackoff"] = None,
+    experimental: bool = False,
+    max_chars: int = _MAX_TRANSCRIPT_CHARS,
+    overload: Optional["_OverloadWatch"] = None,
+    strong: Optional[list[tuple[str, int]]] = None,
 ) -> list[dict]:
     """Sends a single chunk of transcript segments to Gemini and returns parsed clips.
-    gate: shared with the other parallel windows (a 503/429 here makes all of them hold off)."""
+    gate: shared with the other parallel windows (a 503/429 here makes all of them hold off).
+    overload: shared by the windows of one analysis; once Google is clearly down, stop asking."""
     transcript_lines = [f"[{s['start']}s - {s['end']}s]: {s['text']}" for s in segments]
     transcript_text = "\n".join(transcript_lines)
 
     # Safe guard: if a single chunk still exceeds limit, truncate with notice
-    if len(transcript_text) > _MAX_TRANSCRIPT_CHARS:
+    if len(transcript_text) > max_chars:
         log.warning(
-            f"Transcript chunk length ({len(transcript_text)} chars) exceeds {_MAX_TRANSCRIPT_CHARS}. "
+            f"Transcript chunk length ({len(transcript_text)} chars) exceeds {max_chars}. "
             "Applying safe boundary truncation."
         )
-        transcript_text = transcript_text[:_MAX_TRANSCRIPT_CHARS] + "\n... [транскрипцію скорочено для безпеки контексту]"
+        transcript_text = transcript_text[:max_chars] + "\n... [транскрипцію скорочено для безпеки контексту]"
 
     if target_len:
         length_hint = (
@@ -450,20 +607,48 @@ def _call_gemini_single_window(
 
     reaction_hint = ""
     if "[реакція:" in transcript_text:  # stream recordings: reactions.mark_segments
-        reaction_hint = (
-            "\nЦе запис стріму. Позначки «[реакція: ...]» — не мовлення, а підказки: у цю мить стрімер різко "
-            "голоснішав (крик, сміх) або чат вибухнув повідомленнями. Такі місця часто найвірусніші: перевір їх "
-            "першими й бери, якщо там справді є момент, з підводкою за кілька секунд до реакції. "
-            "Не копіюй позначки в 'hook_text' і не обирай кліп лише через позначку.\n"
+        source = "у цю мить звук різко голоснішав (сміх, оплески, крик) або чат вибухнув повідомленнями"
+        if "глядачі YouTube" in transcript_text:
+            source += ", або це місце глядачі YouTube переглядали найчастіше"
+        if experimental:
+            reaction_hint = (
+                f"\nПозначки «[реакція: ...]» — не мовлення, а підказки: {source}. Такі місця часто найвірусніші: "
+                "перевір їх першими й бери, якщо там справді є момент, з підводкою за кілька секунд до реакції. "
+                "Не копіюй позначки в 'hook_text' і не обирай кліп лише через позначку.\n"
+            )
+        else:
+            reaction_hint = (
+                "\nЦе запис стріму. Позначки «[реакція: ...]» — не мовлення, а підказки: у цю мить стрімер різко "
+                "голоснішав (крик, сміх) або чат вибухнув повідомленнями. Такі місця часто найвірусніші: перевір їх "
+                "першими й бери, якщо там справді є момент, з підводкою за кілька секунд до реакції. "
+                "Не копіюй позначки в 'hook_text' і не обирай кліп лише через позначку.\n"
+            )
+    if experimental:
+        scope = "УСЬОГО відео" if max_chars >= EXPERIMENTAL_MAX_CHARS else "фрагмента відео"
+        count_rule = (
+            f"- Кількість фрагментів: ДО {count}. Бери лише справді сильні моменти: краще менше, ніж слабкі.\n"
+            "- НЕ розподіляй кліпи рівномірно по відео. Якщо найцікавіше зібрано в одному місці, бери кілька кліпів звідти; "
+            "нудні частини пропускай повністю.\n"
+            "- Упорядкуй масив від найсильнішого моменту до найслабшого."
         )
+        hook_rule = (
+            "\nХУК: 'start' — секунда, де звучить перша сильна фраза, що чіпляє глядача за 1-2 секунди "
+            "(питання, суперечливе твердження, несподіваний факт, початок жарту). НЕ починай з розгону: "
+            "«ну», «отже», «так от», «як я казав», повторів, звертань до чату чи пауз. Якщо для розуміння "
+            "потрібна підводка, вона має бути короткою. 'hook_text' — ДОСЛІВНО перші 5-8 слів кліпу з транскрипції.\n"
+        )
+    else:
+        scope = "фрагмента відео"
+        count_rule = f"- Кількість фрагментів: рівно {count}"
+        hook_rule = ""
 
     prompt = f"""\
 Ти — топ-продюсер вертикального контенту (Shorts/Reels/TikTok).
-Ось транскрипція фрагмента відео (мова: {lang}) з таймкодами:
+Ось транскрипція {scope} (мова: {lang}) з таймкодами:
 {transcript_text}
 {reaction_hint}
 Параметри завдання:
-- Кількість фрагментів: рівно {count}
+{count_rule}
 - Тривалість кожного кліпу: СТРОГО від {min_len} до {max_len} секунд (end - start).
 {length_hint}
 - Стиль вибору: {filter_hint}
@@ -474,7 +659,7 @@ def _call_gemini_single_window(
 (не обривай речення). Кліпи НЕ повинні перетинатися між собою.
 НЕ обирай вступ і привітання, прощання, заклики підписатися та рекламні інтеграції;
 якщо такий фрагмент усе ж потрапив у список, познач його відповідною категорією.
-
+{hook_rule}
 Вимоги до кожного знайденого кліпу:
 1. 'start' і 'end' — точні секунди (числа) з таймкодів транскрипції.
 2. 'title' — короткий чіпкий заголовок КАПСЛОКОМ мовою відео, що розкриває головну тему моменту (до 5 слів).
@@ -494,6 +679,11 @@ def _call_gemini_single_window(
 Поверни результат ВИКЛЮЧНО у валідному JSON масиві об'єктів:
 [{{"start": 10.0, "end": 42.5, "title": "ГОЛОВНА ПОМИЛКА", "category": "content", "hook": 8, "emotion": 6, "standalone": 9, "value": 7, "reason": "Розповідає про фатальну помилку підприємців і чим вона закінчилась.", "hook_text": "Найбільша помилка, якої припускаються майже всі...", "caption": "Головна помилка, якої припускаються майже всі! Дивіться до кінця.", "hashtags": ["#shorts", "#помилки", "#інсайти", "#тренди"]}}]
 """
+    if strong:
+        clips, used = _ask_strong(client, strong, prompt, _CLIPS_SCHEMA, 0.3, _parse_clips_json)
+        if clips is not None:
+            return [{**c, "_model": used} for c in clips]
+
     last_err = ""
     error_kinds: list[str] = []
     quota_errors: list[str] = []
@@ -505,10 +695,31 @@ def _call_gemini_single_window(
 
     # At most MAX_ATTEMPTS_PER_WINDOW requests: the models in turn, with a growing pause each time
     # the list starts over (instead of 3 full passes over every model)
-    for attempt, model_name in enumerate(_attempt_plan(models)):
+    overload = overload or _OverloadWatch()
+    gave_up = False
+    plan = _attempt_plan(models)
+    # the fallback is a stronger model with a small free daily limit: only the experimental search
+    # (1-3 requests per video) uses it, the classic one (many windows) would use it up
+    for attempt, model_name in enumerate(plan + ([m for m in _fallback_models() if m not in {n for n, _ in strong or []}] if experimental else [])):
         if error_kinds and all(k == "bad_key" for k in error_kinds):
             break  # a wrong key will not start working after a pause
-        if attempt and attempt % len(models) == 0:
+        fallback = attempt >= len(plan)
+        if fallback:
+            # the candidates all said «overloaded»: one try of a stronger model from another family,
+            # but only once per analysis if it is overloaded too
+            if not error_kinds or any(k != "overload" for k in error_kinds) or not overload.claim_fallback():
+                break
+            log.warning(f"Основні моделі Gemini перевантажені, пробуємо запасну {model_name}")
+        elif overload.tripped():
+            if not gave_up:
+                log.warning("Сервери Google перевантажені для всіх частин відео: не витрачаємо більше запитів")
+                gave_up = True
+            if error_kinds:
+                continue  # straight to the fallback model
+            error_kinds.append("overload")
+            last_err = "Google overloaded (other windows)"
+            continue
+        if attempt and not fallback and attempt % len(models) == 0:
             delay = _RETRY_PASS_DELAYS[min(attempt // len(models) - 1, len(_RETRY_PASS_DELAYS) - 1)]
             log.warning(
                 f"Жодна модель Gemini не відповіла (спроба {attempt}/{MAX_ATTEMPTS_PER_WINDOW}). "
@@ -518,11 +729,15 @@ def _call_gemini_single_window(
         if model_name in _exhausted_today():
             continue  # another window found its daily limit meanwhile
         try:
-            if gate is not None:
+            if gate is not None and not fallback:
                 gate.wait()
             log.info(f"Trying Gemini model: {model_name} (attempt {attempt + 1}/{MAX_ATTEMPTS_PER_WINDOW})")
             started = time.monotonic()
-            response = _generate(client, model_name, prompt, _CLIPS_SCHEMA, temperature=0.3)
+            try:
+                response = _generate(client, model_name, prompt, _CLIPS_SCHEMA, temperature=0.3)
+            finally:
+                if fallback:
+                    overload.release_fallback()
             log.info(f"Gemini {model_name} answered in {time.monotonic() - started:.1f} s")
             raw_text = (response.text or "").strip() if response else ""
             if not raw_text:
@@ -531,7 +746,12 @@ def _call_gemini_single_window(
                 continue
         except Exception as e:
             last_err = f"{model_name}: {e}"
-            error_kinds.append(_gemini_error_kind(str(e)))
+            kind = _gemini_error_kind(str(e))
+            if kind == "other" and _is_transient_error(str(e)):
+                kind = "overload"
+            error_kinds.append(kind)
+            if kind == "overload":
+                overload.failed(fallback)
             if error_kinds[-1] == "quota":
                 quota_errors.append(str(e))
                 if _is_daily_quota(str(e)):
@@ -547,12 +767,13 @@ def _call_gemini_single_window(
         try:
             clips = _parse_clips_json(raw_text)
             log.info(f"Response successfully received and parsed from {model_name}")
-            return clips
+            overload.answered()
+            return [{**c, "_model": model_name} for c in clips]
         except Exception as e:
             last_err = f"{model_name}: {e}"
             log.warning(f"Помилка парсингу відповіді {model_name}: {e}. Пробуємо наступну модель...")
 
-    log.error(f"Усі моделі Gemini недоступні після {MAX_ATTEMPTS_PER_WINDOW} спроб. Остання помилка: {last_err}")
+    log.error(f"Усі моделі Gemini недоступні. Остання помилка: {last_err}")
     if error_kinds and all(k == "bad_key" for k in error_kinds):
         raise GeminiUnavailableError(GEMINI_BAD_KEY_MESSAGE)
     if error_kinds and all(k == "quota" for k in error_kinds):
@@ -709,6 +930,7 @@ def analyze_and_find_clips(
         log.info(f"Reusing {len(done)} of {len(windows)} windows analysed before; asking Gemini only for the rest")
     workers = max(1, min(_parallel_windows(), len(windows)))
     gate = _SharedBackoff() if workers > 1 else None
+    overload = _OverloadWatch()
 
     def run(i: int) -> list[dict]:
         return _window_with_rate_retry(
@@ -722,6 +944,7 @@ def analyze_and_find_clips(
             detected_lang=detected_lang,
             target_len=target_len,
             gate=gate,
+            overload=overload,
         )
 
     pending = [i for i, k in enumerate(keys) if k not in done]
@@ -732,6 +955,9 @@ def analyze_and_find_clips(
         if round_no == 2:
             pending = [i for i in pending if _retry_later(errors[i])]
             if not pending:
+                break
+            if overload.down() and not done:
+                log.warning("Google did not answer a single window: no second round, try again later")
                 break
             if _SECOND_ROUND_WAIT > 0:
                 log.warning(
@@ -804,6 +1030,82 @@ def analyze_and_find_clips(
     return selected
 
 
+def _overlapping_windows(segments: list[dict], max_chars: int, overlap_sec: float) -> list[list[dict]]:
+    """Splits segments into windows of at most ~max_chars; each next window repeats the last overlap_sec."""
+    sizes = [len(s.get("text", "")) + 25 for s in segments]
+    if sum(sizes) <= max_chars:
+        return [segments]
+    windows: list[list[dict]] = []
+    i = 0
+    while i < len(segments):
+        total, j = 0, i
+        while j < len(segments) and (total + sizes[j] <= max_chars or j == i):
+            total += sizes[j]
+            j += 1
+        windows.append(segments[i:j])
+        if j >= len(segments):
+            break
+        # next window starts overlap_sec before this one ends, but always moves forward
+        back_to = float(segments[j - 1].get("end", 0)) - overlap_sec
+        k = j
+        while k - 1 > i and float(segments[k - 1].get("start", 0)) >= back_to:
+            k -= 1
+        i = max(i + 1, k)
+    return windows
+
+
+def find_clips_experimental(
+    client=None,
+    segments: Optional[list[dict]] = None,
+    count: int = 10,
+    min_len: int = 15,
+    max_len: int = 60,
+    filter_mode: str = FilterMode.VIRAL_HOOKS,
+    detected_lang: str = "uk",
+    target_len: Optional[float] = None,
+) -> list[dict]:
+    """
+    «Експериментальний» search: Gemini reads the whole video at once and picks only the strongest
+    moments (up to `count`, fewer is fine), clustered where the video is interesting, each starting
+    on its hook. Videos longer than one prompt use windows that overlap by 2 minutes, so a moment on
+    a window edge is not cut; duplicates from the overlap are removed by score later (clip_refiner).
+    """
+    if client is None:
+        client = get_gemini_client()
+    segments = segments or []
+    if not segments:
+        return []
+    count = max(1, min(int(count), EXPERIMENTAL_MAX_CLIPS))
+    windows = _overlapping_windows(segments, EXPERIMENTAL_MAX_CHARS, EXPERIMENTAL_OVERLAP_SEC)
+    per_window = count if len(windows) == 1 else min(EXPERIMENTAL_MAX_CLIPS, math.ceil(count * 1.5 / len(windows)))
+    log.info(f"Experimental search: {len(windows)} window(s), up to {per_window} clips each (target {count}).")
+    strong = strong_plan()
+
+    found: list[dict] = []
+    gemini_error: Optional[GeminiUnavailableError] = None
+    for i, win in enumerate(windows):
+        try:
+            found.extend(_call_gemini_single_window(
+                client=client, segments=win, count=per_window, min_len=min_len, max_len=max_len,
+                filter_mode=filter_mode, detected_lang=detected_lang, target_len=target_len,
+                experimental=True, max_chars=EXPERIMENTAL_MAX_CHARS, strong=strong_plan() if i else strong,
+            ))
+        except GeminiUnavailableError as e:
+            gemini_error = e
+            log.warning(f"Experimental window {i + 1} failed: Gemini unavailable")
+        except Exception as e:
+            log.warning(f"Experimental window {i + 1} failed: {e}")
+    if not found:
+        if gemini_error is not None:
+            raise gemini_error
+        raise RuntimeError("Не вдалося знайти жодного кліпу.")
+    for c in found:
+        r = rubric_score(c)
+        if r is not None:
+            c["score"] = r
+    return found
+
+
 # ─── Second pass: comparative re-ranking ────────────────────────────────────
 
 def rerank_clips(
@@ -811,12 +1113,14 @@ def rerank_clips(
     filter_mode: str = FilterMode.VIRAL_HOOKS,
     detected_lang: str = "uk",
     client=None,
+    strong_model: Optional[str] = None,
 ) -> list[dict]:
     """
     Second Gemini pass: shows the model all final clips side by side and asks for a comparative
     0–100 score, so the ranking reflects how clips compare to each other instead of each being
     judged alone. The final score blends this with the rubric score. Any failure keeps the
     original scores (the clips themselves are never lost here).
+    strong_model: the strong model that found the clips (experimental search) is asked first, once.
     """
     if len(clips) < 2:
         return clips
@@ -838,9 +1142,11 @@ def rerank_clips(
             'Поверни ВИКЛЮЧНО JSON масив: [{"n": 1, "score": 87}, ...] для всіх кліпів.'
         )
         last_err = ""
-        for model_name in available_models():
+        first = [strong_model] if strong_model and strong_model not in _exhausted_today() else []
+        for model_name in first + [m for m in available_models() if m not in first]:
             try:
-                response = _generate(client, model_name, prompt, _RERANK_SCHEMA, temperature=0.2)
+                response = _generate(client, model_name, prompt, _RERANK_SCHEMA, temperature=0.2,
+                                     strong=model_name in first)
                 data = json.loads(_strip_fences((response.text or "").strip()))
                 if isinstance(data, dict):
                     data = next((v for v in data.values() if isinstance(v, list)), [])

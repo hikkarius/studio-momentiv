@@ -11,10 +11,11 @@ import json
 import logging
 import math
 import os
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Dict, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from backend import db
 from constants import resolve_filter_mode
@@ -24,7 +25,10 @@ from core import (
     transcribe_video,
     validate_clips,
 )
-from ai_selector import GeminiIncompleteError, GeminiQuotaError, rerank_clips
+from ai_selector import (
+    SEARCH_EXPERIMENTAL, EXPERIMENTAL_MAX_CLIPS, GeminiIncompleteError, GeminiQuotaError,
+    find_clips_experimental, rerank_clips, resolve_search_mode, strong_plan,
+)
 from clip_refiner import refine_clips
 from languages import language_label
 
@@ -166,12 +170,13 @@ def _run_analyze_worker(
     filter_mode: str,
     engine: str = "whisper_local",
     language: Optional[str] = None,
+    search_mode: Optional[str] = None,
 ):
     if not _analyze_lock.acquire(blocking=False):
         broadcast_update(job_id, {"status": "queued", "progress": 0.0, "message": "Чекає, поки закінчиться обробка іншого відео..."})
         _analyze_lock.acquire()
     try:
-        _run_analyze_worker_locked(job_id, project_id, clips_count, filter_mode, engine, language)
+        _run_analyze_worker_locked(job_id, project_id, clips_count, filter_mode, engine, language, search_mode)
     finally:
         _analyze_lock.release()
 
@@ -181,6 +186,129 @@ def _new_job_id(project_id: str) -> str:
     return f"job_analyze_{clean_suffix}_{int(time.time() * 1000) % 100000}"
 
 
+def find_clips_for(
+    project_id: str,
+    proj: Dict[str, Any],
+    segments: List[Dict[str, Any]],
+    words: List[Dict[str, Any]],
+    detected_lang: str,
+    clips_count: int,
+    canonical_filter: Any,
+    mode: str,
+    progress: Callable[[float, str], None] = lambda p, m: None,
+) -> List[Dict[str, Any]]:
+    """
+    Transcript → finished clips (not saved): reaction hints, Gemini, sentence boundaries, re-ranking.
+    Used by the analysis and by «Порівняти наосліп», which runs it once per search mode.
+    """
+    video_path = proj["source_path"]
+    experimental = mode == SEARCH_EXPERIMENTAL
+
+    # A stream recording (webcam found or a chat replay saved): reactions become hints for the AI.
+    # The experimental search uses the loud moments (laughter, applause, shouts) of every video.
+    ai_segments = segments
+    hints: Dict[str, Any] = {}
+    progress(0.57, "Перевіряю, чи це запис стріму...")
+    if _find_webcam_once(project_id, video_path) or os.path.exists(_chat_path(project_id)):
+        progress(0.58, "Стрім: шукаю реакції (крик, сміх, чат)...")
+        hints = _reaction_hints(project_id, video_path, with_heatmap=experimental)
+    elif experimental:
+        progress(0.58, "Шукаю сміх, оплески й місця, які глядачі YouTube переглядали найчастіше...")
+        hints = _reaction_hints(project_id, video_path, with_heatmap=True)
+    if hints:
+        ai_segments = _mark_hints(project_id, segments, hints)
+
+    progress(0.60, (
+        ("ШІ читає все відео й шукає найсильніші моменти. Сильна модель думає довше, до кількох хвилин..."
+         if strong_plan() else "ШІ читає все відео й шукає найсильніші моменти (експериментальний пошук)...")
+        if experimental
+        else "ШІ-пошук вірусних моментів (Google Gemini)..."
+    ))
+
+    # Gemini Virality Selection (raises GeminiUnavailableError with a user-facing message)
+    min_len = app_config.clips.default_min_len
+    max_len = app_config.clips.default_max_len
+    if experimental:
+        # The model returns up to N strongest moments from the whole video (fewer is fine)
+        clips_count = min(clips_count, EXPERIMENTAL_MAX_CLIPS)
+        raw_candidates = find_clips_experimental(
+            client=None,
+            segments=ai_segments,
+            count=clips_count,
+            min_len=min_len,
+            max_len=max_len,
+            filter_mode=canonical_filter,
+            detected_lang=detected_lang,
+        )
+    else:
+        # Ask for ~50% more candidates than needed: some get dropped as intros/ads, overlaps or too short
+        request_count = min(app_config.clips.max_count, math.ceil(clips_count * 1.5))
+        # Clips must not overlap, so the requested count limits their length: aim for ~80% coverage
+        target_len = max(min_len + 3, min(45.0, proj["duration"] * 0.8 / max(1, clips_count)))
+        done_windows = load_done_windows(project_id)
+        try:
+            raw_candidates = analyze_and_find_clips(
+                client=None,
+                segments=ai_segments,
+                count=request_count,
+                min_len=min_len,
+                max_len=max_len,
+                filter_mode=canonical_filter,
+                detected_lang=detected_lang,
+                target_len=target_len,
+                done_windows=done_windows,
+            )
+        except GeminiIncompleteError as e:
+            if e.done:
+                save_done_windows(project_id, {**done_windows, **e.done})
+            raise
+        clear_done_windows(project_id)
+
+    ai_model = _main_model(raw_candidates)
+    progress(0.85, "Підганяємо межі кліпів під речення...")
+    for c in raw_candidates:  # the reaction marks are for the AI only
+        for k in ("hook_text", "title", "reason"):
+            if isinstance(c.get(k), str) and "[реакція:" in c[k]:
+                c[k] = re.sub(r"\[реакція:[^\]]*\]\s*", "", c[k]).strip()
+    # Loose sanity check only: the refiner below snaps short clips out to full sentences
+    rough = validate_clips(raw_candidates, proj["duration"], min_len=8, max_len=max_len + 30, tolerance=0)
+    valid_clips = refine_clips(
+        rough,
+        words,
+        video_duration=proj["duration"],
+        count=clips_count,
+        min_len=min_len,
+        max_len=max_len,
+        max_overlap=app_config.clips.max_overlap_sec,
+        segments=segments,
+        hook_first=experimental,
+    )
+    if not valid_clips:
+        raise RuntimeError(
+            f"ШІ не повернув жодного коректного кліпу тривалістю {min_len}–{max_len} с. "
+            "Транскрипцію збережено, спробуйте ще раз або змініть фільтр."
+        )
+
+    if app_config.gemini.rerank and len(valid_clips) > 1:
+        progress(0.92, "Другий прохід: порівнюємо кліпи між собою...")
+        valid_clips = rerank_clips(valid_clips, filter_mode=canonical_filter, detected_lang=detected_lang,
+                                   strong_model=ai_model if experimental else None)
+    if hints:
+        valid_clips = _apply_signals(valid_clips, hints, boost=experimental)
+    # which Gemini model chose the clips (shown on the video card); clip_ai_model() reads it back
+    return [{**c, "_model": ai_model} for c in valid_clips] if ai_model else valid_clips
+
+
+def _main_model(clips: List[Dict[str, Any]]) -> str:
+    """The model that answered for most of the clips ('' when unknown, e.g. windows saved earlier)."""
+    names = [c.get("_model") for c in clips if isinstance(c.get("_model"), str) and c.get("_model")]
+    return max(set(names), key=names.count) if names else ""
+
+
+def clip_ai_model(clips: List[Dict[str, Any]]) -> str:
+    return _main_model(clips)
+
+
 def _run_analyze_worker_locked(
     job_id: str,
     project_id: str,
@@ -188,6 +316,7 @@ def _run_analyze_worker_locked(
     filter_mode: str,
     engine: str = "whisper_local",
     language: Optional[str] = None,
+    search_mode: Optional[str] = None,
 ):
     try:
         broadcast_update(job_id, {"status": "running", "progress": 0.05, "message": "Ініціалізація аналізу відео..."})
@@ -216,67 +345,11 @@ def _run_analyze_worker_locked(
         if not segments:
             raise RuntimeError("У відео не виявлено мовлення або транскрипція порожня.")
 
-        # A stream recording (webcam found or a chat replay saved): reactions become hints for the AI
-        ai_segments = segments
-        broadcast_update(job_id, {"status": "running", "progress": 0.57, "message": "Перевіряю, чи це запис стріму..."})
-        if _find_webcam_once(project_id, video_path) or os.path.exists(_chat_path(project_id)):
-            broadcast_update(job_id, {"status": "running", "progress": 0.58, "message": "Стрім: шукаю реакції (крик, сміх, чат)..."})
-            ai_segments = _reaction_segments(project_id, video_path, segments)
-
-        broadcast_update(job_id, {"status": "running", "progress": 0.60, "message": "ШІ-пошук вірусних моментів (Google Gemini)..."})
-
-        # Gemini Virality Selection (raises GeminiUnavailableError with a user-facing message)
-        min_len = app_config.clips.default_min_len
-        max_len = app_config.clips.default_max_len
-        # Ask for ~50% more candidates than needed: some get dropped as intros/ads, overlaps or too short
-        request_count = min(app_config.clips.max_count, math.ceil(clips_count * 1.5))
-        # Clips must not overlap, so the requested count limits their length: aim for ~80% coverage
-        target_len = max(min_len + 3, min(45.0, proj["duration"] * 0.8 / max(1, clips_count)))
-        done_windows = load_done_windows(project_id)
-        try:
-            raw_candidates = analyze_and_find_clips(
-                client=None,
-                segments=ai_segments,
-                count=request_count,
-                min_len=min_len,
-                max_len=max_len,
-                filter_mode=canonical_filter,
-                detected_lang=detected_lang,
-                target_len=target_len,
-                done_windows=done_windows,
-            )
-        except GeminiIncompleteError as e:
-            if e.done:
-                save_done_windows(project_id, {**done_windows, **e.done})
-            raise
-        clear_done_windows(project_id)
-
-        broadcast_update(job_id, {"status": "running", "progress": 0.85, "message": "Підганяємо межі кліпів під речення..."})
-        for c in raw_candidates:  # the reaction marks are for the AI only
-            for k in ("hook_text", "title", "reason"):
-                if isinstance(c.get(k), str) and "[реакція:" in c[k]:
-                    c[k] = re.sub(r"\[реакція:[^\]]*\]\s*", "", c[k]).strip()
-        # Loose sanity check only: the refiner below snaps short clips out to full sentences
-        rough = validate_clips(raw_candidates, proj["duration"], min_len=8, max_len=max_len + 30, tolerance=0)
-        valid_clips = refine_clips(
-            rough,
-            words,
-            video_duration=proj["duration"],
-            count=clips_count,
-            min_len=min_len,
-            max_len=max_len,
-            max_overlap=app_config.clips.max_overlap_sec,
-            segments=segments,
+        mode = resolve_search_mode(search_mode or app_config.studio.default_search)
+        valid_clips = find_clips_for(
+            project_id, proj, segments, words, detected_lang, clips_count, canonical_filter, mode,
+            progress=lambda p, m: broadcast_update(job_id, {"status": "running", "progress": p, "message": m}),
         )
-        if not valid_clips:
-            raise RuntimeError(
-                f"ШІ не повернув жодного коректного кліпу тривалістю {min_len}–{max_len} с. "
-                "Транскрипцію збережено, спробуйте ще раз або змініть фільтр."
-            )
-
-        if app_config.gemini.rerank and len(valid_clips) > 1:
-            broadcast_update(job_id, {"status": "running", "progress": 0.92, "message": "Другий прохід: порівнюємо кліпи між собою..."})
-            valid_clips = rerank_clips(valid_clips, filter_mode=canonical_filter, detected_lang=detected_lang)
 
         # 3. Generate structured metadata files in OUTPUT_DIR/{project_id}
         out_dir = os.path.join(OUTPUT_DIR, project_id)
@@ -322,7 +395,9 @@ def _run_analyze_worker_locked(
                 tf.write("\n")
 
         # 4. Save to DB
-        db.save_candidate_clips(project_id, valid_clips)
+        db.save_candidate_clips(project_id, valid_clips, keep_reviewed=True)
+        db.set_project_search_mode(project_id, mode)
+        db.set_project_ai_model(project_id, clip_ai_model(valid_clips))
         db.update_project_status(project_id, "ready")
 
         broadcast_update(job_id, {
@@ -349,16 +424,63 @@ def _chat_path(project_id: str) -> str:
 
 def _reaction_segments(project_id: str, source_path: str, segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Transcript copies with «[реакція: ...]» at loud moments and chat spikes (hints for Gemini only)."""
+    return _mark_hints(project_id, segments, _reaction_hints(project_id, source_path))
+
+
+def _reaction_hints(project_id: str, source_path: str, with_heatmap: bool = False) -> Dict[str, Any]:
+    """Loud moments, chat spikes and (with_heatmap) the parts YouTube viewers re-watched most. Never fails the job."""
+    import reactions
+    hints: Dict[str, Any] = {"loud": [], "chat": [], "replayed": []}
     try:
-        import reactions
-        loud = reactions.loudness_peaks(source_path)
-        chat = reactions.chat_spikes(reactions.load_chat(_chat_path(project_id)))
-        marked, n = reactions.mark_segments(segments, loud, chat)
-        log.info(f"Reaction hints for {project_id}: {len(loud)} loud, {len(chat)} chat spikes → {n} marked lines")
-        return marked
+        hints["loud"] = reactions.loudness_peaks(source_path)
+        hints["chat"] = reactions.chat_spikes(reactions.load_chat(_chat_path(project_id)))
     except Exception as e:
         log.warning(f"Reaction hints skipped for {project_id}: {e}")
-        return segments
+    if with_heatmap:
+        try:
+            hints["replayed"] = reactions.replayed_parts(_heatmap(project_id))
+        except Exception as e:
+            log.warning(f"YouTube heatmap skipped for {project_id}: {e}")
+    return hints
+
+
+def _mark_hints(project_id: str, segments: List[Dict[str, Any]], hints: Dict[str, Any]) -> List[Dict[str, Any]]:
+    import reactions
+    marked, n = reactions.mark_segments(segments, hints.get("loud", []), hints.get("chat", []), hints.get("replayed", []))
+    log.info(f"Reaction hints for {project_id}: {len(hints.get('loud', []))} loud, {len(hints.get('chat', []))} chat spikes, "
+             f"{len(hints.get('replayed', []))} re-watched parts → {n} marked lines")
+    return marked
+
+
+def _heatmap(project_id: str) -> List[Any]:
+    """YouTube «most replayed» of the video: saved next to its clips; fetched once if the video's link is known."""
+    import reactions
+    path = os.path.join(OUTPUT_DIR, project_id, "heatmap.json")
+    if os.path.exists(path):
+        return reactions.load_heatmap(path)
+    url = db.get_project_source_url(project_id)
+    if not url:
+        return []
+    heat = reactions.fetch_heatmap(url)
+    reactions.save_heatmap(path, heat)  # an empty curve too: no need to ask YouTube again
+    return heat
+
+
+# Extra points for a clip where the audience reacted: the AI judged the words, the viewers confirm it
+_SIGNAL_BOOST = {"replayed": 5, "loud": 3, "chat": 3}
+
+
+def _apply_signals(clips: List[Dict[str, Any]], hints: Dict[str, Any], boost: bool = False) -> List[Dict[str, Any]]:
+    import reactions
+    out = []
+    for c in clips:
+        sig = reactions.clip_signals(float(c["start"]), float(c["end"]), hints.get("loud", []),
+                                     hints.get("chat", []), hints.get("replayed", []))
+        c = {**c, "signals": sig}
+        if boost and sig and isinstance(c.get("score"), (int, float)):
+            c["score"] = min(99, int(c["score"]) + sum(_SIGNAL_BOOST.get(k, 0) for k in sig))
+        out.append(c)
+    return out
 
 
 def _find_webcam_once(project_id: str, source_path: str) -> bool:
@@ -389,9 +511,10 @@ def enqueue_analyze_job(
     filter_mode: str = "Viral Hooks",
     engine: str = "whisper_local",
     language: Optional[str] = None,
+    search_mode: Optional[str] = None,
 ) -> str:
     """Enqueues an analyze job for a project and returns the job ID."""
     job_id = _new_job_id(project_id)
     db.create_job(job_id, project_id, "analyze")
-    _executor.submit(_run_analyze_worker, job_id, project_id, clips_count, filter_mode, engine, language)
+    _executor.submit(_run_analyze_worker, job_id, project_id, clips_count, filter_mode, engine, language, search_mode)
     return job_id

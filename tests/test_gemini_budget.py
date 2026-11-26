@@ -66,19 +66,42 @@ def test_one_window_makes_at_most_four_requests_per_round(sleeps):
     with pytest.raises(GeminiIncompleteError):
         analyze_and_find_clips(client=fake, segments=_segments(20), count=5)
     assert MAX_ATTEMPTS_PER_WINDOW == 4
-    assert fake.models.generate_content.call_count == 2 * 4  # two rounds
+    # 4 tries of the Lite models; no second round when Google answered nothing; the classic search
+    # does not spend the fallback model's small daily limit
+    assert fake.models.generate_content.call_count == 4
     models = [c.kwargs["model"] for c in fake.models.generate_content.call_args_list]
-    assert models[:4] == ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite"] * 2
+    assert models == ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite"] * 2
 
 
 def test_worst_case_for_a_long_video_is_bounded(sleeps):
-    """5 windows, Google down: 5 × 4 × 2 rounds = 40 requests (was 5 × 3 models × 3 passes = 45 in
-    round one alone, and the 3rd model had only 20 a day)."""
+    """5 windows, Google down: it gives up after a handful of «overloaded» answers in all windows
+    (was 5 × 4 × 2 rounds = 40 requests and 3-4 minutes)."""
     fake = MagicMock()
     fake.models.generate_content.side_effect = Exception("503 UNAVAILABLE")
     with pytest.raises(GeminiIncompleteError):
         analyze_and_find_clips(client=fake, segments=_segments(), count=75)
-    assert fake.models.generate_content.call_count == 5 * MAX_ATTEMPTS_PER_WINDOW * 2
+    assert fake.models.generate_content.call_count <= ai_selector.OVERLOAD_TRIP + 3  # + windows in flight
+    models = [c.kwargs["model"] for c in fake.models.generate_content.call_args_list]
+    assert "gemini-3.6-flash" not in models
+
+
+def test_fallback_model_answers_the_experimental_search_when_every_lite_model_is_overloaded(sleeps, monkeypatch):
+    monkeypatch.setattr(ai_selector.app_config.gemini, "experimental_model", "fast")  # no strong models first
+    fake = MagicMock()
+    fake.models.generate_content.side_effect = [Exception("503 UNAVAILABLE")] * 4 + [_ok()]
+    clips = ai_selector.find_clips_experimental(client=fake, segments=_segments(20), count=1)
+    assert clips[0]["title"] == "ОК"
+    assert fake.models.generate_content.call_args_list[-1].kwargs["model"] == "gemini-3.6-flash"
+
+
+def test_fallback_model_is_not_used_for_a_limit_or_a_wrong_key(sleeps):
+    for err in ("429 RESOURCE_EXHAUSTED quota", "400 API key not valid"):
+        fake = MagicMock()
+        fake.models.generate_content.side_effect = Exception(err)
+        with pytest.raises(Exception):
+            analyze_and_find_clips(client=fake, segments=_segments(20), count=1)
+        models = [c.kwargs["model"] for c in fake.models.generate_content.call_args_list]
+        assert "gemini-3.6-flash" not in models
 
 
 def test_answer_on_the_third_try_stops_there(sleeps):

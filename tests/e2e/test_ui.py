@@ -823,3 +823,60 @@ def test_phone_editor_opens_at_the_top(page, studio, project):
     top = page.evaluate("document.getElementById('edVideo').getBoundingClientRect().top")
     assert 0 <= top < 844
     assert not page.errors
+
+
+def test_search_again_offers_the_other_search_mode_and_keeps_marks(page, studio, project):
+    db.set_project_search_mode(PROJECT_ID, "classic")
+    open_editor(page, studio)
+    assert "Класичний" in page.locator("#edSearchMode").inner_text()
+    page.keyboard.press("y")
+    assert wait_for(page, lambda: clip(2)["review_status"] == "keep")
+    sent = []
+    page.on("request", lambda r: sent.append(r.post_data_json) if r.url.endswith("/api/queue") and r.method == "POST" else None)
+    page.click("#edReanalyze")
+    dlg = page.locator(".ask-search")
+    dlg.wait_for(state="visible")
+    assert page.locator(".ask-search [data-v='experimental']").get_attribute("aria-checked") == "true"
+    assert "Позначені кліпи (1) залишаться" in page.locator(".ask-dialog").inner_text()
+    page.click(".ask-dialog [data-a='yes']")
+    assert wait_for(page, lambda: sent)
+    assert sent[0]["search_mode"] == "experimental" and sent[0]["project_ids"] == [PROJECT_ID]
+    assert not page.errors
+
+
+def _ready_comparison():
+    from backend import compare
+    sets = {
+        "classic": [{"start": 5.0 + i * 20, "end": 20.0 + i * 20, "score": 80 - i, "title": f"Класика {i}",
+                     "hook_text": "Почнемо з простого"} for i in range(3)],
+        "experimental": [{"start": 10.0 + i * 25, "end": 28.0 + i * 25, "score": 90 - i, "title": f"Експеримент {i}",
+                          "hook_text": "А тепер уявіть"} for i in range(3)],
+    }
+    compare._save(PROJECT_ID, {"status": "ready", "progress": 1.0, "message": "Готово", "started": 0,
+                               "sets": sets, "pairs": compare.make_pairs(sets)})
+    return compare
+
+
+def test_blind_comparison_votes_shows_the_winner_and_takes_its_clips(page, studio, project):
+    compare = _ready_comparison()
+    keep_first_clip()
+    open_editor(page, studio)
+    page.click("#edReanalyze")
+    page.click(".ask-dialog [data-a='cmp']")
+    page.locator(".cmp-pair").wait_for(state="visible")
+    assert "Пара 1 з 3" in page.locator(".cmp-step").inner_text()
+    assert "Експериментальний" not in page.locator(".cmp-dialog").inner_text()  # blind until the end
+    for n in range(3):
+        p = compare.load(PROJECT_ID)["pairs"][n]
+        side = "left" if p["left"] == "experimental" else "right"
+        page.click(f".cmp-side [data-v='{side}']")
+        if n < 2:
+            page.wait_for_function(f"document.querySelector('.cmp-step').textContent.includes('Пара {n + 2} з 3')")
+    page.locator(".cmp-result").wait_for(state="visible")
+    assert "Експериментальний переміг: 3 з 3" in page.locator(".cmp-big").inner_text()
+    page.click(".cmp-actions [data-a='apply']")
+    page.locator("#editor").wait_for(state="visible")
+    titles = {c["title"] for c in db.get_candidate_clips(PROJECT_ID)}
+    assert {"Експеримент 1", "Експеримент 2"} <= titles  # «Експеримент 0» repeats the kept clip: skipped
+    assert any(c["review_status"] == "keep" for c in db.get_candidate_clips(PROJECT_ID))
+    assert not page.errors

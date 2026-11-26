@@ -163,6 +163,23 @@ def init_db():
             text TEXT NOT NULL,
             created_at REAL NOT NULL
         );""")
+        if "search_mode" not in queue_columns:
+            # '' = the default from the settings, else classic / experimental
+            conn.execute("ALTER TABLE queue_items ADD COLUMN search_mode TEXT NOT NULL DEFAULT '';")
+
+        project_columns = [row["name"] for row in conn.execute("PRAGMA table_info(projects);").fetchall()]
+        if "search_mode" not in project_columns:
+            # how the current clips were found: classic / experimental ('' = before the switch existed)
+            conn.execute("ALTER TABLE projects ADD COLUMN search_mode TEXT NOT NULL DEFAULT '';")
+        if "ai_model" not in project_columns:
+            # the Gemini model that chose the current clips ('' = unknown, before this was saved)
+            conn.execute("ALTER TABLE projects ADD COLUMN ai_model TEXT NOT NULL DEFAULT '';")
+        if "source_url" not in project_columns:
+            # the link the video was downloaded from ('' = a file from the computer)
+            conn.execute("ALTER TABLE projects ADD COLUMN source_url TEXT NOT NULL DEFAULT '';")
+        if "signals" not in columns:
+            # JSON: why the audience liked the clip, ["replayed" (YouTube), "loud" (laughter, applause), "chat"]
+            conn.execute("ALTER TABLE candidate_clips ADD COLUMN signals TEXT NOT NULL DEFAULT '[]';")
 
 
 def new_shelf_size(duration_sec: float) -> int:
@@ -252,13 +269,67 @@ def update_project_status(project_id: str, status: str):
         )
 
 
-def save_candidate_clips(project_id: str, clips: List[Dict[str, Any]]):
+def set_project_source_url(project_id: str, url: str) -> None:
     with get_db() as conn:
-        conn.execute("DELETE FROM candidate_clips WHERE project_id = ?", (project_id,))
-        for idx, c in enumerate(clips, 1):
-            clip_id = f"{project_id}_clip_{idx}"
+        conn.execute("UPDATE projects SET source_url = ? WHERE id = ?", (url or "", project_id))
+
+
+def get_project_source_url(project_id: str) -> str:
+    """The video's link: saved on the project, or (videos added before that) the queue item that downloaded it."""
+    with get_db() as conn:
+        row = conn.execute("SELECT source_url FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if row and row["source_url"]:
+            return row["source_url"]
+        row = conn.execute(
+            "SELECT source_url FROM queue_items WHERE project_id = ? AND source_url != '' ORDER BY created_at DESC LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        return row["source_url"] if row else ""
+
+
+def set_project_search_mode(project_id: str, mode: str) -> None:
+    with get_db() as conn:
+        conn.execute("UPDATE projects SET search_mode = ? WHERE id = ?", (mode or "", project_id))
+
+
+def set_project_ai_model(project_id: str, model: str) -> None:
+    with get_db() as conn:
+        conn.execute("UPDATE projects SET ai_model = ? WHERE id = ?", (model or "", project_id))
+
+
+def save_candidate_clips(project_id: str, clips: List[Dict[str, Any]], keep_reviewed: bool = False):
+    """
+    Replaces the project's clips with `clips`.
+    keep_reviewed (a repeated search): clips the user already marked («В роботі», «Виконані», «Не беру»)
+    stay as they are, and a new clip that mostly repeats one of them is skipped.
+    """
+    with get_db() as conn:
+        kept: list = []
+        if keep_reviewed:
+            kept = conn.execute(
+                "SELECT clip_index, start_sec, end_sec FROM candidate_clips WHERE project_id = ? AND review_status != ''",
+                (project_id,),
+            ).fetchall()
+            conn.execute("DELETE FROM candidate_clips WHERE project_id = ? AND review_status = ''", (project_id,))
+        else:
+            conn.execute("DELETE FROM candidate_clips WHERE project_id = ?", (project_id,))
+
+        def repeats_kept(start: float, end: float) -> bool:
+            for k in kept:
+                inter = min(end, k["end_sec"]) - max(start, k["start_sec"])
+                shorter = max(0.1, min(end - start, k["end_sec"] - k["start_sec"]))
+                if inter / shorter > 0.5:
+                    return True
+            return False
+
+        idx = max([k["clip_index"] for k in kept] + [0])
+        for c in clips:
             start = float(c.get("start", 0.0))
             end = float(c.get("end", 0.0))
+            if kept and repeats_kept(start, end):
+                continue
+            idx += 1
+            clip_id = f"{project_id}_clip_{idx}"
             dur = max(0.0, end - start)
             raw_score = c.get("score") if c.get("score") is not None else c.get("virality_score")
             score = _parse_score(raw_score, default=85)
@@ -269,14 +340,16 @@ def save_candidate_clips(project_id: str, clips: List[Dict[str, Any]]):
             caption = str(c.get("caption") or "")
             tags = c.get("hashtags")
             tags_json = json.dumps(tags if isinstance(tags, list) else ["#shorts", "#відео"])
+            sig = c.get("signals")
+            sig_json = json.dumps([str(x) for x in sig] if isinstance(sig, list) else [])
 
             conn.execute(
                 "INSERT INTO candidate_clips (id, project_id, clip_index, start_sec, end_sec, duration, "
-                "virality_score, title, hook_text, reason, caption, hashtags, is_selected) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
-                (clip_id, project_id, idx, start, end, dur, score, title, hook, reason, caption, tags_json),
+                "virality_score, title, hook_text, reason, caption, hashtags, signals, is_selected) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+                (clip_id, project_id, idx, start, end, dur, score, title, hook, reason, caption, tags_json, sig_json),
             )
-        _mark_reserve(conn, project_id)
+        _mark_reserve(conn, project_id, only_new=keep_reviewed)
 
 
 def _clip_row(row: Any) -> Dict[str, Any]:
@@ -301,6 +374,11 @@ def _clip_row(row: Any) -> Dict[str, Any]:
         d["title_variants"] = tv if isinstance(tv, list) else []
     except Exception:
         d["title_variants"] = []
+    try:
+        sig = json.loads(d.get("signals") or "[]")
+        d["signals"] = sig if isinstance(sig, list) else []
+    except Exception:
+        d["signals"] = []
     return d
 
 
@@ -646,16 +724,18 @@ def add_queue_item(
     clips_count: int = 0,
     filter_mode: str = "Viral Hooks",
     language: str = "",
+    search_mode: str = "",
 ) -> Dict[str, Any]:
     now = time.time()
     with get_db() as conn:
         row = conn.execute("SELECT MAX(position) AS p FROM queue_items").fetchone()
         position = (row["p"] or 0) + 1
         conn.execute(
-            "INSERT INTO queue_items (id, source_url, project_id, title, clips_count, filter_mode, language, status, "
-            "progress, message, position, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', 0.0, 'Чекає своєї черги', ?, ?, ?)",
-            (item_id, source_url, project_id, title, int(clips_count), filter_mode, language or "", position, now, now),
+            "INSERT INTO queue_items (id, source_url, project_id, title, clips_count, filter_mode, language, search_mode, "
+            "status, progress, message, position, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'waiting', 0.0, 'Чекає своєї черги', ?, ?, ?)",
+            (item_id, source_url, project_id, title, int(clips_count), filter_mode, language or "", search_mode or "",
+             position, now, now),
         )
     return get_queue_item(item_id)
 

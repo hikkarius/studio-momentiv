@@ -32,7 +32,7 @@ def _project(pid, duration=600.0):
 
 def _limit_then_ok(limit_runs=1, daily=True):
     """Fake analysis: the first `limit_runs` calls stop on the Gemini limit, then it works."""
-    def run(job_id, project_id, clips_count, filter_mode, engine="whisper_local", language=None):
+    def run(job_id, project_id, clips_count, filter_mode, engine="whisper_local", language=None, search_mode=None):
         run.calls.append(project_id)
         if len(run.calls) <= limit_runs:
             with job_runner._quota_lock:

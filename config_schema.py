@@ -44,10 +44,18 @@ class GeminiConfig(BaseModel):
         ],
         min_length=1,
     )
+    # asked once only when every candidate answers «overloaded» (503); another family, so a busy Lite does not stop the search
+    fallback_models: List[str] = Field(default_factory=lambda: ["gemini-3.6-flash"])
     rerank: bool = True
     parallel_windows: int = Field(default=3, ge=1, le=8)
     thinking_level: str = Field(default="minimal", pattern=r"^(|minimal|low|medium|high)$")
     max_rpm_per_model: int = Field(default=12, ge=0, le=1000)
+    # «🧪 Експериментальний» search: auto = the strongest free model that answers (strong_models in order),
+    # a model id = that model first (a few tries), fast = the candidate models like the classic search
+    experimental_model: str = Field(default="auto", pattern=r"^(auto|fast|gemini-[a-z0-9.\-]+)$")
+    strong_models: List[str] = Field(default_factory=lambda: ["gemini-4-hydrogen", "gemini-3.8-flash", "gemini-3.6-flash"])
+    strong_thinking_level: str = Field(default="low", pattern=r"^(|minimal|low|medium|high)$")
+    strong_timeout_sec: int = Field(default=480, ge=30, le=1800)
 
 
 class CacheConfig(BaseModel):
@@ -65,6 +73,7 @@ class StudioConfig(BaseModel):
     """Studio defaults changed from the «Налаштування» screen."""
     default_clips: int = Field(default=0, ge=0, le=100)         # 0 = auto (by video length)
     default_filter: str = Field(default="Viral Hooks")
+    default_search: str = Field(default="classic", pattern=r"^(classic|experimental)$")  # how AI looks for moments
     cleanup_days: int = Field(default=0, ge=0, le=3650)         # delete re-creatable clip files older than N days; 0 = never
     daily_backup: bool = True       # copy the database and transcripts to backups/ once a day, keep 7
     keep_awake: bool = True         # Windows: do not let the laptop sleep while the queue has work

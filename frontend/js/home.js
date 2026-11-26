@@ -33,7 +33,26 @@ const Home = (() => {
     done: ["✓ Розібрано", "done"],
   };
 
+  /** gemini-4-hydrogen → Gemini 4 Hydrogen (same as backend/gemini_models.pretty_name). */
+  function modelName(m) {
+    const r = /^gemini-([0-9.]+)-(.+)$/.exec(m || "");
+    if (!r) return m || "";
+    const rest = r[2].replace("flash-lite", "Flash-Lite").split("-").join(" ")
+      .split(" ").map((w) => (w[0] === w[0].toUpperCase() ? w : w[0].toUpperCase() + w.slice(1))).join(" ");
+    return `Gemini ${r[1]} ${rest}`;
+  }
+
+  /** «🧪 Gemini 4 Hydrogen»: which model chose the clips of an experimental search. */
+  function modelOf(p) {
+    if (p.search_mode !== "experimental" || !p.ai_model) return "";
+    return ` · <span class="vc-model" title="Ця модель ШІ обрала кліпи">🧪 ${escapeHtml(modelName(p.ai_model))}</span>`;
+  }
+
   function metaOf(p, st) {
+    return metaBase(p, st) + (st === "busy" || st === "failed" || st === "empty" ? "" : modelOf(p));
+  }
+
+  function metaBase(p, st) {
     const total = p.clips_count || 0;
     const reviewed = p.reviewed_count || 0;
     const kept = p.kept_count || 0;
@@ -156,11 +175,14 @@ const Home = (() => {
   }
 
   async function again(p) {
-    const marked = p.reviewed_count || 0;
-    const ask = p.clips_count
-      ? `Шукати кліпи в «${p.title}» заново?${marked ? ` Позначки статусів (${marked}) зникнуть.` : ""}`
-      : `Поставити «${p.title}» в чергу на пошук моментів?`;
-    if (!(await askConfirm(ask, { ok: p.clips_count ? "Шукати заново" : "↻ Так, ще раз" }))) return;
+    if (p.clips_count) {
+      const mode = await askSearchAgain(p, p.reviewed_count || 0);
+      if (!mode) return;
+      if (mode === "compare") { Compare.open(p, { onClose: () => load() }); return; }
+      try { await Queue.addProject(p.id, { search_mode: mode }); } catch (err) { showToast(err.message, "error"); }
+      return;
+    }
+    if (!(await askConfirm(`Поставити «${p.title}» в чергу на пошук моментів?`, { ok: "↻ Так, ще раз" }))) return;
     try { await Queue.addProject(p.id); } catch (err) { showToast(err.message, "error"); }
   }
 
@@ -193,6 +215,7 @@ const Home = (() => {
     const own = projects.filter((p) => !hide.has(p.id)).length;
     $("historyCount").textContent = queueCount ? `${own} · у черзі ${queueCount}` : String(own);
     document.body.classList.toggle("home-empty", loaded && !any);
+    fitDropHint();
     $("historyCard").hidden = !any;
     const tools = projects.length > 6;
     document.querySelector(".home-search").hidden = !tools;
@@ -211,8 +234,22 @@ const Home = (() => {
     const count = c.value === "0" ? "кількість: авто" : `кліпів: ${c.value}`;
     const l = $("heroLang");
     const lang = (l && l.options[l.selectedIndex]?.text.toLowerCase()) || defaults.lang;
-    const chips = [filter, `кліпи ${defaults.min}–${defaults.max} с`, count, `мова: ${lang}`];
+    const s = $("heroSearch");
+    const search = s && s.value === "experimental" ? "🧪 експериментальний пошук" : "📼 класичний пошук";
+    const chips = [filter, search, `кліпи ${defaults.min}–${defaults.max} с`, count, `мова: ${lang}`];
     $("heroHint").innerHTML = chips.map((t) => `<span class="home-chip">${escapeHtml(t)}</span>`).join("");
+    fitDropHint();
+  }
+
+  /** «або просто перетягни відео у вікно» is only a hint: when the chips leave no room on their line, hide it
+   * instead of letting it drop to a line of its own. */
+  function fitDropHint() {
+    const hint = document.querySelector(".home-drop-hint");
+    const edit = $("homeOptsEdit");
+    if (!hint || !edit) return;
+    hint.classList.remove("no-room");
+    if (!hint.offsetParent) return; // hidden anyway (first run, phone width)
+    if (hint.offsetTop > edit.offsetTop + edit.offsetHeight / 2) hint.classList.add("no-room");
   }
 
   // ── drag files anywhere ─────────────────────────────────────────────────────
@@ -244,7 +281,8 @@ const Home = (() => {
   function init() {
     initDrop();
     renderOpts();
-    ["heroFilter", "heroClips", "heroLang"].forEach((id) => $(id).addEventListener("change", renderOpts));
+    window.addEventListener("resize", fitDropHint);
+    ["heroFilter", "heroClips", "heroLang", "heroSearch"].forEach((id) => $(id)?.addEventListener("change", renderOpts));
     $("homeOptsEdit").addEventListener("click", () => {
       const panel = $("homeOptsPanel");
       panel.hidden = !panel.hidden;

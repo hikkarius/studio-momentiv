@@ -36,7 +36,7 @@ const Settings = (() => {
     });
     if (sheet().hidden) return;
     if (name === "disk") loadDisk();
-    if (name === "ai") { showHardware(); if (keyState === "unknown" && view && view.gemini_key.set) checkSavedKey(); }
+    if (name === "ai") { showHardware(); loadModels(); if (keyState === "unknown" && view && view.gemini_key.set) checkSavedKey(); }
     if (name === "about") showAbout();
     if (name === "safe") loadBackups();
   }
@@ -130,7 +130,7 @@ const Settings = (() => {
 
   function get(key) {
     const [sec, k] = key.split(".");
-    return view.values[sec][k];
+    return (view.values[sec] || {})[k];
   }
 
   /** A value set by hand in config.yaml that has no button gets a button of its own, so it shows as chosen. */
@@ -141,7 +141,8 @@ const Settings = (() => {
     b.dataset.v = String(v);
     b.dataset.extra = "1";
     if (group.classList.contains("set-cards")) {
-      const label = (view.choices.whisper_model.find((c) => c.value === v) || {}).label || String(v);
+      const list = (group.id === "setExpModel" ? view.choices.experimental_model : view.choices.whisper_model) || [];
+      const label = (list.find((c) => c.value === v) || {}).label || String(v);
       b.innerHTML = `<b>${escapeHtml(label)}</b><small>Вибрано вручну</small>`;
     } else {
       b.textContent = group.dataset.key === "clips.max_overlap_sec" ? `${v} с` : String(v);
@@ -151,8 +152,10 @@ const Settings = (() => {
 
   function fill() {
     options($("setLang"), view.choices.language);
+    renderModelCards();
     sheet().querySelectorAll("[data-key]").forEach((el) => {
       const v = get(el.dataset.key);
+      if (v === undefined) return; // a studio started before this setting existed (restart it): leave the control as is
       if (el.classList.contains("set-seg") || el.classList.contains("set-cards")) {
         ensureChoice(el, v);
         el.querySelectorAll("[data-v]").forEach((b) => {
@@ -182,6 +185,80 @@ const Settings = (() => {
     renderKey();
   }
 
+  // ── «Модель ШІ для 🧪 експериментального пошуку» ─────────────────────────────
+
+  function renderModelCards() {
+    const box = $("setExpModel");
+    const list = view.choices.experimental_model || [];
+    const sig = list.map((c) => c.value).join("|");
+    if (box.dataset.sig === sig) return;
+    box.dataset.sig = sig;
+    if (!list.length) { box.innerHTML = `<small class="set-note">${escapeHtml(RESTART_NOTE)}</small>`; return; }
+    box.innerHTML = list.map((c) => `<button type="button" data-v="${escapeHtml(c.value)}">` +
+      (c.tag ? `<span class="set-tag">${escapeHtml(c.tag)}</span>` : "") +
+      `<b>${escapeHtml(c.label)}</b><small>${escapeHtml(c.hint)}</small></button>`).join("");
+  }
+
+  const MODEL_ICON = { ok: "✓", busy: "⏳", limit: "⏳", minute: "⏳", paid: "🔒", missing: "✕", bad_key: "!", offline: "!", error: "!" };
+  const MODEL_ROLE = { strong: "сильна", fast: "швидка", fallback: "запасна" };
+
+  function renderModels(check) {
+    const list = $("setModelsList");
+    if (!check || !check.models || !check.models.length) { list.hidden = true; return; }
+    const at = new Date(check.checked_at * 1000);
+    const today = at.toDateString() === new Date().toDateString();
+    const t = at.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
+    $("setModelsNote").textContent = `Перевірено ${today ? "сьогодні" : at.toLocaleDateString("uk-UA", { day: "numeric", month: "long" })} о ${t}. ` +
+      "Стан змінюється протягом дня: «перевантажена» часто минає за годину.";
+    list.innerHTML = check.models.map((m) => {
+      const cls = m.status === "ok" ? "ok" : ["busy", "limit", "minute"].includes(m.status) ? m.status
+        : ["bad_key", "offline", "error"].includes(m.status) ? "bad" : "";
+      const secs = m.status === "ok" && m.seconds != null ? ` · відповідь ${String(m.seconds).replace(".", ",")} с` : "";
+      return `<li class="${cls}"><i aria-hidden="true">${MODEL_ICON[m.status] || "?"}</i><b>${escapeHtml(m.name)}</b>` +
+        `<span class="role">${escapeHtml(MODEL_ROLE[m.role] || "")}</span><span>${escapeHtml(m.text + secs)}</span></li>`;
+    }).join("");
+    list.hidden = false;
+  }
+
+  const RESTART_NOTE = "Студія оновилась, але працює ще стара версія. Закрий вікно студії, запусти її знову й натисни Ctrl+F5.";
+  let modelsLoaded = false;
+  async function loadModels() {
+    if (modelsLoaded) return;
+    try {
+      const res = await fetch("/api/gemini/models");
+      if (res.status === 404) { $("setModelsNote").textContent = RESTART_NOTE; return; }
+      if (!res.ok) return;
+      modelsLoaded = true;
+      renderModels((await res.json()).check);
+    } catch (err) {
+      console.warn("models", err);
+    }
+  }
+
+  async function checkModels() {
+    const btn = $("setModelsCheck");
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = "Перевіряю…";
+    $("setModelsNote").textContent = "Питаю кожну модель. Сильні моделі думають довше, це може тривати до хвилини.";
+    try {
+      const res = await fetch("/api/gemini/models/check", { method: "POST" });
+      if (!res.ok) {
+        const msg = res.status === 404 ? RESTART_NOTE : await errorText(res);
+        showToast(msg, "error");
+        $("setModelsNote").textContent = msg;
+        return;
+      }
+      modelsLoaded = true;
+      renderModels((await res.json()).check);
+    } catch (err) {
+      showToast("Не вдалося зв'язатися зі студією", "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  }
+
   function options(sel, list) {
     if (!sel || sel.options.length) return;
     sel.innerHTML = list.map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join("");
@@ -209,6 +286,8 @@ const Settings = (() => {
       hc.value = val;
     }
     if (hf && !hf.dataset.touched) hf.value = v.studio.default_filter;
+    const hs = $("heroSearch");
+    if (hs && !hs.dataset.touched) hs.value = v.studio.default_search || "classic";
     const lang = (view.choices.language.find((l) => l.value === v.whisper.language) || {}).label || v.whisper.language;
     if (typeof Home !== "undefined") Home.setDefaults({ lang: lang.toLowerCase(), min: v.clips.default_min_len, max: v.clips.default_max_len });
   }
@@ -623,7 +702,7 @@ const Settings = (() => {
       const b = e.target.closest("button[data-restore]");
       if (b) restoreBackup(b.dataset.restore);
     });
-    ["heroClips", "heroFilter", "heroLang"].forEach((id) => {
+    ["heroClips", "heroFilter", "heroLang", "heroSearch"].forEach((id) => {
       const el = $(id);
       if (el) el.addEventListener("change", () => { el.dataset.touched = "1"; });
     });
@@ -635,5 +714,5 @@ const Settings = (() => {
 
   document.addEventListener("DOMContentLoaded", init);
 
-  return { open, close, setTab, backupNow, saveKey, checkSavedKey, showKeyInput, update, resetAll, cleanJunk, cleanClips, openRemoveDialog, closeRemoveDialog, confirmRemove, fmtBytes, reload: load };
+  return { open, close, setTab, checkModels, backupNow, saveKey, checkSavedKey, showKeyInput, update, resetAll, cleanJunk, cleanClips, openRemoveDialog, closeRemoveDialog, confirmRemove, fmtBytes, reload: load };
 })();

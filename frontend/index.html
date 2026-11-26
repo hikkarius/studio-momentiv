@@ -80,6 +80,12 @@
             <option value="Storytelling">🎭 Емоційні історії</option>
           </select>
         </label>
+        <label class="hero-opt" title="Класичний: рівномірно нарізає все відео, багато кліпів. Експериментальний: ШІ читає все відео разом і бере лише сильні місця, кліп починається з хука.">Як шукати
+          <select id="heroSearch" class="input-select">
+            <option value="classic">📼 Класичний</option>
+            <option value="experimental">🧪 Експериментальний</option>
+          </select>
+        </label>
         <label class="hero-opt">Скільки кліпів
           <select id="heroClips" class="input-select">
             <option value="0">Авто (за довжиною)</option>
@@ -393,6 +399,13 @@
             </div>
           </div>
           <div class="set-grp">
+            <h4>Як ШІ шукає моменти</h4>
+            <div class="set-cards" data-key="studio.default_search" role="group" aria-label="Як ШІ шукає моменти">
+              <button type="button" data-v="classic"><b>📼 Класичний</b><small>Рівномірно нарізає все відео: багато кліпів, зокрема середніх. Перевірений спосіб.</small></button>
+              <button type="button" data-v="experimental"><b>🧪 Експериментальний</b><small>ШІ читає все відео разом і бере лише сильні місця, кліп починається з хука. Кліпів менше (до 40), зате кращі.</small></button>
+            </div>
+          </div>
+          <div class="set-grp">
             <h4>Скільки кліпів шукати</h4>
             <div class="set-box">
               <div class="set-line">
@@ -444,6 +457,18 @@
               <label class="set-line set-switch-line"><span class="set-l"><b>Точніші оцінки</b><small>ШІ ще раз порівнює всі кліпи між собою. Точніше, але на один запит до Gemini більше.</small></span>
                 <input type="checkbox" class="set-switch" data-key="gemini.rerank" role="switch"></label>
             </div>
+          </div>
+          <div class="set-grp">
+            <h4>Модель ШІ для 🧪 експериментального пошуку</h4>
+            <div class="set-cards" data-key="gemini.experimental_model" id="setExpModel" role="group" aria-label="Модель ШІ для експериментального пошуку"></div>
+            <div class="set-box">
+              <div class="set-line">
+                <div class="set-l"><b>Що зараз доступно твоєму ключу</b><small id="setModelsNote">Ще не перевіряли. Перевірка надсилає один маленький запит кожній моделі.</small></div>
+                <button type="button" class="btn btn-secondary" id="setModelsCheck" onclick="Settings.checkModels()">Перевірити зараз</button>
+              </div>
+              <ul class="set-models" id="setModelsList" aria-live="polite" hidden></ul>
+            </div>
+            <small class="set-note">📼 Класичний пошук робить багато запитів, тому завжди бере швидкі моделі. Сильні моделі мають малий денний ліміт, а експериментальному вистачає 1–2 запитів на відео.</small>
           </div>
         </div>
 
@@ -618,7 +643,8 @@
           <div class="ed-stat keep ed-stat-vx"><span>В роботі</span><b id="edCntPick">0</b></div>
         </div>
         <span class="ed-spacer"></span>
-        <button class="ed-reanalyze" id="edReanalyze" type="button" title="Gemini ще раз перегляне розмову і запропонує нові кліпи. Транскрипція береться з кешу, тож це швидко.">
+        <span class="ed-search-mode" id="edSearchMode" hidden></span>
+        <button class="ed-reanalyze" id="edReanalyze" type="button" title="Gemini ще раз перегляне розмову і запропонує нові кліпи (можна вибрати інший спосіб пошуку). Транскрипція береться з кешу, тож це швидко.">
           <span class="ed-re-ic" aria-hidden="true">↻</span><span><b>Шукати кліпи заново</b><small>інший набір моментів</small></span>
         </button>
       </header>
@@ -1013,6 +1039,7 @@
   <script src="/js/queue.js"></script>
   <script src="/js/settings.js"></script>
   <script src="/js/welcome.js"></script>
+  <script src="/js/compare.js"></script>
 <div class="vx-modal modal-backdrop" id="vxTplModal" role="dialog" aria-modal="true" aria-labelledby="vxTmTitle" hidden>
   <div class="vx-modal-box vx-tm">
     <div class="vx-tm-head"><h3 id="vxTmTitle">Шаблони</h3><button type="button" class="ed-btn sm ghost" id="vxTmClose" aria-label="Закрити">✕</button></div>
