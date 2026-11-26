@@ -33,9 +33,9 @@ def test_space_presses_focused_button_not_the_player(page, studio, project):
     page.wait_for_timeout(300)
     assert page.locator("#edShelves .ed-shelf[data-f='drop']").get_attribute("aria-pressed") == "true"
     assert paused(page), "Space on a focused button must not start the video"
-    kfocus(page, "#edTabs button[data-tab='post']")
+    kfocus(page, "#edSort button[data-s='time']")
     page.keyboard.press(" ")
-    assert page.locator("#edTabs button[data-tab='post']").get_attribute("aria-selected") == "true"
+    assert page.locator("#edSort button[data-s='time']").get_attribute("aria-pressed") == "true"
     assert paused(page)
 
 
@@ -83,10 +83,6 @@ def test_status_menu_returns_focus_to_its_button(page, studio, project):
 
 def test_tabs_move_with_arrows(page, studio, project):
     open_editor(page, studio)
-    kfocus(page, "#edTabs button[data-tab='text']")
-    page.keyboard.press("ArrowRight")
-    assert page.locator("#edTabs button[data-tab='post']").get_attribute("aria-selected") == "true"
-    assert active(page).split("|")[1] == "post"
     kfocus(page, "#edMode button[data-m='table']")
     page.keyboard.press("ArrowDown")
     page.wait_for_function("document.querySelector('#edMode button[data-m=\"vx\"]').getAttribute('aria-selected') === 'true'")

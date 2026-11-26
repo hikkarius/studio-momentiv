@@ -208,6 +208,7 @@ const Editor = (() => {
     if (document.activeElement !== $("edTitle")) $("edTitle").value = c.title || "";
     if (document.activeElement !== $("edCaption")) $("edCaption").value = c.caption || "";
     if (document.activeElement !== $("edTags")) $("edTags").value = (c.hashtags || []).join(" ");
+    if (!document.querySelector('#edVx .vx-pane[data-t="post"]').hidden) renderPostHook();
 
     renderTc();
   }
@@ -244,10 +245,22 @@ const Editor = (() => {
     if (first && !body.hidden) body.scrollTop = Math.max(0, first.offsetTop - body.offsetTop - 120);
   }
 
-  function renderTabs() {
-    document.querySelectorAll("#edTabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === st.tab)));
-    $("edTabText").hidden = st.tab !== "text";
-    $("edTabPost").hidden = st.tab !== "post";
+  // the clip's text is the only tab left on step 1: the post («Допис») moved to step 2
+  function renderTabs() { $("edTabText").hidden = false; }
+
+  /** «Допис» on step 2 shows the title that is on the video, with a way to change it. */
+  function renderPostHook() {
+    const c = clip();
+    const o = (typeof Vertical !== "undefined" && Vertical.state().opts) || (c && c.vertical_opts) || {};
+    const t = String(o.hook_text || (c && c.title) || "").replace(/\s+/g, " ").trim();
+    const el = $("vxPostHook");
+    el.textContent = "";
+    if (!o.hook || !t) { el.append("Заголовка на відео немає. "); }
+    else { el.append("На відео: "); const b = document.createElement("b"); b.textContent = t; el.append(b, " "); }
+    const go = document.createElement("button");
+    go.type = "button"; go.className = "link"; go.textContent = o.hook && t ? "змінити" : "додати";
+    go.addEventListener("click", () => document.querySelector('#vxTabs button[data-t="hook"]').click());
+    el.append(go);
   }
 
   /** List order: best score first, or as the clips go in the video. Remembered. */
@@ -1450,11 +1463,7 @@ const Editor = (() => {
       $("edList").scrollLeft = 0;
       if (vis.length && !vis.includes(st.cur)) select(vis[0]); // open the first clip of the shelf
     }));
-    document.querySelectorAll("#edTabs button").forEach((b) => b.addEventListener("click", () => {
-      st.tab = b.dataset.tab;
-      renderTabs();
-      if (st.tab === "text") renderWords();
-    }));
+    $("edHome").addEventListener("click", () => $("edBack").click());
     $("edTitle").addEventListener("change", (e) => {
       const val = e.target.value.trim();
       if (!val) { e.target.value = clip().title; toast("Заголовок не може бути порожнім", true); return; }
@@ -1485,6 +1494,10 @@ const Editor = (() => {
       document.querySelectorAll("#vxTabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.t === t)));
       document.querySelectorAll("#edVx .vx-pane").forEach((p) => { p.hidden = p.dataset.t !== t; });
       if (t === "hook" && typeof Vertical !== "undefined") Vertical.onHookPane();
+      if (t === "post") renderPostHook();
+      if (typeof Vertical !== "undefined" && Vertical.onTab) Vertical.onTab(t);
+      const tp = document.querySelector("#edVx .vx-tp");
+      if (tp) tp.scrollTop = 0;  // each tab starts at its top, not where the previous one was scrolled
       try { localStorage.setItem("studio-vx-tab", t); } catch (_) {}
     };
     let savedTab = "style";

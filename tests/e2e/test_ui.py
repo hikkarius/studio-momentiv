@@ -367,15 +367,24 @@ def test_word_menu_sets_end(page, studio, project):
 # ─── Post text & downloads ───────────────────────────────────────────────────
 
 def test_edit_post_texts(page, studio, project):
+    """«Допис» lives on step 2, next to the title on the video; step 1 keeps only the clip's text."""
+    keep_first_clip()
     open_editor(page, studio)
-    page.click("#edTabs button[data-tab='post']")
+    assert page.locator("#edTabText").is_visible() and page.locator("#edTitle").is_hidden()
+    page.click("#edMode button[data-m='vx']")
+    page.wait_for_function("Vertical.state().layout", timeout=20000)
+    idx = page.evaluate("Editor.state().clipIndex")
+    page.click("#vxTabs button[data-t='post']")
+    assert "На відео" in page.locator("#vxPostHook").inner_text() or "немає" in page.locator("#vxPostHook").inner_text()
     page.fill("#edTitle", "Новий заголовок")
     page.press("#edTitle", "Tab")
     page.fill("#edTags", "шорти, подкаст")
     page.press("#edTags", "Tab")
-    assert wait_for(page, lambda: clip(2)["title"] == "Новий заголовок" and clip(2)["hashtags"] == ["#шорти", "#подкаст"])
+    assert wait_for(page, lambda: clip(idx)["title"] == "Новий заголовок" and clip(idx)["hashtags"] == ["#шорти", "#подкаст"])
     assert "Новий заголовок" in page.locator("#edList .ed-row").nth(0).text_content()
-    assert "Новий заголовок" in head(page)
+    page.click("#vxPostHook button")  # «змінити» / «додати» opens the «Заголовок» tab
+    assert page.locator("#vxTabs button[data-t='hook']").get_attribute("aria-selected") == "true"
+    assert not page.errors
 
 
 def test_download_single_clip_and_zip(page, studio, project):
@@ -427,7 +436,7 @@ def test_editor_fits_phone_and_dark_theme(browser, studio, project):
 # ─── Vertical 9:16 export ────────────────────────────────────────────────────
 
 def vx_tab(page, t):
-    """«Вертикальні кліпи» shows one settings tab at a time: Кадр, Стиль, Заголовок, Текст, Тонко."""
+    """«Вертикальні кліпи» shows one settings tab at a time: Кадр, Субтитри, Заголовок, Текст, Допис."""
     page.click(f"#vxTabs button[data-t='{t}']")
 
 
@@ -505,7 +514,7 @@ def test_vertical_title_size_colour_and_scrub(page, studio, project):
     page.keyboard.press("Enter")
     page.click("#vxHookStyle button[data-v='black']")
     page.click("#vxHookDur button[data-v='all']")
-    vx_tab(page, "fine")
+    vx_tab(page, "style")  # every subtitle setting is on «Субтитри» now (no «Тонко»)
     page.click("#vxColor button[data-v='FF4D4D']")
     page.locator("#vxSize").fill("130")
     page.locator("#vxSize").dispatch_event("change")
