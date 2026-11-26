@@ -218,6 +218,7 @@ class QueueAddRequest(BaseModel):
     filter_mode: str = "Viral Hooks"
     language: str = ""   # '' = the language from the settings
     search_mode: str = Field(default="", pattern=r"^(|classic|experimental)$")  # '' = the default from the settings
+    stories: str = Field(default="", pattern=r"^(|on|off)$")  # «Довгі історії»: '' = the default from the settings
 
     @field_validator("language")
     @classmethod
@@ -738,7 +739,52 @@ def _purge_project(project_id: str) -> None:
 def _clip_file_stem(clip: Dict[str, Any]) -> str:
     safe_title = "".join(c for c in clip["title"] if c.isalnum() or c in (" ", "_", "-")).strip()
     safe_title = safe_title[:40].replace(" ", "_") or f"clip_{clip['clip_index']}"
-    return f"clip_{clip['clip_index']}_{int(clip['start_sec'])}s_{safe_title}"
+    return f"{_file_prefix(clip)}_{int(clip['start_sec'])}s_{safe_title}"
+
+
+def _file_prefix(clip: Dict[str, Any]) -> str:
+    """«clip_4», or «clip_4p1» for «Частина 1» of a long story (so the parts never replace each other's files)."""
+    return f"clip_{clip['clip_index']}" + (f"p{clip['part']}" if clip.get("part") else "")
+
+
+# ─── «Довгі історії»: a story as one clip or as «Частина 1» + «Частина 2» ──────
+
+def _story_split(proj: Dict[str, Any], clip: Dict[str, Any]) -> float:
+    """Where «Частина 2» starts: the saved cut while it still fits the bounds, else a sentence end near the middle."""
+    from clip_refiner import clamp_split, story_split
+
+    start, end = float(clip["start_sec"]), float(clip["end_sec"])
+    saved = clamp_split(clip.get("split_sec"), start, end)
+    if saved is not None:
+        return saved
+    words: List[Dict[str, Any]] = []
+    try:
+        cached = load_transcript_cache(proj["source_path"], any_model=True)
+        if cached:
+            words = cached[1]
+    except Exception as e:
+        log.warning(f"Story cut without words: {e}")
+    return story_split(start, end, words)
+
+
+def _story_parts(proj: Dict[str, Any], clip: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The clip as it is handed out: [clip], or its two parts when it is a story shown «2 частини»."""
+    if clip.get("kind") != "story" or clip.get("story_view") != "parts":
+        return [clip]
+    return [_part_clip(proj, clip, 1), _part_clip(proj, clip, 2)]
+
+
+def _part_clip(proj: Dict[str, Any], clip: Dict[str, Any], part: int) -> Dict[str, Any]:
+    """«Частина 1» (start…cut) or «Частина 2» (cut…end) of a story as a clip of its own; part 0 = the whole clip."""
+    if not part:
+        return clip
+    if part not in (1, 2) or clip.get("kind") != "story":
+        raise HTTPException(status_code=400, detail="Частини бувають лише в довгої історії: 1 або 2.")
+    cut = _story_split(proj, clip)
+    start, end = (float(clip["start_sec"]), cut) if part == 1 else (cut, float(clip["end_sec"]))
+    return {**clip, "start_sec": start, "end_sec": end, "duration": round(end - start, 2), "part": part,
+            "part_label": f"Частина {part}/2", "title": f"{clip.get('title') or 'Історія'} · Частина {part}",
+            "cuts": [c for c in (clip.get("cuts") or []) if start <= float(c[0]) and float(c[1]) <= end]}
 
 
 def _clip_number(project_id: str, clip: Dict[str, Any]) -> int:
@@ -823,7 +869,7 @@ def _ensure_clip_file(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any
     lock = _get_slice_path_lock(str(path))
     with lock:
         if not path.exists():
-            for old in slices_dir.glob(f"clip_{clip['clip_index']}_*_cut*.mp4"):
+            for old in slices_dir.glob(f"{_file_prefix(clip)}_*_cut*.mp4"):
                 try:
                     old.unlink()
                 except OSError:
@@ -834,10 +880,12 @@ def _ensure_clip_file(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any
 
 
 @app.get("/api/projects/{project_id}/clips/{clip_index}/download")
-def download_clip_slice(project_id: str, clip_index: int, raw: bool = False):
-    """The 16:9 clip: lossless stream copy, or without its cut pauses (raw=1 always gives the untouched cut)."""
+def download_clip_slice(project_id: str, clip_index: int, raw: bool = False, part: int = 0):
+    """The 16:9 clip: lossless stream copy, or without its cut pauses (raw=1 always gives the untouched cut).
+    part=1/2: that part of a long story."""
     _safe_project_output_dir(project_id)
     proj, target_clip = _get_project_and_clip(project_id, clip_index)
+    target_clip = _part_clip(proj, target_clip, part)
     output_slice_path, slice_filename = _ensure_clip_file(project_id, proj, target_clip, raw=raw)
     return FileResponse(
         output_slice_path,
@@ -901,9 +949,10 @@ def update_clip(project_id: str, clip_index: int, payload: ClipUpdateRequest):
 def _drop_clip_files(project_id: str, clip_index: int, vertical: bool = False) -> int:
     """Deletes cached 16:9 slices and SRTs of a clip (and its 9:16 renders when vertical=True). Returns freed bytes."""
     out_dir = _safe_project_output_dir(project_id)
-    groups = [("slices", f"clip_{clip_index}_*"), ("subtitles", f"clip_{clip_index}_*")]
+    groups = [("slices", f"clip_{clip_index}_*"), ("subtitles", f"clip_{clip_index}_*"),
+              ("slices", f"clip_{clip_index}p*"), ("subtitles", f"clip_{clip_index}p*")]  # story parts too
     if vertical:
-        groups.append(("vertical", f"clip_{clip_index}_*.mp4"))
+        groups += [("vertical", f"clip_{clip_index}_*.mp4"), ("vertical", f"clip_{clip_index}p*.mp4")]
     freed = 0
     for sub, pattern in groups:
         d = out_dir / sub
@@ -1106,7 +1155,7 @@ def export_selected_zip(project_id: str, clips: str = ""):
 
 
 @app.get("/api/projects/{project_id}/clips/{clip_index}/export-srt")
-def export_clip_srt(project_id: str, clip_index: int):
+def export_clip_srt(project_id: str, clip_index: int, part: int = 0):
     """Generates and downloads a clean, relative zero-based .SRT subtitle file for a clip."""
     _validate_project_id(project_id)
     proj = db.get_project(project_id)
@@ -1117,6 +1166,7 @@ def export_clip_srt(project_id: str, clip_index: int):
     target_clip = next((c for c in clips if c["clip_index"] == clip_index), None)
     if not target_clip:
         raise HTTPException(status_code=404, detail="Кліп не знайдено.")
+    target_clip = _part_clip(proj, target_clip, part)
 
     source_path = proj["source_path"]
     project_out_dir = _safe_project_output_dir(project_id)
@@ -1125,7 +1175,7 @@ def export_clip_srt(project_id: str, clip_index: int):
 
     safe_title = "".join(c for c in target_clip["title"] if c.isalnum() or c in (" ", "_", "-")).strip()
     safe_title = safe_title[:40].replace(" ", "_") or f"clip_{clip_index}"
-    srt_filename = f"clip_{clip_index}_{int(target_clip['start_sec'])}s_{safe_title}.srt"
+    srt_filename = f"{_file_prefix(target_clip)}_{int(target_clip['start_sec'])}s_{safe_title}.srt"
     output_srt_path = str(subs_dir / srt_filename)
 
     subtitles_generator.write_clip_srt_file(
@@ -1253,7 +1303,7 @@ def _vertical_target(project_id: str, clip: Dict[str, Any], subs: bool,
         if proj:
             key += _stream_key(_stream_info(project_id, proj))
     filename = _download_name(project_id, clip, "9x16" if subs else "9x16 без субтитрів")
-    return _vertical_dir(project_id) / f"clip_{clip['clip_index']}_{key}_{'s' if subs else 'n'}.mp4", filename
+    return _vertical_dir(project_id) / f"{_file_prefix(clip)}_{key}_{'s' if subs else 'n'}.mp4", filename
 
 
 def _ensure_vertical(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any], subs: bool) -> tuple[str, str]:
@@ -1304,7 +1354,10 @@ def _ensure_vertical(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any]
             round_plates=opts["round"], stroke=opts["stroke"],
             hook_round=opts["hook_round"], hook_stroke=opts["hook_stroke"],
             hook_pos=opts["hook_pos"] if opts["hook_pos"] is not None else layout.stream.get("hook_pos"),
+            part_label=clip.get("part_label"),
         )
+    elif clip.get("part_label"):
+        ass = vertical_render.build_ass([], duration, "none", part_label=clip["part_label"])
     if layout.kind == "stream":
         ass = streamer.nick_ass(ass, layout.stream)  # the streamer's nick is drawn even without subtitles
     caps = app_state.get_gpu_capabilities()
@@ -1313,7 +1366,7 @@ def _ensure_vertical(project_id: str, proj: Dict[str, Any], clip: Dict[str, Any]
             vertical_render.render_vertical(proj["source_path"], clip["start_sec"], clip["end_sec"], str(path), layout, ass,
                                             has_nvenc=caps.has_nvenc, cuts_rel=cuts_rel or None)
     # Old renders of this clip with other settings are no longer reachable.
-    for old in vdir.glob(f"clip_{idx}_*_{'s' if subs else 'n'}.mp4"):
+    for old in vdir.glob(f"{_file_prefix(clip)}_*_{'s' if subs else 'n'}.mp4"):
         if old != path:
             try:
                 old.unlink()
@@ -1479,9 +1532,10 @@ def _change_stream_info(project_id: str, info: Dict[str, Any], payload: StreamCa
 
 
 @app.get("/api/projects/{project_id}/clips/{clip_index}/vertical-plan")
-def get_vertical_plan(project_id: str, clip_index: int, frame: Optional[str] = None):
+def get_vertical_plan(project_id: str, clip_index: int, frame: Optional[str] = None, part: int = 0):
     """What the vertical clip will look like: crop plan + caption words (for the live preview)."""
     proj, clip = _get_project_and_clip(project_id, clip_index)
+    clip = _part_clip(proj, clip, part)
     opts = _clip_vertical_opts(project_id, clip)
     if frame:
         opts["frame"] = frame if frame in vertical_render.FRAME_MODES else "auto"
@@ -1494,13 +1548,16 @@ def get_vertical_plan(project_id: str, clip_index: int, frame: Optional[str] = N
         layout = vertical_render.plan_layout(faces, opts["frame"], clip["end_sec"] - clip["start_sec"])
         src = {"w": faces["w"], "h": faces["h"]}
     words = _clip_caption_words(proj, clip, opts)
-    return {"opts": opts, "layout": layout.to_dict(), "src": src, "words": words}
+    return {"opts": opts, "layout": layout.to_dict(), "src": src, "words": words,
+            "part": {"n": clip["part"], "label": clip["part_label"], "start": clip["start_sec"], "end": clip["end_sec"]}
+            if clip.get("part") else None}
 
 
 @app.post("/api/projects/{project_id}/clips/{clip_index}/vertical")
-def render_vertical_clip(project_id: str, clip_index: int, subs: bool = True):
+def render_vertical_clip(project_id: str, clip_index: int, subs: bool = True, part: int = 0):
     """Renders the vertical clip (waits until done) so the download afterwards is instant."""
     proj, clip = _get_project_and_clip(project_id, clip_index)
+    clip = _part_clip(proj, clip, part)
     try:
         _, filename = _ensure_vertical(project_id, proj, clip, subs)
     except HTTPException:
@@ -1512,8 +1569,9 @@ def render_vertical_clip(project_id: str, clip_index: int, subs: bool = True):
 
 
 @app.get("/api/projects/{project_id}/clips/{clip_index}/vertical")
-def download_vertical_clip(project_id: str, clip_index: int, subs: bool = True):
+def download_vertical_clip(project_id: str, clip_index: int, subs: bool = True, part: int = 0):
     proj, clip = _get_project_and_clip(project_id, clip_index)
+    clip = _part_clip(proj, clip, part)
     try:
         path, filename = _ensure_vertical(project_id, proj, clip, subs)
     except HTTPException:
@@ -1541,7 +1599,8 @@ def _run_vertical_batch(job_id: str, project_id: str, proj: Dict[str, Any], chos
             job["current_index"] = c["clip_index"]
             fresh = next((x for x in db.get_candidate_clips(project_id) if x["clip_index"] == c["clip_index"]), None)
             if fresh is not None:  # the author may change a clip while the others render
-                _ensure_vertical(project_id, proj, fresh, subs)
+                for one in _story_parts(proj, fresh):
+                    _ensure_vertical(project_id, proj, one, subs)
             job["done"] = rank
             job["ready"].append(c["clip_index"])
         job["status"] = "completed"
@@ -1564,8 +1623,9 @@ def _run_vertical_zip(job_id: str, project_id: str, proj: Dict[str, Any], chosen
         with zipfile.ZipFile(tmp_zip, "w", compression=zipfile.ZIP_STORED) as zf:
             for rank, c in enumerate(chosen, 1):
                 job["current"] = c.get("title", "")
-                path, name = _ensure_vertical(project_id, proj, c, subs)
-                zf.write(path, arcname=name)
+                for one in _story_parts(proj, c):
+                    path, name = _ensure_vertical(project_id, proj, one, subs)
+                    zf.write(path, arcname=name)
                 job["done"] = rank
         os.replace(tmp_zip, zip_path)
         job["status"] = "completed"
@@ -1623,14 +1683,14 @@ def _kept_clips(project_id: str, wanted: Optional[List[int]] = None) -> tuple[Di
 @app.get("/api/projects/{project_id}/vertical-status")
 def vertical_status(project_id: str):
     """For the «Усі разом» list: each clip «В роботі», is its 9:16 (with subtitles) ready, which template it matches."""
-    _, clips = _kept_clips(project_id)
+    proj, clips = _kept_clips(project_id)
     templates = db.list_vertical_templates()
     shapes = [(t["name"], vertical_render.template_of(t["opts"])) for t in templates]
     out = []
     for c in clips:
-        path, _ = _vertical_target(project_id, c, True)
+        ready = all(_vertical_target(project_id, one, True, proj)[0].exists() for one in _story_parts(proj, c))
         look = vertical_render.template_of(c.get("vertical_opts"))
-        out.append({"clip_index": c["clip_index"], "ready": path.exists(),
+        out.append({"clip_index": c["clip_index"], "ready": ready,
                     "template": next((n for n, shape in shapes if shape == {k: look[k] for k in shape}), None)})
     job = next((j for j in _vjobs.values() if j.get("project_id") == project_id and j.get("kind") == "batch"
                 and j["status"] == "running"), None)
@@ -1645,7 +1705,8 @@ class VerticalBatchRequest(BaseModel):
 def start_vertical_batch(project_id: str, payload: VerticalBatchRequest):
     """«Зробити незроблені»: renders 9:16 with subtitles in the background, one clip at a time."""
     proj, clips = _kept_clips(project_id, payload.clips)
-    todo = [c for c in clips if not _vertical_target(project_id, c, True)[0].exists()]
+    todo = [c for c in clips if not all(_vertical_target(project_id, one, True, proj)[0].exists()
+                                        for one in _story_parts(proj, c))]
     running = next((j for j in _vjobs.values() if j.get("project_id") == project_id and j.get("kind") == "batch"
                     and j["status"] == "running"), None)
     if running:
@@ -1726,7 +1787,117 @@ def download_vertical_job(job_id: str):
     job = _vjobs.get(job_id)
     if not job or job.get("status") != "completed" or not os.path.exists(job.get("file", "")):
         raise HTTPException(status_code=404, detail="Архів ще не готовий.")
-    return FileResponse(job["file"], media_type="application/zip", filename=job["filename"])
+    return FileResponse(job["file"], media_type=job.get("media_type") or "application/zip", filename=job["filename"])
+
+
+# ─── «🏆 Топ-3»: a few short clips glued into one countdown video ─────────────
+
+class TopRequest(BaseModel):
+    clips: List[int] = Field(min_length=2, max_length=5)  # in the order shown: #N first, #1 last
+    title: str = Field(default="", max_length=120)
+    numbers: bool = True  # a big «#3, #2, #1» for the first second of each clip
+    vertical: bool = False  # 9:16 with subtitles (each clip's own look) instead of the clean 16:9
+
+
+def _run_top(job_id: str, project_id: str, proj: Dict[str, Any], chosen: List[Dict[str, Any]], payload: TopRequest) -> None:
+    from backend import top3
+
+    job = _vjobs[job_id]
+    try:
+        files = []
+        for rank, c in enumerate(chosen, 1):
+            job["current"] = c.get("title", "")
+            if payload.vertical:
+                files.append(_ensure_vertical(project_id, proj, c, True)[0])
+            elif _clip_cuts(c):
+                files.append(_ensure_clip_file(project_id, proj, c)[0])
+            else:  # no pauses cut: straight from the source, to the frame
+                if not os.path.exists(proj["source_path"]):
+                    raise HTTPException(status_code=404, detail="Вихідне відео не знайдено на диску.")
+                files.append((proj["source_path"], float(c["start_sec"]), float(c["end_sec"]) - float(c["start_sec"])))
+            job["done"] = rank
+        job["current"] = "Склеюю…"
+        key = hashlib.sha1(json.dumps([[f if isinstance(f, str) else list(f) for f in files], payload.title, payload.numbers],
+                                      ensure_ascii=False).encode()).hexdigest()[:10]
+        out_dir = _safe_project_output_dir(project_id) / "top"
+        out = out_dir / f"top_{key}_{'v' if payload.vertical else 'h'}.mp4"
+        if not out.exists():
+            for old in out_dir.glob(f"top_*_{'v' if payload.vertical else 'h'}.mp4"):  # one top per format is kept
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+            top3.build(files, str(out), title=payload.title, numbers=payload.numbers,
+                       has_nvenc=app_state.get_gpu_capabilities().has_nvenc)
+        job["file"] = str(out)
+        job["done"] = len(chosen)
+        job["status"] = "completed"
+    except Exception as e:
+        detail = e.detail if isinstance(e, HTTPException) else str(e)
+        log.error(f"Top failed: {detail}")
+        job["status"] = "failed"
+        job["error"] = str(detail)
+
+
+@app.post("/api/projects/{project_id}/top3")
+def start_top(project_id: str, payload: TopRequest):
+    """«🏆 Топ-3»: renders the chosen clips (16:9 or 9:16) and joins them; poll /api/vertical-jobs/{id}."""
+    from backend import top3
+
+    _validate_project_id(project_id)
+    proj = db.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Проєкт не знайдено.")
+    if len(set(payload.clips)) != len(payload.clips):
+        raise HTTPException(status_code=400, detail="Один кліп двічі в топі.")
+    by_idx = {c["clip_index"]: c for c in db.get_candidate_clips(project_id)}
+    chosen = [by_idx.get(i) for i in payload.clips]
+    if any(c is None for c in chosen):
+        raise HTTPException(status_code=404, detail="Кліп не знайдено.")
+    if any(c.get("kind") == "story" for c in chosen):
+        raise HTTPException(status_code=400, detail="Довга історія не влізе в топ: обери короткі кліпи.")
+    total = sum(float(c["end_sec"]) - float(c["start_sec"]) - pauses.removed(_clip_cuts(c)) for c in chosen)
+    if total > top3.MAX_TOTAL_SEC + 1:
+        raise HTTPException(status_code=400, detail=f"Разом {int(total // 60)}:{int(total % 60):02d}, а Shorts і TikTok "
+                                                    "беруть до 3 хв. Прибери або вкороти кліп.")
+    job_id = uuid.uuid4().hex[:12]
+    name = re.sub(r'[\x00-\x1f\\/:*?"<>|]', "", payload.title).strip(" .")[:60] or f"Топ-{len(chosen)}"
+    with _vjobs_lock:
+        _vjobs[job_id] = {"id": job_id, "kind": "top", "project_id": project_id, "status": "running", "done": 0,
+                          "total": len(chosen), "current": "", "error": "", "file": "", "media_type": "video/mp4",
+                          "filename": f"{name} {'9x16' if payload.vertical else '16x9'}.mp4"}
+    threading.Thread(target=_run_top, args=(job_id, project_id, proj, chosen, payload), daemon=True).start()
+    return {k: v for k, v in _vjobs[job_id].items() if k != "file"}
+
+
+class StoryRequest(BaseModel):
+    view: Optional[str] = Field(default=None, pattern=r"^(whole|parts)$")  # «Ціла» / «2 частини»
+    split_sec: Optional[float] = None  # where «Частина 2» starts (absolute seconds)
+
+
+@app.put("/api/projects/{project_id}/clips/{clip_index}/story")
+def set_story(project_id: str, clip_index: int, payload: StoryRequest):
+    """A long story: one clip («Ціла») or two («2 частини»), and where the cut between the parts is."""
+    from clip_refiner import STORY_PART_MIN, clamp_split
+
+    proj, clip = _get_project_and_clip(project_id, clip_index)
+    if clip.get("kind") != "story":
+        raise HTTPException(status_code=400, detail="Це не довга історія.")
+    fields: Dict[str, Any] = {}
+    if payload.view:
+        fields["story_view"] = payload.view
+    if payload.split_sec is not None:
+        cut = clamp_split(payload.split_sec, float(clip["start_sec"]), float(clip["end_sec"]))
+        if cut is None:
+            raise HTTPException(status_code=400,
+                                detail=f"Кожна частина має бути не коротша за {int(STORY_PART_MIN)} с.")
+        fields["split_sec"] = cut
+    elif clip.get("split_sec") is None:
+        fields["split_sec"] = _story_split(proj, clip)
+    updated = db.update_clip_fields(project_id, clip_index, **fields)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Кліп не знайдено.")
+    return {"status": "updated", "clip": updated}
 
 
 @app.put("/api/projects/{project_id}/clips/{clip_index}/trim")
@@ -1759,6 +1930,13 @@ def trim_clip(project_id: str, clip_index: int, payload: TrimClipRequest):
 def _after_bounds_change(project_id: str, clip_index: int, updated_clip: Dict[str, Any]) -> Dict[str, Any]:
     """Drops stale slices/SRTs of a clip, syncs metadata.json and adds formatted fields for the UI."""
     _drop_clip_files(project_id, clip_index)
+    if updated_clip.get("kind") == "story":
+        from clip_refiner import clamp_split
+        start, end = float(updated_clip["start_sec"]), float(updated_clip["end_sec"])
+        if clamp_split(updated_clip.get("split_sec"), start, end) is None:  # the cut fell out: a new one inside
+            proj = db.get_project(project_id)
+            cut = _story_split(proj, {**updated_clip, "split_sec": None}) if proj else round((start + end) / 2, 2)
+            updated_clip = db.update_clip_fields(project_id, clip_index, split_sec=cut) or updated_clip
     project_out_dir = _safe_project_output_dir(project_id)
 
     # Format fields for API response
@@ -1823,7 +2001,8 @@ def add_to_queue(payload: QueueAddRequest):
     for url in dict.fromkeys(urls):
         added.append(db.add_queue_item(queue_runner.new_item_id(), source_url=url, title=url,
                                        clips_count=payload.clips_count, filter_mode=payload.filter_mode,
-                                       language=payload.language, search_mode=payload.search_mode))
+                                       language=payload.language, search_mode=payload.search_mode,
+                                       stories=payload.stories))
     for pid in dict.fromkeys(payload.project_ids):
         _validate_project_id(pid)
         proj = db.get_project(pid)
@@ -1833,7 +2012,8 @@ def add_to_queue(payload: QueueAddRequest):
             continue
         added.append(db.add_queue_item(queue_runner.new_item_id(), project_id=pid, title=proj.get("title") or pid,
                                        clips_count=payload.clips_count, filter_mode=payload.filter_mode,
-                                       language=payload.language, search_mode=payload.search_mode))
+                                       language=payload.language, search_mode=payload.search_mode,
+                                       stories=payload.stories))
     queue_runner.notify()
     return {"added": added}
 
@@ -1859,7 +2039,8 @@ def retry_queue_item(item_id: str):
     db.delete_queue_item(item_id)
     new = db.add_queue_item(queue_runner.new_item_id(), source_url=item["source_url"], project_id=item["project_id"],
                             title=item["title"], clips_count=item["clips_count"], filter_mode=item["filter_mode"],
-                            language=item.get("language") or "", search_mode=item.get("search_mode") or "")
+                            language=item.get("language") or "", search_mode=item.get("search_mode") or "",
+                            stories=item.get("stories") or "")
     queue_runner.notify()
     return {"item": new}
 
@@ -1911,7 +2092,7 @@ _EDITABLE_SETTINGS = {
     "clips": {"default_min_len", "default_max_len", "max_overlap_sec"},
     "gemini": {"rerank", "experimental_model"},
     "studio": {"default_clips", "default_filter", "default_search", "cleanup_days", "daily_backup", "keep_awake",
-               "wait_for_limit"},
+               "wait_for_limit", "find_stories"},
 }
 
 

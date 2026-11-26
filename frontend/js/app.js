@@ -513,7 +513,7 @@ async function retryAnalysisForCurrentProject() {
   }
   resetStudioState();
   try {
-    await Queue.addProject(project.id, { search_mode: mode });
+    await Queue.addProject(project.id, { search_mode: mode, stories: askSearchAgain.stories || "" });
   } catch (err) {
     showToast(err.message, "error");
   }
@@ -1153,6 +1153,8 @@ function askSearchAgain(project, marked) {
   return new Promise((resolve) => {
     const used = project.search_mode || "classic";
     let pick = used === "classic" ? "experimental" : "classic";
+    const hs = document.getElementById("heroStories");
+    const storiesOn = !hs || hs.value !== "off";
     const back = document.createElement("div");
     back.className = "modal-backdrop ask-dialog ask-search-dialog";
     back.setAttribute("role", "dialog");
@@ -1171,6 +1173,7 @@ function askSearchAgain(project, marked) {
                 <b>${escapeHtml(m.label)}${m.value === used && project.search_mode ? " · зараз" : ""}</b><small>${escapeHtml(m.hint)}</small>
               </button>`).join("")}
           </div>
+          <label class="ask-stories"><input type="checkbox" id="askStories"${storiesOn ? " checked" : ""}> 📖 Шукати й довгі історії (1–3 хв)</label>
           <p class="ask-text">${escapeHtml(keepNote)} Транскрипція вже є, тож це швидко.</p>
         </div>
         <div class="modal-footer">
@@ -1202,7 +1205,11 @@ function askSearchAgain(project, marked) {
         return;
       }
       const b = e.target.closest("button[data-a]");
-      if (b) done(b.dataset.a === "yes" ? pick : b.dataset.a === "cmp" ? "compare" : null);
+      if (b) {
+        // «Довгі історії» for this search only; the caller passes it on with askSearchAgain.stories
+        askSearchAgain.stories = back.querySelector("#askStories").checked ? "on" : "off";
+        done(b.dataset.a === "yes" ? pick : b.dataset.a === "cmp" ? "compare" : null);
+      }
       else if (e.target === back) done(null);
     });
     document.addEventListener("keydown", onKey, true);

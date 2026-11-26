@@ -166,6 +166,9 @@ def init_db():
         if "search_mode" not in queue_columns:
             # '' = the default from the settings, else classic / experimental
             conn.execute("ALTER TABLE queue_items ADD COLUMN search_mode TEXT NOT NULL DEFAULT '';")
+        if "stories" not in queue_columns:
+            # «Довгі історії»: '' = the default from the settings, 'on' / 'off'
+            conn.execute("ALTER TABLE queue_items ADD COLUMN stories TEXT NOT NULL DEFAULT '';")
 
         project_columns = [row["name"] for row in conn.execute("PRAGMA table_info(projects);").fetchall()]
         if "search_mode" not in project_columns:
@@ -180,6 +183,12 @@ def init_db():
         if "signals" not in columns:
             # JSON: why the audience liked the clip, ["replayed" (YouTube), "loud" (laughter, applause), "chat"]
             conn.execute("ALTER TABLE candidate_clips ADD COLUMN signals TEXT NOT NULL DEFAULT '[]';")
+        if "kind" not in columns:
+            # '' = a short clip, 'story' = «Довга історія» (1–3 min), split_sec = where «Частина 2» starts,
+            # story_view = 'whole' (one clip) or 'parts' (two clips)
+            conn.execute("ALTER TABLE candidate_clips ADD COLUMN kind TEXT NOT NULL DEFAULT '';")
+            conn.execute("ALTER TABLE candidate_clips ADD COLUMN split_sec REAL;")
+            conn.execute("ALTER TABLE candidate_clips ADD COLUMN story_view TEXT NOT NULL DEFAULT 'whole';")
 
 
 def new_shelf_size(duration_sec: float) -> int:
@@ -195,7 +204,7 @@ def _mark_reserve(conn: Any, project_id: str, only_new: bool = False) -> None:
     row = conn.execute("SELECT duration FROM projects WHERE id = ?", (project_id,)).fetchone()
     n = new_shelf_size(row["duration"] if row else 0)
     clips = conn.execute(
-        "SELECT clip_index, virality_score, review_status FROM candidate_clips WHERE project_id = ?",
+        "SELECT clip_index, virality_score, review_status FROM candidate_clips WHERE project_id = ? AND kind = ''",
         (project_id,),
     ).fetchall()
     ranked = sorted(clips, key=lambda r: (-int(r["virality_score"] or 0), r["clip_index"]))
@@ -307,15 +316,17 @@ def save_candidate_clips(project_id: str, clips: List[Dict[str, Any]], keep_revi
         kept: list = []
         if keep_reviewed:
             kept = conn.execute(
-                "SELECT clip_index, start_sec, end_sec FROM candidate_clips WHERE project_id = ? AND review_status != ''",
+                "SELECT clip_index, start_sec, end_sec, kind FROM candidate_clips WHERE project_id = ? AND review_status != ''",
                 (project_id,),
             ).fetchall()
             conn.execute("DELETE FROM candidate_clips WHERE project_id = ? AND review_status = ''", (project_id,))
         else:
             conn.execute("DELETE FROM candidate_clips WHERE project_id = ?", (project_id,))
 
-        def repeats_kept(start: float, end: float) -> bool:
+        def repeats_kept(start: float, end: float, kind: str) -> bool:
             for k in kept:
+                if (k["kind"] or "") != kind:
+                    continue  # a story may hold a short clip the author kept: both stay
                 inter = min(end, k["end_sec"]) - max(start, k["start_sec"])
                 shorter = max(0.1, min(end - start, k["end_sec"] - k["start_sec"]))
                 if inter / shorter > 0.5:
@@ -326,7 +337,8 @@ def save_candidate_clips(project_id: str, clips: List[Dict[str, Any]], keep_revi
         for c in clips:
             start = float(c.get("start", 0.0))
             end = float(c.get("end", 0.0))
-            if kept and repeats_kept(start, end):
+            kind = "story" if c.get("kind") == "story" else ""
+            if kept and repeats_kept(start, end, kind):
                 continue
             idx += 1
             clip_id = f"{project_id}_clip_{idx}"
@@ -343,11 +355,13 @@ def save_candidate_clips(project_id: str, clips: List[Dict[str, Any]], keep_revi
             sig = c.get("signals")
             sig_json = json.dumps([str(x) for x in sig] if isinstance(sig, list) else [])
 
+            split = c.get("split") if kind else None
             conn.execute(
                 "INSERT INTO candidate_clips (id, project_id, clip_index, start_sec, end_sec, duration, "
-                "virality_score, title, hook_text, reason, caption, hashtags, signals, is_selected) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
-                (clip_id, project_id, idx, start, end, dur, score, title, hook, reason, caption, tags_json, sig_json),
+                "virality_score, title, hook_text, reason, caption, hashtags, signals, is_selected, kind, split_sec) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (clip_id, project_id, idx, start, end, dur, score, title, hook, reason, caption, tags_json, sig_json,
+                 kind, float(split) if isinstance(split, (int, float)) else None),
             )
         _mark_reserve(conn, project_id, only_new=keep_reviewed)
 
@@ -453,6 +467,16 @@ def update_clip_fields(project_id: str, clip_index: int, **fields: Any) -> Optio
     if fields.get("title_variants") is not None:
         sets.append("title_variants = ?")
         values.append(json.dumps(fields["title_variants"], ensure_ascii=False))
+    if "split_sec" in fields:
+        sp = fields["split_sec"]
+        sets.append("split_sec = ?")
+        values.append(None if sp is None else round(float(sp), 2))
+    if fields.get("story_view") is not None:
+        view = str(fields["story_view"])
+        if view not in ("whole", "parts"):
+            raise ValueError(f"Невідомий вигляд історії: {view!r}")
+        sets.append("story_view = ?")
+        values.append(view)
     if fields.get("vertical_opts") is not None:
         sets.append("vertical_opts = ?")
         values.append(json.dumps(fields["vertical_opts"], ensure_ascii=False))
@@ -725,6 +749,7 @@ def add_queue_item(
     filter_mode: str = "Viral Hooks",
     language: str = "",
     search_mode: str = "",
+    stories: str = "",
 ) -> Dict[str, Any]:
     now = time.time()
     with get_db() as conn:
@@ -732,10 +757,10 @@ def add_queue_item(
         position = (row["p"] or 0) + 1
         conn.execute(
             "INSERT INTO queue_items (id, source_url, project_id, title, clips_count, filter_mode, language, search_mode, "
-            "status, progress, message, position, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'waiting', 0.0, 'Чекає своєї черги', ?, ?, ?)",
+            "stories, status, progress, message, position, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting', 0.0, 'Чекає своєї черги', ?, ?, ?)",
             (item_id, source_url, project_id, title, int(clips_count), filter_mode, language or "", search_mode or "",
-             position, now, now),
+             stories if stories in ("on", "off") else "", position, now, now),
         )
     return get_queue_item(item_id)
 

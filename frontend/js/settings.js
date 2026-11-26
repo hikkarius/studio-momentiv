@@ -288,6 +288,8 @@ const Settings = (() => {
     if (hf && !hf.dataset.touched) hf.value = v.studio.default_filter;
     const hs = $("heroSearch");
     if (hs && !hs.dataset.touched) hs.value = v.studio.default_search || "classic";
+    const hst = $("heroStories");
+    if (hst && !hst.dataset.touched) hst.value = v.studio.find_stories === false ? "off" : "on";
     const lang = (view.choices.language.find((l) => l.value === v.whisper.language) || {}).label || v.whisper.language;
     if (typeof Home !== "undefined") Home.setDefaults({ lang: lang.toLowerCase(), min: v.clips.default_min_len, max: v.clips.default_max_len });
   }
@@ -702,7 +704,7 @@ const Settings = (() => {
       const b = e.target.closest("button[data-restore]");
       if (b) restoreBackup(b.dataset.restore);
     });
-    ["heroClips", "heroFilter", "heroLang", "heroSearch"].forEach((id) => {
+    ["heroClips", "heroFilter", "heroLang", "heroSearch", "heroStories"].forEach((id) => {
       const el = $(id);
       if (el) el.addEventListener("change", () => { el.dataset.touched = "1"; });
     });

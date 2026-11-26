@@ -118,7 +118,7 @@ def _junk(uploads: Path, output: Path, projects: List[Dict[str, Any]], with_tran
             if entry.is_dir() and entry.name not in project_ids:
                 junk.append(entry)
             elif entry.is_dir():
-                for sub in ("slices", "vertical"):
+                for sub in ("slices", "vertical", "top"):
                     d = entry / sub
                     if d.is_dir():
                         junk.extend(f for f in d.iterdir()
@@ -178,7 +178,7 @@ def scan(uploads: Path, output: Path) -> Dict[str, Any]:
             seen_sources.add(_norm(src))
             src_size = _size(Path(src))
         out_dir = output / p["id"]
-        clips = _size(out_dir / "slices")
+        clips = _size(out_dir / "slices") + _size(out_dir / "top")  # «Топ-3» videos are clips made again on demand
         vertical = _size(out_dir / "vertical")
         other = max(0, _size(out_dir) - clips - vertical)
         totals["sources"] += src_size
@@ -287,7 +287,7 @@ def cleanup(
         for p in projects:
             if wanted is not None and p["id"] not in wanted:
                 continue
-            for sub in ("slices", "vertical"):
+            for sub in ("slices", "vertical", "top"):
                 d = output / p["id"] / sub
                 if not d.is_dir():
                     continue

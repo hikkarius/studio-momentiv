@@ -443,3 +443,53 @@ def refine_clips(
     )
     return result
 
+
+
+# ─── Long stories: where to cut one into two parts ───────────────────────────
+
+STORY_PART_MIN = 15.0  # neither part of a story may be shorter
+
+
+def story_split(start: float, end: float, words: list[dict] | None,
+                segment_ends: list[float] | None = None) -> float:
+    """
+    The moment to cut a story into «Частина 1» and «Частина 2»: a sentence end close to the middle
+    (between 35 % and 65 % of the story), the one with the longest pause after it. Without words
+    the middle. Always leaves at least STORY_PART_MIN seconds on each side.
+    """
+    start, end = float(start), float(end)
+    dur = end - start
+    mid = start + dur / 2
+    if dur < 2 * STORY_PART_MIN:
+        return round(mid, 2)
+    lo = max(start + STORY_PART_MIN, start + dur * 0.35)
+    hi = min(end - STORY_PART_MIN, start + dur * 0.65)
+    w = [x for x in _clean_words(words) if start <= x["start"] and x["end"] <= end]
+    if len(w) < 2:
+        return round(mid, 2)
+    flags = _end_flags(w, segment_ends)
+    best: tuple[float, float] | None = None  # (rank, time)
+    for i in range(len(w) - 1):
+        if not flags[i]:
+            continue
+        gap = w[i + 1]["start"] - w[i]["end"]
+        t = w[i]["end"] + min(gap, 0.6) / 2  # inside the pause, never in the next word
+        if not lo <= t <= hi:
+            continue
+        rank = min(gap, 1.5) - abs(t - mid) / dur  # a real pause first, then closeness to the middle
+        if best is None or rank > best[0]:
+            best = (rank, t)
+    return round(best[1] if best else mid, 2)
+
+
+def clamp_split(split: float | None, start: float, end: float) -> float | None:
+    """A saved cut that still fits the story's (maybe re-trimmed) bounds, else None (recompute)."""
+    if split is None:
+        return None
+    try:
+        s = float(split)
+    except (TypeError, ValueError):
+        return None
+    if end - start < 2 * STORY_PART_MIN or not (start + STORY_PART_MIN <= s <= end - STORY_PART_MIN):
+        return None
+    return round(s, 2)

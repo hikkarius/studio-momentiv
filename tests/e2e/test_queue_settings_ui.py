@@ -25,7 +25,7 @@ def clean_queue_and_settings(tmp_path):
     config_loader._assign_in_place(config_loader.app_config, saved_cfg)
 
 
-def _fake_analyze(job_id, project_id, clips_count, filter_mode, engine="whisper_local", language=None, search_mode=None):
+def _fake_analyze(job_id, project_id, clips_count, filter_mode, engine="whisper_local", language=None, search_mode=None, stories=None):
     db.update_project_status(project_id, "ready")
     job_runner.broadcast_update(job_id, {"status": "completed", "progress": 1.0, "message": "Готово!"})
 

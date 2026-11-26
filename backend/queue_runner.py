@@ -223,9 +223,11 @@ def process_next() -> Optional[Dict[str, Any]]:
         db.create_job(job_id, project_id, "analyze")
         db.update_queue_item(item_id, job_id=job_id)
         clips_count = item["clips_count"] or job_runner.auto_clips_count(proj.get("duration") or 0)
+        # «Довгі історії» chosen for this video (passed only then: '' = the setting, read by the worker)
+        extra = {"stories": item["stories"] == "on"} if item.get("stories") in ("on", "off") else {}
         job_runner._run_analyze_worker(job_id, project_id, clips_count, item["filter_mode"],
                                        language=item.get("language") or None,
-                                       search_mode=item.get("search_mode") or None)
+                                       search_mode=item.get("search_mode") or None, **extra)
 
         job = db.get_job(job_id) or {}
         quota = job_runner.pop_quota_hit(job_id)

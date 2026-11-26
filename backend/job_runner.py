@@ -27,9 +27,9 @@ from core import (
 )
 from ai_selector import (
     SEARCH_EXPERIMENTAL, EXPERIMENTAL_MAX_CLIPS, GeminiIncompleteError, GeminiQuotaError,
-    find_clips_experimental, rerank_clips, resolve_search_mode, strong_plan,
+    GeminiUnavailableError, find_clips_experimental, find_stories, rerank_clips, resolve_search_mode, strong_plan,
 )
-from clip_refiner import refine_clips
+from clip_refiner import refine_clips, story_split
 from languages import language_label
 
 log = logging.getLogger("shorts_core")
@@ -171,12 +171,13 @@ def _run_analyze_worker(
     engine: str = "whisper_local",
     language: Optional[str] = None,
     search_mode: Optional[str] = None,
+    stories: Optional[bool] = None,
 ):
     if not _analyze_lock.acquire(blocking=False):
         broadcast_update(job_id, {"status": "queued", "progress": 0.0, "message": "Чекає, поки закінчиться обробка іншого відео..."})
         _analyze_lock.acquire()
     try:
-        _run_analyze_worker_locked(job_id, project_id, clips_count, filter_mode, engine, language, search_mode)
+        _run_analyze_worker_locked(job_id, project_id, clips_count, filter_mode, engine, language, search_mode, stories)
     finally:
         _analyze_lock.release()
 
@@ -196,6 +197,7 @@ def find_clips_for(
     canonical_filter: Any,
     mode: str,
     progress: Callable[[float, str], None] = lambda p, m: None,
+    stories: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Transcript → finished clips (not saved): reaction hints, Gemini, sentence boundaries, re-ranking.
@@ -295,8 +297,53 @@ def find_clips_for(
                                    strong_model=ai_model if experimental else None)
     if hints:
         valid_clips = _apply_signals(valid_clips, hints, boost=experimental)
+    if stories:
+        progress(0.95, "Шукаю довгі історії (1–3 хв)...")
+        valid_clips = valid_clips + find_stories_for(
+            proj, ai_segments, segments, words, detected_lang, canonical_filter, experimental)
     # which Gemini model chose the clips (shown on the video card); clip_ai_model() reads it back
     return [{**c, "_model": ai_model} for c in valid_clips] if ai_model else valid_clips
+
+
+def find_stories_for(
+    proj: Dict[str, Any],
+    ai_segments: List[Dict[str, Any]],
+    segments: List[Dict[str, Any]],
+    words: List[Dict[str, Any]],
+    detected_lang: str,
+    canonical_filter: Any,
+    experimental: bool,
+) -> List[Dict[str, Any]]:
+    """
+    «Довгі історії»: up to clips.max_stories whole stories (story_min_len…story_max_len s), snapped to
+    sentences, each with a suggested cut for «Частина 1/2». Optional extra: when Gemini does not answer,
+    the short clips are kept and the job goes on.
+    """
+    cfg = app_config.clips
+    try:
+        raw = find_stories(
+            client=None, segments=ai_segments, count=cfg.max_stories, min_len=cfg.story_min_len,
+            max_len=cfg.story_max_len, filter_mode=canonical_filter, detected_lang=detected_lang,
+            strong=strong_plan() if experimental else None,
+        )
+    except GeminiUnavailableError as e:
+        log.warning(f"Stories skipped for {proj.get('id')}: Gemini unavailable ({e})")
+        return []
+    except Exception as e:
+        log.warning(f"Stories skipped for {proj.get('id')}: {e}")
+        return []
+    for c in raw:
+        for k in ("hook_text", "title", "reason"):
+            if isinstance(c.get(k), str) and "[реакція:" in c[k]:
+                c[k] = re.sub(r"\[реакція:[^\]]*\]\s*", "", c[k]).strip()
+    rough = validate_clips(raw, proj["duration"], min_len=cfg.story_min_len * 0.75,
+                           max_len=cfg.story_max_len + 30, tolerance=0)
+    found = refine_clips(
+        rough, words, video_duration=proj["duration"], count=cfg.max_stories,
+        min_len=cfg.story_min_len, max_len=cfg.story_max_len, max_overlap=0, segments=segments,
+    )
+    seg_ends = [float(sg["end"]) for sg in segments if isinstance(sg, dict) and "end" in sg]
+    return [{**c, "kind": "story", "split": story_split(c["start"], c["end"], words, seg_ends)} for c in found]
 
 
 def _main_model(clips: List[Dict[str, Any]]) -> str:
@@ -317,6 +364,7 @@ def _run_analyze_worker_locked(
     engine: str = "whisper_local",
     language: Optional[str] = None,
     search_mode: Optional[str] = None,
+    stories: Optional[bool] = None,
 ):
     try:
         broadcast_update(job_id, {"status": "running", "progress": 0.05, "message": "Ініціалізація аналізу відео..."})
@@ -349,6 +397,7 @@ def _run_analyze_worker_locked(
         valid_clips = find_clips_for(
             project_id, proj, segments, words, detected_lang, clips_count, canonical_filter, mode,
             progress=lambda p, m: broadcast_update(job_id, {"status": "running", "progress": p, "message": m}),
+            stories=app_config.studio.find_stories if stories is None else bool(stories),
         )
 
         # 3. Generate structured metadata files in OUTPUT_DIR/{project_id}
@@ -512,9 +561,11 @@ def enqueue_analyze_job(
     engine: str = "whisper_local",
     language: Optional[str] = None,
     search_mode: Optional[str] = None,
+    stories: Optional[bool] = None,
 ) -> str:
-    """Enqueues an analyze job for a project and returns the job ID."""
+    """Enqueues an analyze job for a project and returns the job ID. stories: None = the setting."""
     job_id = _new_job_id(project_id)
     db.create_job(job_id, project_id, "analyze")
-    _executor.submit(_run_analyze_worker, job_id, project_id, clips_count, filter_mode, engine, language, search_mode)
+    _executor.submit(_run_analyze_worker, job_id, project_id, clips_count, filter_mode, engine, language, search_mode,
+                     stories)
     return job_id

@@ -318,9 +318,11 @@ def build_ass(
     hook_round: bool = False,
     hook_stroke: Optional[str] = None,
     hook_pos: Optional[float] = None,
+    part_label: Optional[str] = None,
 ) -> str:
     """
     Builds the .ass subtitle document (1080×1920) for one clip.
+    part_label («Частина 1/2» of a long story): a small dark plate in the top right corner for the whole clip.
     size / hook_size scale the fonts; accent recolours the highlighted & key words; text_color the rest;
     hook_sec=None keeps the title on screen for the whole clip.
     Plates are drawn as vector shapes (square or rounded) from measured word widths, so they can have
@@ -468,6 +470,16 @@ def build_ass(
                 events[before:] = [e.replace("{\\an7\\pos(0,0)", "{\\an7\\pos(0,0)" + fade, 1) for e in events[before:]]
         text = "\\N".join(" ".join(hwords[i] for i in ln) for ln in hlines)
         ev(5, 0.0, until, "Hook", "{\\an8\\pos(540," + str(int(htop)) + ")" + fade + "}" + text)
+
+    if part_label and part_label.strip():
+        pst = CaptionStyle("part", "", "Montserrat Black", 44, True, 0, 0, "none", primary="FFFFFF", outline=0, shadow=0)
+        styles.append(_style_line("Part", pst, align=9))
+        ptxt = _ass_text(part_label.strip().upper())
+        pw = text_width(pst.font, False, ptxt, pst.size)
+        right, top, ppad = OUT_W - 48, 64, 16
+        plates(6, 0.0, duration, [(right - pw - ppad, top - ppad * 0.6, right + ppad, top + pst.size + ppad * 0.6)],
+               "111111", 0x33, (pst.size + ppad) * 0.32, None, 0)
+        ev(8, 0.0, duration, "Part", "{\\an9\\pos(" + str(right) + "," + str(top) + ")}" + ptxt)
 
     head = (
         "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 2\n"
