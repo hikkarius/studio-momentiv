@@ -324,7 +324,12 @@ def _run_ytdlp_with_progress(cmd: list, env: dict, progress_cb: Callable[[float,
 
     t_err = threading.Thread(target=read, args=(proc.stderr, err_lines), daemon=True)
     t_err.start()
-    read(proc.stdout, out_lines)
+    try:
+        read(proc.stdout, out_lines)
+    except BaseException:  # «Скасувати»: progress_cb raised job_runner.Cancelled
+        proc.kill()
+        proc.wait(timeout=30)
+        raise
     try:
         proc.wait(timeout=3600)
     except subprocess.TimeoutExpired:

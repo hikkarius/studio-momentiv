@@ -2024,9 +2024,24 @@ def remove_from_queue(item_id: str):
     if not item:
         raise HTTPException(status_code=404, detail="У черзі такого немає.")
     if item["status"] in db.QUEUE_ACTIVE:
-        raise HTTPException(status_code=409, detail="Це відео вже обробляється, його не можна зупинити посередині.")
+        raise HTTPException(status_code=409, detail="Це відео зараз обробляється: спершу натисни «Скасувати».")
     db.delete_queue_item(item_id)
     return {"status": "removed"}
+
+
+@app.post("/api/queue/{item_id}/cancel")
+def cancel_queue_item(item_id: str):
+    """«Скасувати» on a card: a waiting video leaves the queue, a running one stops at its next
+    progress report (seconds, or up to a minute on a slow graphics card) and can be started again."""
+    item = db.get_queue_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="У черзі такого немає.")
+    if item["status"] in db.QUEUE_PENDING:
+        db.delete_queue_item(item_id)
+        return {"status": "removed"}
+    if not queue_runner.request_cancel(item_id):
+        raise HTTPException(status_code=409, detail="Це відео вже не обробляється.")
+    return {"status": "cancelling"}
 
 
 @app.post("/api/queue/{item_id}/retry")
@@ -2034,8 +2049,8 @@ def retry_queue_item(item_id: str):
     item = db.get_queue_item(item_id)
     if not item:
         raise HTTPException(status_code=404, detail="У черзі такого немає.")
-    if item["status"] != "failed":
-        raise HTTPException(status_code=409, detail="Повторити можна лише те, що не вдалося.")
+    if item["status"] not in ("failed", "cancelled"):
+        raise HTTPException(status_code=409, detail="Повторити можна лише те, що не вдалося або скасоване.")
     db.delete_queue_item(item_id)
     new = db.add_queue_item(queue_runner.new_item_id(), source_url=item["source_url"], project_id=item["project_id"],
                             title=item["title"], clips_count=item["clips_count"], filter_mode=item["filter_mode"],

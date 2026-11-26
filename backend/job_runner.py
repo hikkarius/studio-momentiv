@@ -67,8 +67,29 @@ def unregister_subscriber(job_id: str, q: asyncio.Queue):
                 del _subscribers[job_id]
 
 
+class Cancelled(BaseException):
+    """The user pressed «Скасувати». Raised from the next progress report of the cancelled work, so
+    it stops between Whisper segments or download lines. A BaseException on purpose: the many
+    «except Exception» fallbacks on the way (GPU → CPU, audio → video) must not swallow it."""
+
+
+_cancelled_jobs: set = set()
+_cancel_lock = threading.Lock()
+
+
+def cancel_job(job_id: str) -> None:
+    """Asks a running analysis to stop at its next progress report."""
+    with _cancel_lock:
+        _cancelled_jobs.add(job_id)
+
+
 def broadcast_update(job_id: str, data: Dict[str, Any]):
-    """Broadcasts update to SSE queues and updates database thread-safely."""
+    """Broadcasts update to SSE queues and updates database thread-safely.
+    A progress report of a cancelled job raises Cancelled instead."""
+    if data.get("status") == "running":
+        with _cancel_lock:
+            if job_id in _cancelled_jobs:
+                raise Cancelled()
     db.update_job(
         job_id,
         status=data.get("status"),
@@ -177,9 +198,16 @@ def _run_analyze_worker(
         broadcast_update(job_id, {"status": "queued", "progress": 0.0, "message": "Чекає, поки закінчиться обробка іншого відео..."})
         _analyze_lock.acquire()
     try:
+        with _cancel_lock:
+            cancelled = job_id in _cancelled_jobs
+        if cancelled:
+            broadcast_update(job_id, {"status": "cancelled", "progress": 0.0, "message": "Скасовано"})
+            return
         _run_analyze_worker_locked(job_id, project_id, clips_count, filter_mode, engine, language, search_mode, stories)
     finally:
         _analyze_lock.release()
+        with _cancel_lock:
+            _cancelled_jobs.discard(job_id)
 
 
 def _new_job_id(project_id: str) -> str:
@@ -366,6 +394,7 @@ def _run_analyze_worker_locked(
     search_mode: Optional[str] = None,
     stories: Optional[bool] = None,
 ):
+    status_before = "uploaded"
     try:
         broadcast_update(job_id, {"status": "running", "progress": 0.05, "message": "Ініціалізація аналізу відео..."})
         proj = db.get_project(project_id)
@@ -373,6 +402,7 @@ def _run_analyze_worker_locked(
             raise ValueError(f"Проєкт {project_id} не знайдено.")
 
         video_path = proj["source_path"]
+        status_before = proj.get("status") or "uploaded"
         db.update_project_status(project_id, "analyzing")
 
         canonical_filter = resolve_filter_mode(filter_mode)
@@ -455,6 +485,11 @@ def _run_analyze_worker_locked(
             "message": f"Готово! Знайдено {len(valid_clips)} вірусних моментів.",
         })
 
+    except Cancelled:
+        log.info(f"Analyze job {job_id} cancelled by the user.")
+        if db.get_project(project_id):
+            db.update_project_status(project_id, status_before if status_before != "analyzing" else "uploaded")
+        broadcast_update(job_id, {"status": "cancelled", "progress": 0.0, "message": "Скасовано"})
     except Exception as e:
         log.exception(f"Analyze job {job_id} failed: {e}")
         if isinstance(e, (GeminiQuotaError, GeminiIncompleteError)):
