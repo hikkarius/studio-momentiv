@@ -266,3 +266,16 @@ a.linkish { color: var(--orange-text); font-weight: 700; text-decoration: none; 
 .set-models span:last-child { margin-left: auto; color: var(--text-muted); font-size: var(--fs-sm); }
 .set-models .ok span:last-child { color: var(--ok); }
 @media (max-width: 640px) { .set-models span:last-child { margin-left: 38px; width: 100%; } }
+
+/* ═══ Як у макетах 2026-11-25 (вирівнювання 2026-11-26) ═══ */
+/* «✓ Збережено» — зелена мітка біля заголовка розділу */
+.settings-saved { padding: 4px 12px; border-radius: var(--r-pill); background: var(--ok-soft); font-size: var(--fs-sm); font-weight: 700; }
+.settings-saved.bad { background: var(--danger-soft); }
+/* «Місце на диску»: одна кольорова смужка, під нею короткий підпис в один рядок */
+.disk-bar { height: 12px; border-radius: var(--r-pill); }
+.disk-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.disk-legend li { display: inline-flex; align-items: center; gap: 7px; }
+.disk-legend i { width: 9px; height: 9px; border-radius: 50%; }
+.disk-legend span { flex-direction: row; color: var(--text-muted); }
+.disk-legend small { display: none; }
+.disk-legend b { font-weight: 600; color: var(--text-main); }
