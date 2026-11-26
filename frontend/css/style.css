@@ -1198,3 +1198,41 @@ body:not(.home-empty) .home-how { display: none !important; }
 /* Phone: the link field keeps its placeholder on one line */
 @media (max-width: 640px) { .hero-input { font-size: var(--fs-md); } }
 .vc-model { white-space: nowrap; }
+
+/* ═══ Як у макетах 2026-11-25 (вирівнювання 2026-11-26) ═══ */
+/* Лінійні іконки зі спрайта в index.html */
+svg.i { width: 1.15em; height: 1.15em; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: -.2em; }
+.btn svg.i { margin-right: 6px; }
+.vc-menu button { display: flex; align-items: center; gap: 9px; }
+.vc-menu button svg.i { color: var(--text-muted); } .vc-menu .danger svg.i { color: inherit; }
+/* Головна: «Додай відео» звичайними літерами, справа підказка про відео */
+.home-add-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.home-add-title { text-transform: none; letter-spacing: 0; font-family: var(--font-sans); font-weight: 800; font-size: var(--fs-xl); }
+.home-add-note { font-size: var(--fs-sm); color: var(--text-muted); }
+/* поле посилання окремо від кнопок, з іконкою; «В чергу» найбільша кнопка */
+#step1Card.home-add .hero-source { padding: 0; border: 0; background: none; box-shadow: none; gap: 10px; align-items: stretch; }
+#step1Card.home-add .hero-source:focus-within { box-shadow: none; }
+.hero-field { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; padding: 0 6px 0 14px; border-radius: var(--r-md); background: var(--bg-card-alt); border: 1px solid var(--border-color); cursor: text; }
+.hero-field:focus-within { border-color: var(--accent-orange); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / .3); }
+.hero-field-ic { color: var(--text-muted); }
+.hero-field .hero-input { flex: 1; font-size: var(--fs-md); padding: 13px 8px; }
+#step1Card .hero-file, #step1Card .hero-go { display: inline-flex; align-items: center; justify-content: center; padding: 12px 22px; font-size: var(--fs-md); }
+#step1Card .hero-go { padding-inline: 26px; }
+@media (max-width: 760px) { .hero-field { flex-basis: 100%; } }
+.home-opts-edit { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
+.home-opts-edit:hover { color: var(--text-strong); }
+.home-drop-hint { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fs-sm); }
+/* «Твої відео  3 відео  3 у черзі» */
+.videos-head h2 { display: flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-family: var(--font-sans); font-weight: 800; font-size: var(--fs-lg); }
+.videos-head h2 .vh-pill { font-family: var(--font-sans); font-weight: 700; font-size: var(--fs-sm); padding: 3px 10px; border-radius: var(--r-pill); background: var(--bg-card-alt); border: 1px solid var(--border-color); color: var(--text-main); }
+.videos-head h2 .vh-pill.q { background: var(--info-soft); border-color: transparent; color: var(--info-text); }
+.videos-head h2 .vh-pill[hidden] { display: none; }
+/* мітки стану з крапкою замість емодзі */
+.vc-badge { display: inline-flex; align-items: center; gap: 6px; }
+.vc-badge:is(.info, .new, .work, .done, .bad)::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.vc-badge.info { background: var(--info-solid); color: var(--white); }
+.vc-badge.work { background: rgb(var(--scrim-rgb) / .72); color: var(--white); }
+.q-item .q-ico { display: grid; place-items: center; font-size: 40px; color: var(--text-muted); opacity: .8; }
+.q-item.failed .q-ico { color: var(--danger-text); opacity: 1; }
+.q-unqueue { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 4px 0; font: inherit; font-size: var(--fs-sm); font-weight: 700; color: var(--text-muted); cursor: pointer; }
+.q-unqueue:hover { color: var(--danger-text); }

@@ -318,7 +318,7 @@ const Settings = (() => {
   }
 
   // ── saving ──────────────────────────────────────────────────────────────────
-  async function save(patch, okText = "Збережено ✓") {
+  async function save(patch, okText = "✓ Збережено") {
     try {
       const res = await fetch("/api/settings", {
         method: "POST",
@@ -547,7 +547,7 @@ const Settings = (() => {
     $("diskBar").innerHTML = CATS.filter((c) => t[c.key] > 0)
       .map((c) => `<i style="flex:${t[c.key] / all};background:${c.color}" title="${c.label}: ${fmtBytes(t[c.key])}"></i>`).join("");
     $("diskLegend").innerHTML = CATS.map((c) => `
-      <li><i style="background:${c.color}"></i><span>${c.label}<small>${c.note}</small></span><b>${fmtBytes(t[c.key])}</b></li>`).join("");
+      <li title="${c.label}: ${c.note}"><i style="background:${c.color}"></i><span>${c.label}<small>${c.note}</small></span><b>${fmtBytes(t[c.key])}</b></li>`).join("");
     $("diskJunk").textContent = t.junk ? `· ${fmtBytes(t.junk)}` : "· чисто";
     $("btnCleanJunk").disabled = !t.junk;
     $("diskClips").textContent = `· ${fmtBytes(t.clips + t.vertical)}`;

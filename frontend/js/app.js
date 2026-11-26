@@ -3,6 +3,9 @@
  * Fast, interactive, zero-rendering moments exploration & metadata management.
  */
 
+/** A line icon from the sprite in index.html (same set as the mockups). */
+const icon = (name, cls = "") => `<svg class="i${cls ? " " + cls : ""}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+
 let currentProject = null;
 let currentClips = [];
 let activeEventSource = null;

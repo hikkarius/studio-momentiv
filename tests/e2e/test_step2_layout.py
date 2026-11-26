@@ -82,7 +82,8 @@ def test_view_switch_in_header_and_back(page, studio, project):
     assert page.locator(".vx-hview").is_visible()
     page.click("#vxToList")
     page.locator("#vxList").wait_for(state="visible")
-    assert page.locator(".vx-lhint").is_visible()
+    assert "відкриває" in page.locator("#vxViewHint").inner_text()
+    assert page.locator(".vx-hview button[aria-pressed='true']").inner_text().strip() == "Усі разом"
     page.click("#vxToOne")
     page.locator("#vxPhone").wait_for(state="visible")
     assert page.locator(".vx-hview button[aria-pressed='true']").inner_text() == "По одному"

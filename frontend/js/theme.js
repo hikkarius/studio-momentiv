@@ -7,7 +7,7 @@
 const StudioTheme = (() => {
   const KEY = "studio-theme";
   const MODES = ["system", "light", "dark"];
-  const LABELS = { light: "☀ Світла", dark: "☾ Темна", system: "◐ Тема: авто" };
+  const LABELS = { light: "Тема: світла", dark: "Тема: темна", system: "Тема: авто" };
 
   function get() {
     try {
@@ -24,7 +24,7 @@ const StudioTheme = (() => {
     document.querySelectorAll(".theme-switch button").forEach((b) => {
       b.setAttribute("aria-pressed", String(b.dataset.theme === mode));
     });
-    document.querySelectorAll(".theme-menu-cur").forEach((el) => { el.textContent = LABELS[mode]; });
+    document.querySelectorAll(".theme-menu-cur").forEach((el) => { el.innerHTML = `<svg class="i" aria-hidden="true"><use href="#i-theme"/></svg><span></span>`; el.lastChild.textContent = LABELS[mode]; });
   }
 
   function openMenu(menu, on) {

@@ -883,3 +883,46 @@
   .top3-grip, .top3-x { display: none; }
   .top3-list img { width: 72px; height: 40px; }
 }
+
+/* ═══ Як у макетах 2026-11-25 (вирівнювання 2026-11-26) ═══ */
+/* Крок 1: «✓ В роботі» окремою кнопкою поруч зі статусом, бо це найчастіша дія */
+.ed-keep { display: inline-flex; align-items: center; gap: 7px; padding: 9px 18px; border-radius: var(--r-pill); border: 1px solid transparent; cursor: pointer; white-space: nowrap;
+  background: var(--ed-accent-grad); color: var(--ed-accent-ink); font: 700 var(--fs-md) var(--ed-sans); }
+.ed-keep:hover:not(:disabled) { filter: brightness(1.06); }
+.ed-keep:disabled { background: transparent; border-color: var(--ed-line); color: var(--ed-muted); cursor: default; }
+/* «Шукати кліпи заново»: тихе посилання в шапці, а не кнопка */
+.ed-reanalyze { border-color: transparent; padding: 7px 10px; }
+.ed-reanalyze:hover { border-color: transparent; background: var(--ed-panel); }
+.ed-re-ic { border: 0; width: 18px; height: 18px; }
+/* Крок 2: «По одному / Усі разом» у шапці, з підказкою */
+#vxViewSw, .vx-hhint { display: none; }
+#editor.is-vx:not(.vx-none) #vxViewSw { display: flex; padding: 3px; border: 1px solid var(--ed-line); border-radius: var(--r-md); background: var(--ed-panel); align-self: center; }
+#editor.is-vx:not(.vx-none) .vx-hhint { display: block; }
+#vxViewSw button { border-color: transparent; background: transparent; padding: 7px 14px; }
+.vx-hhint { align-self: center; max-width: 230px; font-size: var(--fs-xs); line-height: 1.35; color: var(--ed-muted); }
+@media (max-width: 1279px) { #editor.is-vx:not(.vx-none) .vx-hhint { display: none; } }
+/* Субтитри: 4 маленькі плитки в ряд, щоб розмір, висоту й кольори було видно без гортання */
+#vxStyle { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+#vxStyle button { gap: 4px; font-size: var(--fs-xs); }
+#vxStyle .vx-tile { height: 44px; border-radius: var(--r-md); font-size: 11px; overflow: hidden; }
+#vxStyle .vx-tile:is(.vx-t-hl, .vx-t-kar, .vx-t-one, .vx-t-gold) { -webkit-text-stroke-width: 2px; }
+#vxStyle .vx-t-none { font-size: 10px; white-space: normal; text-align: center; line-height: 1.1; }
+@media (max-width: 560px) { .ed-decide { flex-wrap: wrap; } .ed-decide > * { flex: 1 1 auto; justify-content: center; } }
+/* Картинки кроків: лінійна іконка в рамці, як у макеті */
+.ed-mode .ed-ill { display: grid; place-items: center; width: 72px; height: 52px; border: 1.5px solid var(--ed-line); border-radius: var(--r-md); background: var(--ed-panel); color: var(--ed-muted); }
+.ed-mode .ed-ill svg.i { width: 26px; height: 26px; }
+.ed-mode [aria-selected="true"] .ed-ill { border-color: var(--ed-accent); color: var(--ed-accent-text); }
+#editor.rail-mini .ed-mode .ed-ill { width: 44px; height: 36px; }
+@media (max-width: 760px) { .ed-mode .ed-ill { width: 40px; height: 30px; } .ed-mode .ed-ill svg.i { width: 18px; height: 18px; } }
+/* іконки на кнопках кроку 1 і 2 */
+.ed-btn svg.i, .ed-bigdl svg.i, .vx-big svg.i, .ed-silence svg.i, .ed-keep svg.i { margin-right: 6px; }
+.ed-bigdl { display: flex; align-items: center; }
+.ed-bigdl small { margin-left: auto; }
+.vx-tabs [role="tab"] > span svg.i, .vx-tab > span svg.i { width: 20px; height: 20px; }
+.vx-empty-ic svg.i { width: 54px; height: 54px; stroke-width: 1.5; color: var(--ed-muted); }
+.ed-re-ic svg.i { width: 16px; height: 16px; }
+.ed-pen svg.i { width: 15px; height: 15px; }
+.ed-rail-back svg.i { margin-right: 2px; }
+.theme-menu-cur { display: inline-flex; align-items: center; gap: 8px; }
+.settings-tabs [role="tab"] i svg.i { width: 17px; height: 17px; }
+.vx-seg button svg.i { margin-right: 6px; }

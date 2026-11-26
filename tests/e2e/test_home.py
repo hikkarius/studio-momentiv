@@ -151,7 +151,7 @@ def test_video_count_includes_the_queue(page, studio, project):
     db.add_queue_item("e2e_q1", "https://www.youtube.com/watch?v=aaaaaaaaaaa", None, "Стендап", 0)
     try:
         page.goto(studio["url"] + "/")
-        page.wait_for_function("document.getElementById('historyCount').textContent.includes('у черзі 1')")
-        assert page.locator("#historyCount").text_content() == "1 · у черзі 1"
+        page.wait_for_function("document.getElementById('historyQueue').textContent.includes('1 у черзі')")
+        assert page.locator("#historyCount").text_content() == "1 відео"
     finally:
         db.delete_queue_item("e2e_q1")
