@@ -644,36 +644,32 @@
 
   <!-- ═══ Перший запуск: ключ Gemini ═══ -->
   <div class="settings-backdrop welcome-backdrop" id="welcomeScreen" hidden>
-    <section class="settings-sheet welcome-sheet" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle">
-      <header class="settings-head">
-        <h2 id="welcomeTitle">Вітаю у Студії моментів!</h2>
+    <section class="welcome-sheet" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle">
+      <header class="welcome-head">
+        <span class="welcome-ic"><svg class="i" aria-hidden="true"><use href="#i-spark"/></svg></span>
+        <div><h2 id="welcomeTitle">Вітаю у Студії моментів!</h2><span class="welcome-sub">Залишився один крок: ключ Google Gemini</span></div>
       </header>
-      <div class="welcome-body">
-        <p class="welcome-lead">Студія сама знаходить у довгих відео найцікавіші моменти для коротких кліпів. Для цього їй потрібен безкоштовний ключ Google Gemini. Він робиться один раз і займає 2 хвилини.</p>
-        <ol class="welcome-steps">
-          <li><b>Відкрий Google AI Studio</b> і увійди у свій Google-акаунт.
-            <a class="btn btn-secondary btn-sm" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Відкрити AI Studio ↗</a></li>
-          <li><b>Натисни «Create API key»</b> (Створити ключ). Якщо спитає проєкт, вибери будь-який або створи новий. Потім натисни на ключ і скопіюй його.</li>
-          <li><b>Встав ключ сюди</b> і натисни «Перевірити й зберегти».
-            <div class="set-key welcome-key">
-              <input type="password" id="welcomeKey" class="input-text" placeholder="Встав ключ Gemini" autocomplete="off" spellcheck="false">
-              <button type="button" class="btn btn-primary" id="welcomeSave" onclick="Welcome.saveKey()">Перевірити й зберегти</button>
-            </div>
-            <div class="welcome-msg" id="welcomeMsg" role="status" aria-live="polite"></div>
-            <button type="button" class="btn btn-secondary welcome-later" onclick="Welcome.close()">Пізніше: спершу подивлюсь студію</button>
-          </li>
-        </ol>
-        <div class="welcome-gpu" id="welcomeGpu"></div>
+      <p class="welcome-lead">Студія сама знаходить у довгих відео найцікавіші моменти. Для цього потрібен безкоштовний ключ Gemini. Він робиться один раз і займає 2 хвилини.</p>
+      <ol class="welcome-steps">
+        <li>Відкрий Google AI Studio і увійди у свій Google-акаунт.</li>
+        <li>Натисни «Create API key». Якщо спитає проєкт, обери будь-який.</li>
+        <li>Скопіюй ключ і встав нижче.</li>
+        <li class="welcome-open"><a class="btn btn-secondary btn-sm" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener"><svg class="i" aria-hidden="true"><use href="#i-ext"/></svg>Відкрити AI Studio</a></li>
+      </ol>
+      <label class="welcome-field" for="welcomeKey"><svg class="i" aria-hidden="true"><use href="#i-key"/></svg><input type="password" id="welcomeKey" placeholder="Встав ключ Gemini (починається з AIza…)" autocomplete="off" spellcheck="false" aria-label="Ключ Gemini"></label>
+      <div class="welcome-msg" id="welcomeMsg" role="status" aria-live="polite"></div>
+      <button type="button" class="btn btn-primary welcome-save" id="welcomeSave" onclick="Welcome.saveKey()"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>Перевірити й зберегти</button>
+      <div class="welcome-row">
+        <button type="button" class="welcome-later" onclick="Welcome.close()">Пізніше: спершу подивлюсь студію</button>
         <details class="welcome-more">
           <summary>Що треба знати про безкоштовний ключ</summary>
           <p>Безкоштовний ключ має ліміт запитів на день. Для кількох відео на день цього вистачає. Якщо ліміт закінчився, студія про це скаже, і можна буде спробувати пізніше.</p>
           <p>На безкоштовному тарифі Google може використовувати запити для покращення своїх моделей. Не обробляй відео, які мають лишатися приватними.</p>
-          <p>Ключ зберігається тільки на цьому комп'ютері. Змінити його можна в «Налаштування → Розпізнавання й ШІ».</p>
+          <p>Ключ зберігається тільки на цьому комп'ютері. Змінити його можна в «Налаштування → Ключ і розпізнавання».</p>
         </details>
       </div>
-      <footer class="settings-foot">
-        <span id="welcomeVersion" hidden></span>
-      </footer>
+      <div class="welcome-gpu" id="welcomeGpu"></div>
+      <span id="welcomeVersion" hidden></span>
     </section>
   </div>
 

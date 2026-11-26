@@ -54,9 +54,12 @@ const Welcome = (() => {
   async function showGpu() {
     try {
       const h = await (await fetch("/api/health")).json();
-      $("welcomeGpu").textContent = h.has_cuda
-        ? `🟢 Знайдено відеокарту ${h.gpu_name}: відео оброблятимуться швидко.`
-        : "🟡 Відеокарту NVIDIA не знайдено. Студія працюватиме, але повільніше: відео на годину ≈ 30–40 хвилин.";
+      const g = $("welcomeGpu");
+      g.classList.toggle("ok", !!h.has_cuda);
+      g.innerHTML = icon("monitor") + "<span></span>";
+      g.lastChild.textContent = h.has_cuda
+        ? `Знайдено відеокарту ${h.gpu_name}: відео оброблятимуться швидко.`
+        : "Відеокарту NVIDIA не знайдено. Студія працюватиме, але повільніше: година відео ≈ 30–40 хв.";
     } catch (_) { /* not critical */ }
   }
 

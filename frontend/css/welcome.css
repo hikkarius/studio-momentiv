@@ -1,24 +1,33 @@
-/* welcome.css — first-run «встав ключ Gemini» screen and the «Оновити» pill. Uses style.css tokens. */
-.welcome-sheet { max-width: 640px; }
-.welcome-body { padding: 6px 24px 18px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
+/* welcome.css — first-run «встав ключ Gemini» window (one column, as in the mockups) and the «Оновити» pill. Uses tokens.css. */
+.welcome-sheet { width: min(600px, 100%); margin: 24px auto; padding: 32px; display: flex; flex-direction: column; gap: 18px; background: var(--bg-card); border: 1px solid rgb(var(--tint) / .16); border-radius: var(--r-lg); box-shadow: 0 30px 80px rgb(var(--scrim-rgb) / .45); }
+.welcome-head { display: flex; align-items: center; gap: 12px; }
+.welcome-ic { flex: none; width: 40px; height: 40px; border-radius: var(--r-md); display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-text); }
+.welcome-head h2 { margin: 0; font: 400 var(--fs-2xl) var(--font-head); color: var(--text-strong); }
+.welcome-sub { color: var(--text-muted); font-size: var(--fs-md); }
 .welcome-lead { margin: 0; color: var(--text-main); line-height: 1.55; }
-.welcome-steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 14px; line-height: 1.5; }
-.welcome-steps li { padding-left: 4px; }
-.welcome-steps li > .btn { display: inline-flex; margin-top: 8px; }
-.welcome-steps b { color: var(--text-strong); }
-.welcome-key { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
-.welcome-key .input-text { flex: 1; min-width: 200px; }
-.welcome-msg { font-size: var(--fs-md); margin-top: 8px; min-height: 1.2em; }
-.welcome-msg.ok { color: var(--accent-emerald); }
-.welcome-msg.err { color: var(--danger-text); }
-.welcome-gpu { font-size: var(--fs-md); padding: 10px 12px; border-radius: var(--r-md); background: var(--bg-card-alt); border: 1px solid var(--border-color); color: var(--text-main); }
-.welcome-gpu:empty { display: none; }
-.welcome-more { font-size: var(--fs-md); color: var(--text-muted); }
-.welcome-more summary { cursor: pointer; font-weight: 600; color: var(--text-main); }
+.welcome-steps { margin: 0; padding: 16px 16px 16px 36px; display: flex; flex-direction: column; gap: 8px; line-height: 1.45; border-radius: var(--r-md); background: var(--bg-card-alt); border: 1px solid var(--border-color); }
+.welcome-steps li::marker { font-weight: 800; color: var(--text-strong); }
+.welcome-steps .welcome-open { list-style: none; margin-left: -20px; margin-top: 4px; }
+.welcome-steps .btn { display: inline-flex; align-items: center; text-decoration: none; }
+.welcome-field { display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 14px; border-radius: var(--r-md); background: var(--bg-card-alt); border: 1px solid var(--border-color); color: var(--text-muted); cursor: text; }
+.welcome-field:focus-within { border-color: var(--accent-orange); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / .3); }
+.welcome-field input { flex: 1; min-width: 0; border: 0; background: none; font: inherit; font-size: var(--fs-md); color: var(--text-main); outline: 0; }
+.welcome-msg { font-size: var(--fs-md); margin-top: -8px; }
+.welcome-msg:empty { display: none; }
+.welcome-msg.ok { color: var(--accent-emerald); font-weight: 700; }
+.welcome-msg.err { color: var(--danger-text); padding: 10px 12px; border-radius: var(--r-md); background: var(--danger-soft); margin-top: 0; }
+.welcome-save { display: inline-flex; align-items: center; justify-content: center; width: 100%; padding: 14px 22px; font-size: var(--fs-lg); }
+.welcome-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.welcome-later { border: 1px solid var(--border-color); background: none; padding: 7px 12px; border-radius: var(--r-sm); font: inherit; font-size: var(--fs-sm); font-weight: 700; color: var(--text-main); cursor: pointer; }
+.welcome-later:hover { border-color: var(--text-muted); }
+.welcome-more { font-size: var(--fs-sm); color: var(--text-muted); max-width: 100%; }
+.welcome-more[open] { flex-basis: 100%; }
+.welcome-more summary { cursor: pointer; padding: 7px 0; }
 .welcome-more p { margin: 8px 0 0; line-height: 1.5; }
+.welcome-gpu { display: flex; align-items: center; gap: 10px; font-size: var(--fs-sm); padding: 10px 12px; border-radius: var(--r-md); background: rgb(var(--warn-rgb) / .1); border: 1px solid rgb(var(--warn-rgb) / .45); color: var(--text-main); }
+.welcome-gpu svg.i { color: var(--warn); }
+.welcome-gpu.ok { background: var(--ok-soft); border-color: rgb(var(--ok-rgb) / .45); } .welcome-gpu.ok svg.i { color: var(--ok); }
+.welcome-gpu:empty { display: none; }
 .update-pill { padding: 7px 14px; font-size: var(--fs-sm); }
 .update-pill[hidden] { display: none; }
-@media (max-width: 600px) { .welcome-body { padding: 6px 16px 16px; } }
-
-/* «Пізніше» sits under the key field as a normal quiet button; the version is in «Про студію» */
-.welcome-later { align-self: flex-start; margin-top: 4px; }
+@media (max-width: 600px) { .welcome-sheet { margin: 0; padding: 20px 16px; border-radius: 0; min-height: 100vh; } }
