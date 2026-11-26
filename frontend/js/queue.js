@@ -250,8 +250,8 @@ const Queue = (() => {
 
   const STATUS = {
     waiting: "У черзі",
-    downloading: "⏳ Обробляється",
-    analyzing: "⏳ Обробляється",
+    downloading: "Обробляється",
+    analyzing: "Обробляється",
     failed: "Не вдалося",
     limit: "⏸ Чекає на Gemini",
   };
@@ -410,22 +410,22 @@ const Queue = (() => {
           <div class="vc-menu" role="menu" hidden>
             <button type="button" role="menuitem" data-move="${it.id}:-1" ${wIndex <= 0 ? "disabled" : ""}>↑ Раніше в черзі</button>
             <button type="button" role="menuitem" data-move="${it.id}:1" ${wIndex >= waiting.length - 1 ? "disabled" : ""}>↓ Пізніше в черзі</button>
-            <button type="button" role="menuitem" data-remove="${it.id}" class="danger">✕ Прибрати з черги</button>
           </div>` : "";
       if (it.no_space) badge = "Немає місця";
-      const actions = it.status === "limit" && pIndex === 0 ? `
+      const actions = it.status === "waiting" ? `
+            <div class="q-actions"><button type="button" class="q-unqueue" data-remove="${it.id}">${icon("close")}Прибрати з черги</button></div>` : it.status === "limit" && pIndex === 0 ? `
             <div class="q-actions">
-              <button type="button" class="btn btn-primary btn-sm" data-resume="${it.id}">↻ Спробувати зараз</button>
+              <button type="button" class="btn btn-primary btn-sm" data-resume="${it.id}">${icon("refresh")}Спробувати зараз</button>
               <button type="button" class="btn btn-secondary btn-sm" data-remove="${it.id}">Прибрати</button>
             </div>` : it.status === "failed" ? `
             <div class="q-actions">${it.no_space ? FREE_BTN : ""}
-              <button type="button" class="btn ${it.no_space ? "btn-secondary" : "btn-primary"} btn-sm" data-retry="${it.id}">↻ Ще раз</button>
+              <button type="button" class="btn ${it.no_space ? "btn-secondary" : "btn-primary"} btn-sm" data-retry="${it.id}">${icon("refresh")}Ще раз</button>
               <button type="button" class="btn btn-secondary btn-sm" data-remove="${it.id}">Прибрати</button>
             </div>` : "";
       cards.push(`
         <li class="q-item video-card ${it.status}">
-          <div class="history-thumb-wrap q-thumb">${over ? "" : `<span class="q-ico">${it.source_url && !it.project_id ? "🔗" : "🎬"}</span>`}${thumb}${over}</div>
-          <span class="vc-badge${it.status === "failed" ? " bad" : it.status === "limit" ? " warn" : ""}">${escapeHtml(badge)}</span>${menu}
+          <div class="history-thumb-wrap q-thumb">${over ? "" : `<span class="q-ico">${icon(it.status === "failed" ? "alert" : it.source_url && !it.project_id ? "link" : "play")}</span>`}${thumb}${over}</div>
+          <span class="vc-badge${it.status === "failed" ? " bad" : it.status === "limit" ? " warn" : busy ? " info" : " plain"}">${escapeHtml(badge)}</span>${menu}
           <div class="history-details">
             <span class="history-item-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
             <span class="video-card-meta">${it.status === "failed" ? errorSummaryHtml(meta) : escapeHtml(meta)}</span>${actions}

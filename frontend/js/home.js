@@ -25,12 +25,12 @@ const Home = (() => {
   }
 
   const BADGE = {
-    busy: ["⏳ Обробляється", ""],
+    busy: ["Обробляється", "info"],
     failed: ["Не вдалося", "bad"],
     empty: ["Без кліпів", ""],
-    new: ["● Нове відео", "new"],
-    work: ["✂ Розбираю", ""],
-    done: ["✓ Розібрано", "done"],
+    new: ["Нове відео", "new"],
+    work: ["Розбираю", "work"],
+    done: ["Розібрано", "done"],
   };
 
   /** gemini-4-hydrogen → Gemini 4 Hydrogen (same as backend/gemini_models.pretty_name). */
@@ -131,15 +131,15 @@ const Home = (() => {
         </div>
       </div>
       ${st === "failed" ? `<div class="q-actions vc-acts">
-        <button type="button" class="btn btn-primary btn-sm" data-act="retry">↻ Ще раз</button>
+        <button type="button" class="btn btn-primary btn-sm" data-act="retry">${icon("refresh")}Ще раз</button>
         <button type="button" class="btn btn-secondary btn-sm" data-act="delete">Видалити</button>
       </div>` : ""}
       <span class="vc-badge ${badgeCls}">${badge}</span>
       <button type="button" class="vc-dots" aria-haspopup="true" aria-expanded="false" title="Дії з відео" aria-label="Дії з відео">⋯</button>
       <div class="vc-menu" role="menu" hidden>
-        ${total ? `<button type="button" role="menuitem" data-act="open">Відкрити</button>` : ""}
-        <button type="button" role="menuitem" data-act="again">↻ ${total ? "Шукати кліпи заново" : "Знайти кліпи"}</button>
-        <button type="button" role="menuitem" data-act="delete" class="danger">🗑 Видалити</button>
+        ${total ? `<button type="button" role="menuitem" data-act="open">${icon("eye")}Відкрити</button>` : ""}
+        <button type="button" role="menuitem" data-act="again">${icon("refresh")}${total ? "Шукати кліпи заново" : "Знайти кліпи"}</button>
+        <button type="button" role="menuitem" data-act="delete" class="danger">${icon("trash")}Видалити</button>
       </div>`;
     const img = el.querySelector(".history-thumb-img");
     img.addEventListener("error", () => { img.style.display = "none"; img.nextElementSibling.style.display = "flex"; });
@@ -213,7 +213,9 @@ const Home = (() => {
     // «Твої відео 3 · у черзі 2»: every card in the grid is counted once
     const hide = queuedIds();
     const own = projects.filter((p) => !hide.has(p.id)).length;
-    $("historyCount").textContent = queueCount ? `${own} · у черзі ${queueCount}` : String(own);
+    $("historyCount").textContent = `${own} відео`;
+    $("historyQueue").textContent = `${queueCount} у черзі`;
+    $("historyQueue").hidden = !queueCount;
     document.body.classList.toggle("home-empty", loaded && !any);
     fitDropHint();
     $("historyCard").hidden = !any;
@@ -235,9 +237,10 @@ const Home = (() => {
     const l = $("heroLang");
     const lang = (l && l.options[l.selectedIndex]?.text.toLowerCase()) || defaults.lang;
     const s = $("heroSearch");
-    const search = s && s.value === "experimental" ? "🧪 експериментальний пошук" : "📼 класичний пошук";
-    const chips = [filter, search, `кліпи ${defaults.min}–${defaults.max} с`, count, `мова: ${lang}`];
-    if ($("heroStories") && $("heroStories").value === "on") chips.push("📖 + історії до 3 хв");
+    // the usual choices (classic search) stay quiet: a chip only when it differs, so the line keeps room for the drop hint
+    const chips = [filter, `кліпи ${defaults.min}–${defaults.max} с`, count, `мова: ${lang}`];
+    if (s && s.value === "experimental") chips.splice(1, 0, "експериментальний пошук");
+    if ($("heroStories") && $("heroStories").value === "on") chips.push("+ історії до 3 хв");
     $("heroHint").innerHTML = chips.map((t) => `<span class="home-chip">${escapeHtml(t)}</span>`).join("");
     fitDropHint();
   }
