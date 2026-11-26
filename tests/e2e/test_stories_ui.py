@@ -35,7 +35,7 @@ def test_story_whole_then_two_parts_with_a_draggable_cut(page, studio, story_pro
     assert "📖 ціла" in row.inner_text() and "1:30" in row.inner_text()
     row.click()
     page.locator("#edStory").wait_for(state="visible")
-    assert page.locator("#edMp4Lab").inner_text().startswith("⬇ Ціла історія")
+    assert page.locator("#edMp4Lab").inner_text().startswith("Ціла історія")
     assert page.locator("#edMp4Parts").is_hidden()
 
     page.click('#edStoryView [data-v="parts"]')

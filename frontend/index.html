@@ -79,14 +79,14 @@
         </div>
       </div>
       <div class="header-tools">
-      <button type="button" class="btn btn-primary btn-sm update-pill" id="btnUpdate" hidden onclick="Welcome.update()">⬆ Оновити</button>
-      <button type="button" class="btn btn-secondary btn-settings" id="btnOpenSettings" onclick="Settings.open()">⚙ Налаштування</button>
+      <button type="button" class="btn btn-primary btn-sm update-pill" id="btnUpdate" hidden onclick="Welcome.update()"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg>Оновити</button>
+      <button type="button" class="btn btn-secondary btn-settings" id="btnOpenSettings" onclick="Settings.open()"><svg class="i" aria-hidden="true"><use href="#i-settings"/></svg>Налаштування</button>
       <div class="theme-menu">
-          <button type="button" class="theme-menu-btn" aria-haspopup="true" aria-expanded="false" title="Тема оформлення"><span class="theme-menu-cur">◐ Тема: авто</span><span class="theme-menu-caret" aria-hidden="true">▾</span></button>
+          <button type="button" class="theme-menu-btn" aria-haspopup="true" aria-expanded="false" title="Тема оформлення"><span class="theme-menu-cur">Тема: авто</span><span class="theme-menu-caret" aria-hidden="true">▾</span></button>
           <div class="theme-switch theme-menu-pop" role="group" aria-label="Тема" hidden>
             <span class="theme-menu-cap">Тема</span>
-            <button type="button" data-theme="light">☀ Світла</button>
-            <button type="button" data-theme="dark">☾ Темна</button>
+            <button type="button" data-theme="light">Світла</button>
+            <button type="button" data-theme="dark">Темна</button>
             <button type="button" data-theme="system">Авто, як у системі</button>
           </div>
         </div>
@@ -414,11 +414,11 @@
       <nav class="settings-tabs" aria-label="Налаштування">
         <h2 id="settingsTitle">Налаштування</h2>
         <div class="settings-tablist" role="tablist" aria-label="Розділи налаштувань">
-        <button type="button" role="tab" data-tab="clips" aria-selected="true"><i aria-hidden="true">✂</i>Кліпи</button>
-        <button type="button" role="tab" data-tab="ai" aria-selected="false"><i aria-hidden="true">✨</i>Ключ і розпізнавання<span class="set-dot" id="setKeyDot" hidden></span></button>
-        <button type="button" role="tab" data-tab="disk" aria-selected="false"><i aria-hidden="true">💾</i>Місце на диску</button>
-        <button type="button" role="tab" data-tab="safe" aria-selected="false"><i aria-hidden="true">🛡</i>Надійність</button>
-        <button type="button" role="tab" data-tab="about" aria-selected="false"><i aria-hidden="true">ℹ</i>Про студію</button>
+        <button type="button" role="tab" data-tab="clips" aria-selected="true"><i aria-hidden="true"><svg class="i" aria-hidden="true"><use href="#i-scissors"/></svg></i>Кліпи</button>
+        <button type="button" role="tab" data-tab="ai" aria-selected="false"><i aria-hidden="true"><svg class="i" aria-hidden="true"><use href="#i-key"/></svg></i>Ключ і розпізнавання<span class="set-dot" id="setKeyDot" hidden></span></button>
+        <button type="button" role="tab" data-tab="disk" aria-selected="false"><i aria-hidden="true"><svg class="i" aria-hidden="true"><use href="#i-disk"/></svg></i>Місце на диску</button>
+        <button type="button" role="tab" data-tab="safe" aria-selected="false"><i aria-hidden="true"><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg></i>Надійність</button>
+        <button type="button" role="tab" data-tab="about" aria-selected="false"><i aria-hidden="true"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg></i>Про студію</button>
         </div>
         <span class="settings-nav-note">Зміни зберігаються одразу</span>
       </nav>
@@ -621,7 +621,7 @@
           <div class="set-box">
             <div class="set-line">
               <div class="set-l"><b class="set-big2" id="setVersion">Студія моментів</b><small id="setVersionNote">Перевіряю оновлення…</small></div>
-              <button type="button" class="btn btn-primary" id="setUpdate" hidden onclick="Settings.update()">⬆ Оновити</button>
+              <button type="button" class="btn btn-primary" id="setUpdate" hidden onclick="Settings.update()"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg>Оновити</button>
             </div>
           </div>
           <div class="set-grp">
@@ -629,7 +629,7 @@
             <div class="set-box">
               <div class="set-line">
                 <div class="set-l"><b>Зібрати звіт про проблему</b><small>Файл для того, хто дав тобі студію. Ключ Gemini у звіт не потрапляє.</small></div>
-                <a class="btn btn-secondary" id="btnReport" href="/api/support-report" download>🧰 Зібрати звіт</a>
+                <a class="btn btn-secondary" id="btnReport" href="/api/support-report" download><svg class="i" aria-hidden="true"><use href="#i-download"/></svg>Зібрати звіт</a>
               </div>
               <div class="set-line">
                 <div class="set-l"><b>Повернути всі налаштування як було</b><small>Ключ, відео й кліпи не зачіпаються</small></div>
@@ -680,19 +680,19 @@
   <section id="editor" hidden aria-label="Монтажний стіл">
     <nav class="ed-rail" aria-label="Кроки">
       <button class="ed-rail-brand" id="edHome" type="button" title="Студія моментів: на головну"><i class="ed-brand-dot" aria-hidden="true"></i><span class="ed-lab">Студія моментів</span></button>
-      <button class="ed-rail-back" id="edBack" type="button" title="Усі відео">←<span class="ed-lab"> Усі відео</span></button>
+      <button class="ed-rail-back" id="edBack" type="button" title="Усі відео"><svg class="i" aria-hidden="true"><use href="#i-left"/></svg><span class="ed-lab"> Усі відео</span></button>
       <div class="ed-mode" id="edMode" role="tablist" aria-label="Режим" aria-orientation="vertical">
-        <button type="button" role="tab" data-m="table" aria-selected="true" title="Крок 1: обери кліпи й підріж межі"><svg viewBox="0 0 64 48" class="ed-ill" aria-hidden="true"><rect x="4" y="3" width="56" height="31" rx="4" class="f" stroke="currentColor" stroke-width="2"/><circle cx="25" cy="17" r="5" fill="currentColor" opacity=".55"/><path d="M14 34c2-7 7-10 11-10s9 3 11 10" fill="currentColor" opacity=".35"/><path d="M42 12l6 5-6 5z" fill="currentColor" opacity=".8"/><rect x="4" y="38" width="56" height="7" rx="2" fill="currentColor" opacity=".18"/><rect x="18" y="37" width="24" height="9" rx="2" fill="none" class="a" stroke-width="2.2"/></svg><span class="ed-step">Крок 1</span><b>Монтажний стіл</b><small>Обери кліпи й підріж межі</small><em id="edStep1"></em></button>
+        <button type="button" role="tab" data-m="table" aria-selected="true" title="Крок 1: обери кліпи й підріж межі"><span class="ed-ill" aria-hidden="true"><svg class="i"><use href="#i-monitor"/></svg></span><span class="ed-step">Крок 1</span><b>Монтажний стіл</b><small>Обери кліпи й підріж межі</small><em id="edStep1"></em></button>
         <span class="ed-flow" aria-hidden="true">↓</span>
-        <button type="button" role="tab" data-m="vx" aria-selected="false" title="Крок 2: вертикальні 9:16 із субтитрами"><svg viewBox="0 0 64 48" class="ed-ill" aria-hidden="true"><rect x="20" y="1" width="25" height="46" rx="5" class="f" stroke="currentColor" stroke-width="2"/><circle cx="32.5" cy="17" r="5" fill="currentColor" opacity=".55"/><path d="M23 33c2-6 5.5-9 9.5-9s7.5 3 9.5 9" fill="currentColor" opacity=".35"/><rect x="24" y="35" width="17" height="5" rx="2" class="af"/><rect x="27" y="7" width="11" height="3" rx="1.5" fill="currentColor" opacity=".6"/><path d="M50 18l7 6-7 6M14 18l-7 6 7 6" fill="none" stroke="currentColor" stroke-width="2" opacity=".35" stroke-linecap="round"/></svg><span class="ed-step">Крок 2</span><b>Вертикальні кліпи</b><small>9:16 із субтитрами</small><em id="edStep2"></em></button>
+        <button type="button" role="tab" data-m="vx" aria-selected="false" title="Крок 2: вертикальні 9:16 із субтитрами"><span class="ed-ill" aria-hidden="true"><svg class="i"><use href="#i-phone"/></svg></span><span class="ed-step">Крок 2</span><b>Вертикальні кліпи</b><small>9:16 із субтитрами</small><em id="edStep2"></em></button>
       </div>
       <div class="ed-rail-bot">
         <div class="theme-menu">
-          <button type="button" class="theme-menu-btn" aria-haspopup="true" aria-expanded="false" title="Тема оформлення"><span class="theme-menu-cur">◐ Тема: авто</span></button>
+          <button type="button" class="theme-menu-btn" aria-haspopup="true" aria-expanded="false" title="Тема оформлення"><span class="theme-menu-cur">Тема: авто</span></button>
           <div class="theme-switch theme-menu-pop" role="group" aria-label="Тема" hidden>
             <span class="theme-menu-cap">Тема</span>
-            <button type="button" data-theme="light">☀ Світла</button>
-            <button type="button" data-theme="dark">☾ Темна</button>
+            <button type="button" data-theme="light">Світла</button>
+            <button type="button" data-theme="dark">Темна</button>
             <button type="button" data-theme="system">Авто, як у системі</button>
           </div>
         </div>
@@ -707,13 +707,13 @@
         </div>
         <div class="vx-seg vx-lview vx-hview" id="vxViewSw" role="group" aria-label="Як показувати кліпи">
           <button type="button" id="vxToOne" aria-pressed="true" title="Налаштовуєш кліп за кліпом">По одному</button>
-          <button type="button" id="vxToList" aria-pressed="false" title="Усі кліпи «В роботі» таблицею: заголовок, шаблон, стан">☰ Усі разом</button>
+          <button type="button" id="vxToList" aria-pressed="false" title="Усі кліпи «В роботі» таблицею: заголовок, шаблон, стан"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg>Усі разом</button>
         </div>
         <span class="vx-hhint" id="vxViewHint">Налаштовуєш кліп за кліпом. «Усі разом»: таблиця всіх кліпів.</span>
         <span class="ed-spacer"></span>
         <span class="ed-search-mode" id="edSearchMode" hidden></span>
         <button class="ed-reanalyze" id="edReanalyze" type="button" title="Gemini ще раз перегляне розмову і запропонує нові кліпи (можна вибрати інший спосіб пошуку). Транскрипція береться з кешу, тож це швидко.">
-          <span class="ed-re-ic" aria-hidden="true">↻</span><span><b>Шукати кліпи заново</b><small>інший набір моментів</small></span>
+          <span class="ed-re-ic" aria-hidden="true"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg></span><span><b>Шукати кліпи заново</b><small>інший набір моментів</small></span>
         </button>
       </header>
 
@@ -722,7 +722,7 @@
           <div class="ed-stage-head">
             <span class="ed-no" id="edNo"></span>
             <h2 class="ed-htitle" id="edClipTitle" contenteditable="plaintext-only" spellcheck="false" title="Клік, щоб змінити заголовок"></h2>
-            <span class="ed-pen" aria-hidden="true">✎</span>
+            <span class="ed-pen" aria-hidden="true"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></span>
             <span class="ed-hscore" id="edScore"></span>
           </div>
           <div class="ed-why" id="edWhy"></div>
@@ -742,7 +742,7 @@
           <div class="ed-trim" id="edTrim" aria-label="Межі кліпу">
             <div class="ed-trim-info">
               <span class="ed-len" id="edLen"></span>
-              <button type="button" class="ed-silence" id="edPauses" title="Вирізати довгі паузи всередині кліпу (jump cut). Чистий оригінал лишається для скачування">✂ Прибрати паузи</button>
+              <button type="button" class="ed-silence" id="edPauses" title="Вирізати довгі паузи всередині кліпу (jump cut). Чистий оригінал лишається для скачування"><svg class="i" aria-hidden="true"><use href="#i-scissors"/></svg>Прибрати паузи</button>
               <div class="ed-zoom" role="group" aria-label="Масштаб доріжки">
                 <button type="button" id="edZoomOut" title="Віддалити (Ctrl + колесо вниз)" aria-label="Віддалити">−</button><button type="button" id="edZoomIn" title="Наблизити (Ctrl + колесо вгору)" aria-label="Наблизити">+</button><button type="button" id="edZoomAll" title="Повернути вигляд кліпу (подвійний клік по смузі)" aria-label="Вигляд кліпу" disabled>⤢</button>
                 <input type="range" id="edZoomRange" min="0" max="100" step="1" value="0" aria-label="Масштаб" hidden>
@@ -763,24 +763,24 @@
             <span class="ed-spacer"></span>
             <div class="ed-decide" id="edDecide">
               <button class="ed-sbtn" id="edStatus" type="button" aria-haspopup="menu" aria-expanded="false" title="Статус кліпу"><i class="ed-sdot"></i><span class="ed-sbtn-l">Нове</span><small aria-hidden="true">▾</small></button>
-              <button type="button" class="ed-keep" id="edKeep" title="Взяти кліп у роботу: він піде на крок 2 (клавіша Y)"><span aria-hidden="true">✓</span> <span class="ed-keep-l">В роботі</span></button>
-              <button type="button" class="ed-btn ed-gonext" id="edGoNext" title="Наступний кліп (↓)">Наступний <kbd>↓</kbd></button>
+              <button type="button" class="ed-keep" id="edKeep" title="Взяти кліп у роботу: він піде на крок 2 (клавіша Y)"><span aria-hidden="true"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg></span><span class="ed-keep-l">В роботі</span></button>
+              <button type="button" class="ed-btn ed-gonext" id="edGoNext" title="Наступний кліп (↓)"><svg class="i" aria-hidden="true"><use href="#i-down"/></svg>Наступний</button>
             </div>
           </div>
         </section>
 
         <section class="ed-panel ed-side" aria-label="Кліп">
           <div class="ed-cap">Скачати цей кліп</div>
-          <button class="ed-bigdl" id="edMp4" type="button"><span id="edMp4Lab">⬇ Кліп 16:9 · MP4</span> <small id="edMp4Info"></small></button>
+          <button class="ed-bigdl" id="edMp4" type="button"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg><span id="edMp4Lab">Кліп 16:9 · MP4</span> <small id="edMp4Info"></small></button>
           <div class="ed-dlparts" id="edMp4Parts" hidden>
-            <button class="ed-bigdl" type="button" data-part="1"><span>⬇ Частина 1 · 16:9</span> <small></small></button>
-            <button class="ed-bigdl" type="button" data-part="2"><span>⬇ Частина 2 · 16:9</span> <small></small></button>
+            <button class="ed-bigdl" type="button" data-part="1"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg><span>Частина 1 · 16:9</span> <small></small></button>
+            <button class="ed-bigdl" type="button" data-part="2"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg><span>Частина 2 · 16:9</span> <small></small></button>
           </div>
           <div class="ed-dlwhole ed-small" id="edMp4Whole" hidden>або <button type="button" class="link" id="edMp4WholeBtn">⬇ ціла історія</button> · у 9:16 кожна частина отримає напис «Частина 1/2»</div>
           <button class="ed-btn ed-rawdl" id="edMp4Raw" type="button" hidden title="Той самий кліп з усіма паузами, без перекодування: для монтажу в CapCut">⬇ Без вирізів · оригінал</button>
           <div class="ed-dl2">
-            <button class="ed-btn" id="edSrt" type="button">💬 Субтитри SRT</button>
-            <button class="ed-btn" id="edGoVx" type="button">📱 Зробити 9:16 →</button>
+            <button class="ed-btn" id="edSrt" type="button"><svg class="i" aria-hidden="true"><use href="#i-subs"/></svg>Субтитри SRT</button>
+            <button class="ed-btn" id="edGoVx" type="button"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg>Зробити 9:16</button>
           </div>
           <div class="ed-cap ed-textcap"><span>Текст кліпу</span><small>допис тепер на кроці 2</small></div>
           <div class="ed-tabbody" id="edTabText" tabindex="0" aria-label="Текст кліпу">
@@ -790,10 +790,10 @@
         </section>
         <section class="ed-panel ed-vx" id="edVx" aria-label="Вертикальний кліп" hidden>
           <div class="vx-empty" id="vxEmpty" hidden>
-            <div class="vx-empty-ic" aria-hidden="true">📱</div>
+            <div class="vx-empty-ic" aria-hidden="true"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg></div>
             <h2>Поки жодного кліпу «В роботі»</h2>
             <p>На кроці 1 натисни <b>«В роботі»</b> (або клавішу <kbd>Y</kbd>) на кліпах, які хочеш змонтувати. Тут будуть лише вони, готові до 9:16.</p>
-            <button type="button" class="vx-big vx-empty-go" id="vxEmptyBack">← До монтажного столу</button>
+            <button type="button" class="vx-big vx-empty-go" id="vxEmptyBack"><svg class="i" aria-hidden="true"><use href="#i-left"/></svg>До монтажного столу</button>
           </div>
           <div class="vx-list" id="vxList" hidden>
             <div class="vx-lhead">
@@ -802,7 +802,7 @@
               <label class="vx-ltpl"><span>Шаблон для всіх</span><select id="vxLTpl"></select></label>
               <button type="button" class="ed-btn" id="vxLApply">Застосувати</button>
               <button type="button" class="vx-big vx-lmake" id="vxLMake">Зробити незроблені</button>
-              <button type="button" class="ed-btn" id="vxLZip">⬇ Скачати готові · ZIP</button>
+              <button type="button" class="ed-btn" id="vxLZip"><svg class="i" aria-hidden="true"><use href="#i-zip"/></svg>Скачати готові · ZIP</button>
             </div>
             <div class="vx-lprog" id="vxLProg" hidden><i id="vxLProgBar"></i></div>
             <div class="vx-ltable" role="table" aria-label="Кліпи «В роботі»">
@@ -857,7 +857,7 @@
               </div>
               <div class="vx-note" id="vxNote" hidden></div>
               <div class="vx-dlbar">
-                <button class="vx-big" id="vxDlSubs" type="button" title="MP4 1080×1920 із субтитрами">⬇ Скачати 9:16 із субтитрами</button>
+                <button class="vx-big" id="vxDlSubs" type="button" title="MP4 1080×1920 із субтитрами"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg>Скачати 9:16 із субтитрами</button>
                 <button class="ed-btn" id="vxMp4" type="button" title="Чистий горизонтальний кліп для монтажу в CapCut">16:9 чистий</button>
                 <button class="ed-btn" id="vxSrt" type="button" title="Субтитри .srt для CapCut чи Premiere">SRT</button>
                 <div class="vx-more">
@@ -874,11 +874,11 @@
               <div class="vx-prog" id="vxProg" hidden><i id="vxProgBar"></i></div>
             </div>
             <nav class="vx-tabs" id="vxTabs" role="tablist" aria-label="Налаштування вертикального кліпу">
-              <button type="button" role="tab" data-t="frame" aria-selected="false"><span aria-hidden="true">⛶</span>Кадр</button>
-              <button type="button" role="tab" data-t="style" aria-selected="true"><span aria-hidden="true">Aa</span>Субтитри</button>
-              <button type="button" role="tab" data-t="hook" aria-selected="false"><span aria-hidden="true">T</span>Заголовок</button>
-              <button type="button" role="tab" data-t="text" aria-selected="false" id="vxTabText"><span aria-hidden="true">✎</span>Текст</button>
-              <button type="button" role="tab" data-t="post" aria-selected="false"><span aria-hidden="true">⧉</span>Допис</button>
+              <button type="button" role="tab" data-t="frame" aria-selected="false"><span aria-hidden="true"><svg class="i" aria-hidden="true"><use href="#i-frame"/></svg></span>Кадр</button>
+              <button type="button" role="tab" data-t="style" aria-selected="true"><span aria-hidden="true"><svg class="i" aria-hidden="true"><use href="#i-subs"/></svg></span>Субтитри</button>
+              <button type="button" role="tab" data-t="hook" aria-selected="false"><span aria-hidden="true"><svg class="i" aria-hidden="true"><use href="#i-spark"/></svg></span>Заголовок</button>
+              <button type="button" role="tab" data-t="text" aria-selected="false" id="vxTabText"><span aria-hidden="true"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></span>Текст</button>
+              <button type="button" role="tab" data-t="post" aria-selected="false"><span aria-hidden="true"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg></span>Допис</button>
             </nav>
             <div class="vx-tp">
               <div class="vx-tplbar">
@@ -911,7 +911,7 @@
                   <p class="vx-camst" id="vxCamSt" role="status"></p>
                   <div class="vx-cambtns">
                     <button type="button" class="ed-btn sm" id="vxCamMark" title="Показати рамку вебки на кадрі, щоб посунути її">▭ Рамка вебки</button>
-                    <button type="button" class="ed-btn sm" id="vxCamFind" title="Знайти вебку ще раз автоматично">↻ Знайти</button>
+                    <button type="button" class="ed-btn sm" id="vxCamFind" title="Знайти вебку ще раз автоматично"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg>Знайти</button>
                     <button type="button" class="ed-btn sm" id="vxCamOff">Без вебки</button>
                   </div>
                   <div class="vx-lbl">Розкладка</div>
@@ -990,7 +990,7 @@
                   <div class="vx-lbl">ШІ пропонує</div>
                   <div class="vx-idea-list" id="vxIdeaList" role="radiogroup" aria-label="Заголовки від ШІ"></div>
                   <div class="vx-idea-row">
-                    <button type="button" class="ed-btn sm" id="vxIdeaMore">↻ Ще 3 варіанти</button>
+                    <button type="button" class="ed-btn sm" id="vxIdeaMore"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg>Ще 3 варіанти</button>
                     <span class="vx-idea-note" id="vxIdeaNote" aria-live="polite"></span>
                   </div>
                 </div>
@@ -1060,8 +1060,8 @@
                   <input id="edTags" type="text">
                 </div>
                 <div class="ed-copyrow">
-                  <button class="ed-btn" id="edCopyPost" type="button">⧉ Для TikTok і Reels</button>
-                  <button class="ed-btn" id="edCopyShorts" type="button">⧉ Назва для Shorts</button>
+                  <button class="ed-btn" id="edCopyPost" type="button"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg>Для TikTok і Reels</button>
+                  <button class="ed-btn" id="edCopyShorts" type="button"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg>Назва для Shorts</button>
                 </div>
                 <div class="ed-small">TikTok і Reels: увесь допис. Shorts показує лише назву до 100 знаків, тому туди йде заголовок-гачок.</div>
               </section>
@@ -1140,7 +1140,7 @@
 </div>
 <div class="vx-modal modal-backdrop" id="vxStreamModal" role="dialog" aria-modal="true" aria-labelledby="vxSmTitle" hidden>
   <div class="vx-modal-box">
-    <h3 id="vxSmTitle">📺 Перевіряю, чи це стрім…</h3>
+    <h3 id="vxSmTitle">Перевіряю, чи це стрім…</h3>
     <ul class="vx-sm-steps" id="vxSmSteps"></ul>
     <div class="vx-sm-bar" id="vxSmBar"><i></i></div>
     <div class="vx-sm-thumb" id="vxSmThumb" hidden><canvas id="vxSmCanvas" width="640" height="360"></canvas><div class="vx-sm-box" id="vxSmBox"><span>ВЕБКА</span></div></div>

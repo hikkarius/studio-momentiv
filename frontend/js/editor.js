@@ -1160,7 +1160,7 @@ const Editor = (() => {
     $("edLen").textContent = cuts.length ? `${durLabel(len(c))} → ${fmt1(len(c) - rm)} с` : durLabel(len(c));
     const btn = $("edPauses");
     btn.classList.toggle("on", cuts.length > 0);
-    btn.textContent = cuts.length ? `✓ Паузи прибрано · −${fmt1(rm)} с` : "✂ Прибрати паузи";
+    btn.innerHTML = cuts.length ? `${icon("check")}Паузи прибрано · −${fmt1(rm)} с` : `${icon("scissors")}Прибрати паузи`;
     const bar = $("edPauseBar");
     const cut = cuts.length > 0 || st.restored.length > 0;
     const mode = pauseMode();
@@ -1171,7 +1171,7 @@ const Editor = (() => {
     btn.disabled = !!none || cuts.length > 0; // once cut, the button only shows the result; «↶ Повернути все» undoes it
     btn.classList.toggle("none", !!none);
     btn.title = none ? "Довгих пауз немає: кліп і так іде щільно" : "Вирізати довгі паузи всередині кліпу (jump cut). Чистий оригінал лишається для скачування";
-    if (none) { btn.textContent = "✓ Пауз немає"; bar.innerHTML = ""; } // the button itself says it; the row keeps its height
+    if (none) { btn.innerHTML = `${icon("check")}Пауз немає`; bar.innerHTML = ""; } // the button itself says it; the row keeps its height
     else bar.innerHTML = `<span>Темп:</span><span class="seg" role="group" aria-label="Темп: наскільки різати паузи">${Object.entries(PAUSE_MODES).map(([k, m]) => {
         const r = pv && pv[k];
         const res = r ? (r.count ? ` · −${fmt1(r.removed_sec)} с` : " · 0 с") : "";
@@ -1181,7 +1181,7 @@ const Editor = (() => {
         ? `<span class="res">прибрано <b>${cuts.length} ${cuts.length === 1 ? "паузу" : cuts.length > 1 && cuts.length < 5 ? "паузи" : "пауз"} · −${fmt1(rm)} с</b></span>
            <span class="hint">· клік по ✂ повертає паузу</span><button type="button" class="link" data-a="all">↶ Повернути все</button>`
         : `<span class="hint">${PAUSE_MODES[mode].hint}</span>`);
-    $("edMp4Lab").textContent = cuts.length ? "⬇ Кліп 16:9 · без пауз" : "⬇ Кліп 16:9 · MP4";
+    $("edMp4Lab").textContent = cuts.length ? "Кліп 16:9 · без пауз" : "Кліп 16:9 · MP4";
     $("edMp4Info").innerHTML = cuts.length ? `${fmt1(len(c) - rm)} с` : `${durLabel(len(c))}<span class="q"> · оригінальна якість</span>`;
     $("edMp4Raw").hidden = !cuts.length;
     // a story: «Ціла історія», or one button per part
@@ -1189,7 +1189,7 @@ const Editor = (() => {
     $("edMp4").hidden = parts;
     $("edMp4Parts").hidden = !parts;
     $("edMp4Whole").hidden = !parts;
-    if (isStory(c) && !parts) $("edMp4Lab").textContent = cuts.length ? "⬇ Ціла історія 16:9 · без пауз" : "⬇ Ціла історія 16:9 · MP4";
+    if (isStory(c) && !parts) $("edMp4Lab").textContent = cuts.length ? "Ціла історія 16:9 · без пауз" : "Ціла історія 16:9 · MP4";
     if (parts) {
       const cut = splitOf(c);
       const rmIn = (a, b) => cuts.reduce((s, [x, y]) => s + (x >= a && y <= b ? y - x : 0), 0);

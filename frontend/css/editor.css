@@ -908,3 +908,21 @@
 #vxStyle .vx-tile:is(.vx-t-hl, .vx-t-kar, .vx-t-one, .vx-t-gold) { -webkit-text-stroke-width: 2px; }
 #vxStyle .vx-t-none { font-size: 10px; white-space: normal; text-align: center; line-height: 1.1; }
 @media (max-width: 560px) { .ed-decide { flex-wrap: wrap; } .ed-decide > * { flex: 1 1 auto; justify-content: center; } }
+/* Картинки кроків: лінійна іконка в рамці, як у макеті */
+.ed-mode .ed-ill { display: grid; place-items: center; width: 72px; height: 52px; border: 1.5px solid var(--ed-line); border-radius: var(--r-md); background: var(--ed-panel); color: var(--ed-muted); }
+.ed-mode .ed-ill svg.i { width: 26px; height: 26px; }
+.ed-mode [aria-selected="true"] .ed-ill { border-color: var(--ed-accent); color: var(--ed-accent-text); }
+#editor.rail-mini .ed-mode .ed-ill { width: 44px; height: 36px; }
+@media (max-width: 760px) { .ed-mode .ed-ill { width: 40px; height: 30px; } .ed-mode .ed-ill svg.i { width: 18px; height: 18px; } }
+/* іконки на кнопках кроку 1 і 2 */
+.ed-btn svg.i, .ed-bigdl svg.i, .vx-big svg.i, .ed-silence svg.i, .ed-keep svg.i { margin-right: 6px; }
+.ed-bigdl { display: flex; align-items: center; }
+.ed-bigdl small { margin-left: auto; }
+.vx-tabs [role="tab"] > span svg.i, .vx-tab > span svg.i { width: 20px; height: 20px; }
+.vx-empty-ic svg.i { width: 54px; height: 54px; stroke-width: 1.5; color: var(--ed-muted); }
+.ed-re-ic svg.i { width: 16px; height: 16px; }
+.ed-pen svg.i { width: 15px; height: 15px; }
+.ed-rail-back svg.i { margin-right: 2px; }
+.theme-menu-cur { display: inline-flex; align-items: center; gap: 8px; }
+.settings-tabs [role="tab"] i svg.i { width: 17px; height: 17px; }
+.vx-seg button svg.i { margin-right: 6px; }

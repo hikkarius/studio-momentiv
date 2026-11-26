@@ -55,7 +55,7 @@ def test_home_theme_switch_persists(page, studio, project):
     assert page.evaluate("document.documentElement.dataset.theme") == "light"
     light_bg = page.evaluate("getComputedStyle(document.body).backgroundColor")
 
-    assert "Світла" in page.locator(".app-header .theme-menu-btn").inner_text()
+    assert "світла" in page.locator(".app-header .theme-menu-btn").inner_text()
     pick_theme(page, ".app-header", "dark")
     dark_bg = page.evaluate("getComputedStyle(document.body).backgroundColor")
     assert light_bg != dark_bg
